@@ -22,6 +22,7 @@ type Stroke = {
   tool: StrokeTool;
   width: number;
   color?: string;
+  style?: StrokeStyle;
 };
 type Shape = {
   kind: "shape";
@@ -29,6 +30,8 @@ type Shape = {
   start: Point;
   end: Point;
 };
+type StrokeStyle = "solid" | "dashed" | "dotted";
+
 type TextElement = {
   kind: "text";
   point: Point;
@@ -97,6 +100,7 @@ export default function Page() {
   const [penWidth, setPenWidth] = useState(4);
   const [penColor, setPenColor] = useState("#000000");
   const [eraserWidth, setEraserWidth] = useState(24);
+  const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>("solid");
   const [activeText, setActiveText] = useState<ActiveText | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -133,6 +137,21 @@ export default function Page() {
     height: text.height,
   });
 
+  const getStrokeDashPattern = (style: StrokeStyle | undefined, width: number) => {
+    if (style === "dashed") {
+      return [Math.max(8, width * 1.5), Math.max(6, width * 1.1)];
+    }
+
+    if (style === "dotted") {
+      return [0, Math.max(10, width * 2.2)];
+    }
+
+    return [];
+  };
+
+  const getStrokeLineCap = (style: StrokeStyle | undefined) =>
+    style === "dashed" ? "butt" : "round";
+
   const drawShape = (
     ctx: CanvasRenderingContext2D,
     shape: ShapeTool,
@@ -145,6 +164,7 @@ export default function Page() {
     const height = currentY - startY;
 
     ctx.beginPath();
+    ctx.setLineDash([]);
     ctx.strokeStyle = "black";
     ctx.lineWidth = 4;
 
@@ -350,6 +370,7 @@ export default function Page() {
         ctx.fillStyle = element.color;
         ctx.font = `${element.fontSize}px Arial, sans-serif`;
         ctx.textBaseline = "top";
+        ctx.setLineDash([]);
 
         element.value.split("\n").forEach((line, index) => {
           ctx.fillText(line, element.point.x, element.point.y + index * element.fontSize * 1.25);
@@ -360,10 +381,11 @@ export default function Page() {
       if (!element.points.length) continue;
 
       ctx.beginPath();
-      ctx.lineCap = "round";
+      ctx.lineCap = getStrokeLineCap(element.style);
       ctx.lineJoin = "round";
       ctx.strokeStyle = element.tool === "pen" ? element.color ?? "black" : "#ffffff";
       ctx.lineWidth = element.width;
+      ctx.setLineDash(getStrokeDashPattern(element.style, element.width));
 
       if (element.points.length === 1) {
         const p = element.points[0];
@@ -392,10 +414,11 @@ export default function Page() {
       const stroke = currentStroke.current;
 
       ctx.beginPath();
-      ctx.lineCap = "round";
+      ctx.lineCap = getStrokeLineCap(stroke.style);
       ctx.lineJoin = "round";
       ctx.strokeStyle = stroke.tool === "pen" ? stroke.color ?? "black" : "#ffffff";
       ctx.lineWidth = stroke.width;
+      ctx.setLineDash(getStrokeDashPattern(stroke.style, stroke.width));
 
       if (stroke.points.length === 1) {
         const p = stroke.points[0];
@@ -623,12 +646,12 @@ export default function Page() {
   const commitActiveText = () => {
     if (!activeText) return;
 
-    const value = activeText.value.trim();
-    if (value) {
+    const trimmedValue = activeText.value.trim();
+    if (trimmedValue) {
       const nextText: TextElement = {
         kind: "text",
         point: activeText.point,
-        value,
+        value: trimmedValue,
         color: "#000000",
         fontSize: activeText.fontSize,
         width: activeText.width,
@@ -735,6 +758,7 @@ export default function Page() {
         tool,
         width: tool === "pen" ? penWidth : eraserWidth,
         color: tool === "pen" ? penColor : undefined,
+        style: tool === "pen" ? strokeStyle : undefined,
       };
     }
 
@@ -787,6 +811,7 @@ export default function Page() {
       width: 120,
       height: 44,
       fontSize: getTextFontSize(120, 44),
+      editingIndex: undefined,
     });
   };
 
@@ -945,6 +970,7 @@ export default function Page() {
         tool: currentStroke.current.tool,
         width: currentStroke.current.width,
         color: currentStroke.current.color,
+        style: currentStroke.current.style,
       };
 
       setElements((prev) => [...prev, finishedStroke]);
@@ -1318,14 +1344,13 @@ export default function Page() {
                 </div>
                 <input
                   type="range"
+                  className="modern-range"
                   min="1"
                   max="24"
                   value={penWidth}
                   onChange={(e) => setPenWidth(Number(e.target.value))}
                   style={{
-                    width: "100%",
                     accentColor: "#7c3aed",
-                    cursor: "pointer",
                   }}
                 />
                 <div
@@ -1341,6 +1366,101 @@ export default function Page() {
                     flexShrink: 0,
                   }}
                 />
+              </div>
+
+              <div
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "flex-start",
+                  gap: "3px",
+                  paddingTop: "6px",
+                  borderTop: "1px solid rgba(15,23,42,0.08)",
+                }}
+              >
+                {(["solid", "dashed", "dotted"] as StrokeStyle[]).map(
+                  (styleOption) => (
+                    <button
+                      key={styleOption}
+                      aria-label={
+                        styleOption === "solid"
+                          ? "Solid pen style"
+                          : styleOption === "dashed"
+                          ? "Dashed pen style"
+                          : "Dotted pen style"
+                      }
+                      onClick={() => setStrokeStyle(styleOption)}
+                      style={{
+                        width: "24px",
+                        height: "24px",
+                        borderRadius: "6px",
+                        border:
+                          strokeStyle === styleOption
+                            ? "2px solid #7c3aed"
+                            : "1px solid rgba(15,23,42,0.12)",
+                        background:
+                          strokeStyle === styleOption
+                            ? "rgba(124,58,237,0.12)"
+                            : "#ffffff",
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      {styleOption === "solid" ? (
+                        <div
+                          style={{
+                            width: "10px",
+                            height: "2px",
+                            background: "#111827",
+                          }}
+                        />
+                      ) : styleOption === "dashed" ? (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            width: "12px",
+                          }}
+                        >
+                          {Array.from({ length: 3 }).map((_, index) => (
+                            <div
+                              key={index}
+                              style={{
+                                width: "3px",
+                                height: "3px",
+                                background: "#111827",
+                              }}
+                            />
+                          ))}
+                        </div>
+                      ) : (
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            width: "12px",
+                          }}
+                        >
+                          {Array.from({ length: 3 }).map((_, index) => (
+                            <div
+                              key={index}
+                              style={{
+                                width: "3px",
+                                height: "3px",
+                                borderRadius: "999px",
+                                background: "#111827",
+                              }}
+                            />
+                          ))}
+                        </div>
+                      )}
+                    </button>
+                  )
+                )}
               </div>
             </div>
           )}
@@ -1403,14 +1523,13 @@ export default function Page() {
               </div>
               <input
                 type="range"
+                className="modern-range"
                 min="8"
                 max="64"
                 value={eraserWidth}
                 onChange={(e) => setEraserWidth(Number(e.target.value))}
                 style={{
-                  width: "100%",
                   accentColor: "#7c3aed",
-                  cursor: "pointer",
                 }}
               />
               <div
@@ -1558,6 +1677,7 @@ export default function Page() {
             </div>
           )}
         </div>
+
       </div>
     </div>
   );
