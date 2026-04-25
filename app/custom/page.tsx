@@ -14,6 +14,7 @@ import {
   ArrowRight,
   Moon,
   Sun,
+  SunDim,
   Move,
 } from "lucide-react";
 
@@ -90,6 +91,7 @@ type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 export default function Page() {
   const topBarHeight = 48;
   const lightCanvasColor = "#ffffff";
+  const greyCanvasColor = "#6b7280";
   const darkCanvasColor = "#111111";
   const penColors = [
     { name: "black", value: "#000000" },
@@ -129,6 +131,7 @@ export default function Page() {
   >("pen");
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
+  const [showTextMenu, setShowTextMenu] = useState(false);
   const [showEraserMenu, setShowEraserMenu] = useState(false);
   const lastPos = useRef<Point | null>(null);
   const lastMid = useRef<Point | null>(null);
@@ -1358,24 +1361,55 @@ export default function Page() {
   const isTextActive = tool === "text";
   const isPenActive = tool === "pen";
   const isDarkCanvas = canvasBackground === darkCanvasColor;
+  const isGreyCanvas = canvasBackground === greyCanvasColor;
   const toolbarBackground = isDarkCanvas
     ? "rgba(30,30,30,0.94)"
+    : isGreyCanvas
+    ? "rgba(75,85,99,0.94)"
     : "rgba(255,255,255,0.92)";
   const popoverBackground = isDarkCanvas
     ? "rgba(34,34,34,0.96)"
+    : isGreyCanvas
+    ? "rgba(82,92,106,0.96)"
     : "rgba(255,255,255,0.96)";
-  const inactiveToolBackground = isDarkCanvas ? "#2a2a2a" : "#f3f4f6";
-  const panelTextColor = isDarkCanvas ? "#f9fafb" : "#111827";
+  const inactiveToolBackground = isDarkCanvas
+    ? "#2a2a2a"
+    : isGreyCanvas
+    ? "#64748b"
+    : "#f3f4f6";
+  const panelTextColor = isDarkCanvas || isGreyCanvas ? "#f9fafb" : "#111827";
   const panelBorderColor = isDarkCanvas
     ? "rgba(255,255,255,0.12)"
+    : isGreyCanvas
+    ? "rgba(255,255,255,0.18)"
     : "rgba(15,23,42,0.12)";
   const panelDividerColor = isDarkCanvas
     ? "rgba(255,255,255,0.12)"
+    : isGreyCanvas
+    ? "rgba(255,255,255,0.16)"
     : "rgba(15,23,42,0.08)";
   const selectedControlBackground = isDarkCanvas
     ? "rgba(124,58,237,0.24)"
+    : isGreyCanvas
+    ? "rgba(255,255,255,0.18)"
     : "rgba(124,58,237,0.12)";
-  const controlBackground = isDarkCanvas ? "#2f2f2f" : "#ffffff";
+  const controlBackground = isDarkCanvas
+    ? "#2f2f2f"
+    : isGreyCanvas
+    ? "#596579"
+    : "#ffffff";
+  const nextCanvasTheme =
+    canvasBackground === lightCanvasColor
+      ? greyCanvasColor
+      : canvasBackground === greyCanvasColor
+      ? darkCanvasColor
+      : lightCanvasColor;
+  const themeButtonLabel =
+    nextCanvasTheme === greyCanvasColor
+      ? "Use grey canvas"
+      : nextCanvasTheme === darkCanvasColor
+      ? "Use dark canvas"
+      : "Use white canvas";
 
   return (
     <div
@@ -1755,12 +1789,8 @@ export default function Page() {
         }}
       >
         <button
-          aria-label={isDarkCanvas ? "Use white canvas" : "Use dark grey canvas"}
-          onClick={() =>
-            setCanvasBackground((current) =>
-              current === darkCanvasColor ? lightCanvasColor : darkCanvasColor
-            )
-          }
+          aria-label={themeButtonLabel}
+          onClick={() => setCanvasBackground(nextCanvasTheme)}
           style={{
             position: "absolute",
             top: "50%",
@@ -1779,7 +1809,13 @@ export default function Page() {
             backdropFilter: "blur(8px)",
           }}
         >
-          {isDarkCanvas ? <Sun size={17} /> : <Moon size={17} />}
+          {nextCanvasTheme === greyCanvasColor ? (
+            <SunDim size={17} />
+          ) : nextCanvasTheme === darkCanvasColor ? (
+            <Moon size={17} />
+          ) : (
+            <Sun size={17} />
+          )}
         </button>
       </div>
 
@@ -1804,6 +1840,7 @@ export default function Page() {
           onClick={() => {
             setTool("cursor");
             setShowPenMenu(false);
+            setShowTextMenu(false);
             setShowEraserMenu(false);
             setShowShapesMenu(false);
           }}
@@ -1824,29 +1861,98 @@ export default function Page() {
           <MousePointer2 size={18} />
         </button>
 
-        <button
-          onClick={() => {
-            setTool("text");
-            setShowPenMenu(false);
-            setShowEraserMenu(false);
-            setShowShapesMenu(false);
-          }}
-          style={{
-            width: "42px",
-            height: "42px",
-            borderRadius: "8px",
-            border: "none",
-            background: isTextActive ? "#7c3aed" : inactiveToolBackground,
-            color: isTextActive ? "white" : panelTextColor,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Type size={19} />
-        </button>
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => {
+              const nextIsOpen = !(tool === "text" && showTextMenu);
+              setTool("text");
+              setShowTextMenu(nextIsOpen);
+              setShowPenMenu(false);
+              setShowEraserMenu(false);
+              setShowShapesMenu(false);
+            }}
+            style={{
+              width: "42px",
+              height: "42px",
+              borderRadius: "8px",
+              border: "none",
+              background: isTextActive ? "#7c3aed" : inactiveToolBackground,
+              color: isTextActive ? "white" : panelTextColor,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            <Type size={19} />
+          </button>
+
+          {showTextMenu && isTextActive && (
+            <div
+              style={{
+                position: "absolute",
+                top: "50%",
+                left: "54px",
+                transform: "translateY(-50%)",
+                padding: "10px",
+                borderRadius: "12px",
+                background: popoverBackground,
+                color: panelTextColor,
+                display: "flex",
+                gap: "4px",
+                boxSizing: "border-box",
+                boxShadow: "0 8px 25px rgba(0,0,0,0.18)",
+              }}
+            >
+              {textFonts.map((font) => (
+                <button
+                  key={font.name}
+                  aria-label={`${font.name} writing style`}
+                  onClick={() => {
+                    setTextFontFamily(font.family);
+                    setTextFontWeight(font.weight);
+                    setActiveText((prev) =>
+                      prev
+                        ? {
+                            ...prev,
+                            fontFamily: font.family,
+                            fontWeight: font.weight,
+                          }
+                        : prev
+                    );
+                  }}
+                  style={{
+                    width: "34px",
+                    height: "28px",
+                    borderRadius: "7px",
+                    border:
+                      textFontFamily === font.family &&
+                      textFontWeight === font.weight
+                        ? "2px solid #7c3aed"
+                        : `1px solid ${panelBorderColor}`,
+                    background:
+                      textFontFamily === font.family &&
+                      textFontWeight === font.weight
+                        ? selectedControlBackground
+                        : controlBackground,
+                    color: panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontFamily: font.family,
+                    fontSize: "14px",
+                    fontWeight: font.weight,
+                    lineHeight: 1,
+                  }}
+                >
+                  {font.preview}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         <div style={{ position: "relative" }}>
           <button
@@ -1854,6 +1960,7 @@ export default function Page() {
               const nextIsOpen = !(tool === "pen" && showPenMenu);
               setTool("pen");
               setShowPenMenu(nextIsOpen);
+              setShowTextMenu(false);
               setShowEraserMenu(false);
               setShowShapesMenu(false);
             }}
@@ -2081,62 +2188,6 @@ export default function Page() {
                 )}
               </div>
 
-              <div
-                style={{
-                  width: "100%",
-                  display: "flex",
-                  justifyContent: "flex-start",
-                  gap: "4px",
-                  paddingTop: "6px",
-                  borderTop: `1px solid ${panelDividerColor}`,
-                }}
-              >
-                {textFonts.map((font) => (
-                  <button
-                    key={font.name}
-                    aria-label={`${font.name} writing style`}
-                    onClick={() => {
-                      setTextFontFamily(font.family);
-                      setTextFontWeight(font.weight);
-                      setActiveText((prev) =>
-                        prev
-                          ? {
-                              ...prev,
-                              fontFamily: font.family,
-                              fontWeight: font.weight,
-                            }
-                          : prev
-                      );
-                    }}
-                    style={{
-                      width: "34px",
-                      height: "28px",
-                      borderRadius: "7px",
-                      border:
-                        textFontFamily === font.family &&
-                        textFontWeight === font.weight
-                          ? "2px solid #7c3aed"
-                          : `1px solid ${panelBorderColor}`,
-                      background:
-                        textFontFamily === font.family &&
-                        textFontWeight === font.weight
-                          ? selectedControlBackground
-                          : controlBackground,
-                      color: panelTextColor,
-                      display: "grid",
-                      placeItems: "center",
-                      cursor: "pointer",
-                      padding: 0,
-                      fontFamily: font.family,
-                      fontSize: "14px",
-                      fontWeight: font.weight,
-                      lineHeight: 1,
-                    }}
-                  >
-                    {font.preview}
-                  </button>
-                ))}
-              </div>
             </div>
           )}
         </div>
@@ -2148,6 +2199,7 @@ export default function Page() {
               setTool("eraser");
               setShowEraserMenu(nextIsOpen);
               setShowPenMenu(false);
+              setShowTextMenu(false);
               setShowShapesMenu(false);
             }}
             style={{
@@ -2245,6 +2297,7 @@ export default function Page() {
             onClick={() => {
               setShowShapesMenu((prev) => !prev);
               setShowPenMenu(false);
+              setShowTextMenu(false);
               setShowEraserMenu(false);
             }}
             style={{
@@ -2287,6 +2340,7 @@ export default function Page() {
                   setTool("circle");
                   setShowShapesMenu(false);
                   setShowPenMenu(false);
+                  setShowTextMenu(false);
                   setShowEraserMenu(false);
                 }}
                 style={{
@@ -2310,6 +2364,7 @@ export default function Page() {
                   setTool("square");
                   setShowShapesMenu(false);
                   setShowPenMenu(false);
+                  setShowTextMenu(false);
                   setShowEraserMenu(false);
                 }}
                 style={{
@@ -2333,6 +2388,7 @@ export default function Page() {
                   setTool("arrow");
                   setShowShapesMenu(false);
                   setShowPenMenu(false);
+                  setShowTextMenu(false);
                   setShowEraserMenu(false);
                 }}
                 style={{
@@ -2356,6 +2412,7 @@ export default function Page() {
                   setTool("line");
                   setShowShapesMenu(false);
                   setShowPenMenu(false);
+                  setShowTextMenu(false);
                   setShowEraserMenu(false);
                 }}
                 style={{
