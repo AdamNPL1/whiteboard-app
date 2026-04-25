@@ -8,12 +8,16 @@ import {
   Shapes,
   Circle,
   Square,
+  Minus,
   MousePointer2,
   Type,
   ArrowRight,
+  Moon,
+  Sun,
+  Move,
 } from "lucide-react";
 
-type ShapeTool = "circle" | "square" | "arrow";
+type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
 type Stroke = {
@@ -65,9 +69,12 @@ type SelectionMenu = {
   x: number;
   y: number;
 };
+type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 
 export default function Page() {
   const topBarHeight = 48;
+  const lightCanvasColor = "#ffffff";
+  const darkCanvasColor = "#111111";
   const penColors = [
     { name: "black", value: "#000000" },
     { name: "white", value: "#ffffff" },
@@ -101,6 +108,7 @@ export default function Page() {
   const [penColor, setPenColor] = useState("#000000");
   const [eraserWidth, setEraserWidth] = useState(24);
   const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>("solid");
+  const [canvasBackground, setCanvasBackground] = useState(lightCanvasColor);
   const [activeText, setActiveText] = useState<ActiveText | null>(null);
   const [isPanning, setIsPanning] = useState(false);
   const [isSelecting, setIsSelecting] = useState(false);
@@ -116,9 +124,17 @@ export default function Page() {
   const selectionStart = useRef<Point | null>(null);
   const isSelectingRef = useRef(false);
   const isDraggingTextRef = useRef(false);
+  const isResizingTextRef = useRef(false);
   const textDragStart = useRef<{ screen: Point; textScreen: Point } | null>(
     null
   );
+  const textResizeStart = useRef<{
+    screen: Point;
+    screenPoint: Point;
+    width: number;
+    height: number;
+    handle: TextResizeHandle;
+  } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
 
   const [elements, setElements] = useState<CanvasElement[]>([]);
@@ -129,6 +145,28 @@ export default function Page() {
 
   const getTextFontSize = (width: number, height: number) =>
     Math.max(12, Math.min(96, Math.round(Math.min(width / 5, height * 0.55))));
+
+  const getTextEditorSize = (value: string, fontSize: number) => {
+    const measuringCanvas = document.createElement("canvas");
+    const measuringContext = measuringCanvas.getContext("2d");
+    const lineHeight = fontSize * 1.25;
+    const lines = value.split("\n");
+
+    if (measuringContext) {
+      measuringContext.font = `${fontSize}px Arial, sans-serif`;
+    }
+
+    const longestLineWidth = Math.max(
+      ...lines.map((line) =>
+        measuringContext ? measuringContext.measureText(line || " ").width : 0
+      )
+    );
+
+    return {
+      width: Math.max(48, Math.ceil(longestLineWidth) + 8),
+      height: Math.max(30, Math.ceil(lines.length * lineHeight) + 4),
+    };
+  };
 
   const getTextBounds = (text: TextElement): Bounds => ({
     x: text.point.x,
@@ -195,6 +233,13 @@ export default function Page() {
         currentX - headLength * Math.cos(angle + Math.PI / 6),
         currentY - headLength * Math.sin(angle + Math.PI / 6)
       );
+      ctx.stroke();
+      return;
+    }
+
+    if (shape === "line") {
+      ctx.moveTo(startX, startY);
+      ctx.lineTo(currentX, currentY);
       ctx.stroke();
       return;
     }
@@ -346,7 +391,7 @@ export default function Page() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = canvasBackground;
     ctx.fillRect(0, 0, cssWidth, cssHeight);
 
     ctx.save();
@@ -383,14 +428,16 @@ export default function Page() {
       ctx.beginPath();
       ctx.lineCap = getStrokeLineCap(element.style);
       ctx.lineJoin = "round";
-      ctx.strokeStyle = element.tool === "pen" ? element.color ?? "black" : "#ffffff";
+      ctx.strokeStyle =
+        element.tool === "pen" ? element.color ?? "black" : canvasBackground;
       ctx.lineWidth = element.width;
       ctx.setLineDash(getStrokeDashPattern(element.style, element.width));
 
       if (element.points.length === 1) {
         const p = element.points[0];
         ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle = element.tool === "pen" ? element.color ?? "black" : "#ffffff";
+        ctx.fillStyle =
+          element.tool === "pen" ? element.color ?? "black" : canvasBackground;
         ctx.fill();
         continue;
       }
@@ -416,14 +463,16 @@ export default function Page() {
       ctx.beginPath();
       ctx.lineCap = getStrokeLineCap(stroke.style);
       ctx.lineJoin = "round";
-      ctx.strokeStyle = stroke.tool === "pen" ? stroke.color ?? "black" : "#ffffff";
+      ctx.strokeStyle =
+        stroke.tool === "pen" ? stroke.color ?? "black" : canvasBackground;
       ctx.lineWidth = stroke.width;
       ctx.setLineDash(getStrokeDashPattern(stroke.style, stroke.width));
 
       if (stroke.points.length === 1) {
         const p = stroke.points[0];
         ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle = stroke.tool === "pen" ? stroke.color ?? "black" : "#ffffff";
+        ctx.fillStyle =
+          stroke.tool === "pen" ? stroke.color ?? "black" : canvasBackground;
         ctx.fill();
       } else {
         ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
@@ -472,7 +521,7 @@ export default function Page() {
       ctx.clearRect(0, 0, canvas.width, canvas.height);
       ctx.scale(dpr, dpr);
 
-      ctx.fillStyle = "#ffffff";
+      ctx.fillStyle = canvasBackground;
       ctx.fillRect(0, 0, cssWidth, cssHeight);
 
       ctx.lineCap = "round";
@@ -489,7 +538,7 @@ export default function Page() {
 
   useEffect(() => {
     redrawCanvas();
-  }, [offset, zoom, elements, selectionBox]);
+  }, [offset, zoom, elements, selectionBox, canvasBackground]);
 
   useEffect(() => {
     offsetRef.current = offset;
@@ -524,52 +573,72 @@ export default function Page() {
   }, [activeTextScreenX, activeTextScreenY]);
 
   useEffect(() => {
-    if (!activeText || !textInputRef.current) return;
-
-    const textInput = textInputRef.current;
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const borderBox = entry.borderBoxSize?.[0];
-      const rect = textInput.getBoundingClientRect();
-      const nextWidth = Math.round(borderBox?.inlineSize ?? rect.width);
-      const nextHeight = Math.round(borderBox?.blockSize ?? rect.height);
-      const nextFontSize = getTextFontSize(nextWidth, nextHeight);
-
-      setActiveText((prev) => {
-        if (
-          !prev ||
-          (prev.width === nextWidth &&
-            prev.height === nextHeight &&
-            prev.fontSize === nextFontSize)
-        ) {
-          return prev;
-        }
-
-        return {
-          ...prev,
-          width: nextWidth,
-          height: nextHeight,
-          fontSize: nextFontSize,
+    const moveOrResizeText = (clientX: number, clientY: number) => {
+      if (isResizingTextRef.current && textResizeStart.current) {
+        const dx = clientX - textResizeStart.current.screen.x;
+        const dy = clientY - textResizeStart.current.screen.y;
+        const minWidth = 48;
+        const minHeight = 30;
+        const startsOnLeft = textResizeStart.current.handle.includes("w");
+        const startsOnTop = textResizeStart.current.handle.includes("n");
+        const changesWidth =
+          startsOnLeft || textResizeStart.current.handle.includes("e");
+        const changesHeight =
+          startsOnTop || textResizeStart.current.handle.includes("s");
+        const nextWidth = changesWidth
+          ? startsOnLeft
+            ? Math.max(minWidth, textResizeStart.current.width - dx)
+            : Math.max(minWidth, textResizeStart.current.width + dx)
+          : textResizeStart.current.width;
+        const nextHeight = changesHeight
+          ? startsOnTop
+            ? Math.max(minHeight, textResizeStart.current.height - dy)
+            : Math.max(minHeight, textResizeStart.current.height + dy)
+          : textResizeStart.current.height;
+        const nextScreenPoint = {
+          x: startsOnLeft
+            ? textResizeStart.current.screenPoint.x +
+              (textResizeStart.current.width - nextWidth)
+            : textResizeStart.current.screenPoint.x,
+          y: startsOnTop
+            ? textResizeStart.current.screenPoint.y +
+              (textResizeStart.current.height - nextHeight)
+            : textResizeStart.current.screenPoint.y,
         };
-      });
-    });
 
-    resizeObserver.observe(textInput);
+        setActiveText((prev) =>
+          prev
+            ? {
+                ...prev,
+                screenPoint: nextScreenPoint,
+              point: {
+                x: (nextScreenPoint.x - offsetRef.current.x) / zoomRef.current,
+                y:
+                  (nextScreenPoint.y -
+                    topBarHeight -
+                    offsetRef.current.y) /
+                  zoomRef.current,
+              },
+              width: nextWidth,
+              height: nextHeight,
+              fontSize: getTextFontSize(nextWidth, nextHeight),
+            }
+          : prev
+      );
 
-    return () => resizeObserver.disconnect();
-  }, [activeText]);
+        return;
+      }
 
-  useEffect(() => {
-    const moveText = (e: MouseEvent) => {
       if (!isDraggingTextRef.current || !textDragStart.current) return;
 
       const nextScreenPoint = {
         x:
           textDragStart.current.textScreen.x +
-          e.clientX -
+          clientX -
           textDragStart.current.screen.x,
         y:
           textDragStart.current.textScreen.y +
-          e.clientY -
+          clientY -
           textDragStart.current.screen.y,
       };
 
@@ -591,17 +660,31 @@ export default function Page() {
       );
     };
 
+    const moveText = (e: MouseEvent) => {
+      moveOrResizeText(e.clientX, e.clientY);
+    };
+
+    const moveTextPointer = (e: PointerEvent) => {
+      moveOrResizeText(e.clientX, e.clientY);
+    };
+
     const stopMovingText = () => {
       isDraggingTextRef.current = false;
+      isResizingTextRef.current = false;
       textDragStart.current = null;
+      textResizeStart.current = null;
     };
 
     window.addEventListener("mousemove", moveText);
     window.addEventListener("mouseup", stopMovingText);
+    window.addEventListener("pointermove", moveTextPointer);
+    window.addEventListener("pointerup", stopMovingText);
 
     return () => {
       window.removeEventListener("mousemove", moveText);
       window.removeEventListener("mouseup", stopMovingText);
+      window.removeEventListener("pointermove", moveTextPointer);
+      window.removeEventListener("pointerup", stopMovingText);
     };
   }, []);
 
@@ -652,7 +735,7 @@ export default function Page() {
         kind: "text",
         point: activeText.point,
         value: trimmedValue,
-        color: "#000000",
+        color: canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
         fontSize: activeText.fontSize,
         width: activeText.width,
         height: activeText.height,
@@ -736,7 +819,8 @@ export default function Page() {
     if (
       tool === "circle" ||
       tool === "square" ||
-      tool === "arrow"
+      tool === "arrow" ||
+      tool === "line"
     ) {
       setIsDrawing(true);
       setShapeStart({ x, y });
@@ -769,10 +853,6 @@ export default function Page() {
 
   const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
     if (tool !== "text") return;
-    if (activeText) {
-      textInputRef.current?.focus();
-      return;
-    }
 
     const { x, y } = getCanvasCoordinates(e);
     const textIndex = elements.findLastIndex(
@@ -780,6 +860,10 @@ export default function Page() {
         element.kind === "text" &&
         pointInBounds({ x, y }, getTextBounds(element))
     );
+
+    if (activeText) {
+      commitActiveText();
+    }
 
     if (textIndex !== -1) {
       const textElement = elements[textIndex];
@@ -808,9 +892,9 @@ export default function Page() {
       point: { x, y },
       screenPoint: { x: e.clientX, y: e.clientY },
       value: "",
-      width: 120,
-      height: 44,
-      fontSize: getTextFontSize(120, 44),
+      width: 48,
+      height: 30,
+      fontSize: 24,
       editingIndex: undefined,
     });
   };
@@ -854,7 +938,8 @@ export default function Page() {
       (
         tool === "circle" ||
         tool === "square" ||
-        tool === "arrow"
+        tool === "arrow" ||
+        tool === "line"
       ) &&
       shapeStart &&
       snapshot
@@ -901,7 +986,7 @@ export default function Page() {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    ctx.fillStyle = "#ffffff";
+    ctx.fillStyle = canvasBackground;
     ctx.fillRect(0, 0, cssWidth, cssHeight);
   };
   const stopDrawing = (e?: React.MouseEvent<HTMLCanvasElement>) => {
@@ -945,7 +1030,8 @@ export default function Page() {
       (
         tool === "circle" ||
         tool === "square" ||
-        tool === "arrow"
+        tool === "arrow" ||
+        tool === "line"
       ) &&
       shapeStart &&
       shapeEnd.current
@@ -991,6 +1077,25 @@ export default function Page() {
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
   const isPenActive = tool === "pen";
+  const isDarkCanvas = canvasBackground === darkCanvasColor;
+  const toolbarBackground = isDarkCanvas
+    ? "rgba(30,30,30,0.94)"
+    : "rgba(255,255,255,0.92)";
+  const popoverBackground = isDarkCanvas
+    ? "rgba(34,34,34,0.96)"
+    : "rgba(255,255,255,0.96)";
+  const inactiveToolBackground = isDarkCanvas ? "#2a2a2a" : "#f3f4f6";
+  const panelTextColor = isDarkCanvas ? "#f9fafb" : "#111827";
+  const panelBorderColor = isDarkCanvas
+    ? "rgba(255,255,255,0.12)"
+    : "rgba(15,23,42,0.12)";
+  const panelDividerColor = isDarkCanvas
+    ? "rgba(255,255,255,0.12)"
+    : "rgba(15,23,42,0.08)";
+  const selectedControlBackground = isDarkCanvas
+    ? "rgba(124,58,237,0.24)"
+    : "rgba(124,58,237,0.12)";
+  const controlBackground = isDarkCanvas ? "#2f2f2f" : "#ffffff";
 
   return (
     <div
@@ -998,7 +1103,7 @@ export default function Page() {
         width: "100vw",
         height: "100vh",
         overflow: "hidden",
-        background: "#ffffff",
+        background: canvasBackground,
       }}
     >
       <canvas
@@ -1017,88 +1122,247 @@ export default function Page() {
           width: "100vw",
           height: `calc(100vh - ${topBarHeight}px)`,
           display: "block",
-          background: "#ffffff",
+          background: canvasBackground,
           cursor: canvasCursor,
         }}
       />
 
       {activeText && (
-        <textarea
-          ref={textInputRef}
-          autoFocus
-          placeholder="Type here"
-          value={activeText.value}
-          onChange={(e) =>
-            setActiveText((prev) =>
-              prev ? { ...prev, value: e.target.value } : prev
-            )
-          }
-          onMouseUp={(e) => {
-            const target = e.currentTarget;
-            setActiveText((prev) =>
-              prev
-                ? {
-                    ...prev,
-                    width: target.offsetWidth,
-                    height: target.offsetHeight,
-                    fontSize: getTextFontSize(
-                      target.offsetWidth,
-                      target.offsetHeight
-                    ),
-                  }
-                : prev
-            );
-          }}
-          onClick={(e) => e.stopPropagation()}
-          onMouseDown={(e) => {
-            e.stopPropagation();
+        <>
+          {activeText.value.length > 0 && (
+            <button
+              aria-label="Move text box"
+              onMouseDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                isDraggingTextRef.current = true;
+                textDragStart.current = {
+                  screen: { x: e.clientX, y: e.clientY },
+                  textScreen: activeText.screenPoint,
+                };
+              }}
+              onPointerDown={(e) => {
+                e.stopPropagation();
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+                isDraggingTextRef.current = true;
+                textDragStart.current = {
+                  screen: { x: e.clientX, y: e.clientY },
+                  textScreen: activeText.screenPoint,
+                };
+              }}
+              style={{
+                position: "fixed",
+                top: `${activeText.screenPoint.y - 20}px`,
+                left: `${activeText.screenPoint.x}px`,
+                width: "22px",
+                height: "18px",
+                border: "1px solid #7c3aed",
+                borderRadius: "4px 4px 0 0",
+                background: "#7c3aed",
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                cursor: "move",
+                padding: 0,
+                zIndex: 61,
+              }}
+            >
+              <Move size={12} />
+            </button>
+          )}
+          {activeText.value.length > 0 && (
+            <div
+              style={{
+                position: "fixed",
+                top: `${activeText.screenPoint.y}px`,
+                left: `${activeText.screenPoint.x}px`,
+                width: `${activeText.width}px`,
+                height: `${activeText.height}px`,
+                border: "1.5px solid #2563eb",
+                boxSizing: "border-box",
+                pointerEvents: "none",
+                zIndex: 62,
+              }}
+            />
+          )}
+          {activeText.value.length > 0 &&
+            ([
+              {
+                handle: "nw" as const,
+                x: activeText.screenPoint.x - 8,
+                y: activeText.screenPoint.y - 8,
+                cursor: "nwse-resize",
+              },
+              {
+                handle: "n" as const,
+                x: activeText.screenPoint.x + activeText.width / 2 - 8,
+                y: activeText.screenPoint.y - 8,
+                cursor: "ns-resize",
+              },
+              {
+                handle: "ne" as const,
+                x: activeText.screenPoint.x + activeText.width - 8,
+                y: activeText.screenPoint.y - 8,
+                cursor: "nesw-resize",
+              },
+              {
+                handle: "e" as const,
+                x: activeText.screenPoint.x + activeText.width - 8,
+                y: activeText.screenPoint.y + activeText.height / 2 - 8,
+                cursor: "ew-resize",
+              },
+              {
+                handle: "se" as const,
+                x: activeText.screenPoint.x + activeText.width - 8,
+                y: activeText.screenPoint.y + activeText.height - 8,
+                cursor: "nwse-resize",
+              },
+              {
+                handle: "s" as const,
+                x: activeText.screenPoint.x + activeText.width / 2 - 8,
+                y: activeText.screenPoint.y + activeText.height - 8,
+                cursor: "ns-resize",
+              },
+              {
+                handle: "sw" as const,
+                x: activeText.screenPoint.x - 8,
+                y: activeText.screenPoint.y + activeText.height - 8,
+                cursor: "nesw-resize",
+              },
+              {
+                handle: "w" as const,
+                x: activeText.screenPoint.x - 8,
+                y: activeText.screenPoint.y + activeText.height / 2 - 8,
+                cursor: "ew-resize",
+              },
+            ]).map(({ handle, x, y, cursor }) => (
+              <div
+                key={handle}
+                role="presentation"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  isResizingTextRef.current = true;
+                  textResizeStart.current = {
+                    screen: { x: e.clientX, y: e.clientY },
+                    screenPoint: activeText.screenPoint,
+                    width: activeText.width,
+                    height: activeText.height,
+                    handle,
+                  };
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  isResizingTextRef.current = true;
+                  textResizeStart.current = {
+                    screen: { x: e.clientX, y: e.clientY },
+                    screenPoint: activeText.screenPoint,
+                    width: activeText.width,
+                    height: activeText.height,
+                    handle,
+                  };
+                }}
+                style={{
+                  position: "fixed",
+                  left: `${x}px`,
+                  top: `${y}px`,
+                  width: "16px",
+                  height: "16px",
+                  border: "4px solid transparent",
+                  background: "transparent",
+                  boxSizing: "border-box",
+                  cursor,
+                  zIndex: 80,
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    inset: "4px",
+                    border: "1.5px solid #2563eb",
+                    background: canvasBackground,
+                    boxSizing: "border-box",
+                    pointerEvents: "none",
+                  }}
+                />
+              </div>
+            ))}
+          <textarea
+            ref={textInputRef}
+            autoFocus
+            wrap="off"
+            value={activeText.value}
+            onChange={(e) => {
+              const value = e.target.value;
+              const nextSize = activeText
+                ? getTextEditorSize(value, activeText.fontSize)
+                : { width: 48, height: 30 };
+              setActiveText((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      value,
+                      width: Math.max(prev.width, nextSize.width),
+                      height: Math.max(prev.height, nextSize.height),
+                    }
+                  : prev
+              );
+            }}
+            onMouseUp={(e) => {
+              const target = e.currentTarget;
+              setActiveText((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      width: target.offsetWidth,
+                      height: target.offsetHeight,
+                    }
+                  : prev
+              );
+            }}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => e.stopPropagation()}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                setActiveText(null);
+              }
 
-            const rect = e.currentTarget.getBoundingClientRect();
-            const isResizeCorner =
-              e.clientX > rect.right - 18 && e.clientY > rect.bottom - 18;
-
-            if (isResizeCorner) return;
-
-            isDraggingTextRef.current = true;
-            textDragStart.current = {
-              screen: { x: e.clientX, y: e.clientY },
-              textScreen: activeText.screenPoint,
-            };
-          }}
-          onKeyDown={(e) => {
-            if (e.key === "Escape") {
-              setActiveText(null);
-            }
-
-            if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
-              commitActiveText();
-            }
-          }}
-          style={{
-            position: "fixed",
-            top: `${activeText.screenPoint.y}px`,
-            left: `${activeText.screenPoint.x}px`,
-            width: `${activeText.width}px`,
-            height: `${activeText.height}px`,
-            minWidth: "72px",
-            minHeight: "30px",
-            padding: "4px 6px",
-            border: "2px solid #000000",
-            borderRadius: "2px",
-            outline: "none",
-            background: "#ffffff",
-            boxShadow: "0 0 0 1px rgba(0,0,0,0.14)",
-            color: "#000000",
-            caretColor: "#000000",
-            fontSize: `${activeText.fontSize}px`,
-            fontFamily: "Arial, sans-serif",
-            lineHeight: 1.25,
-            resize: "both",
-            overflow: "auto",
-            boxSizing: "border-box",
-            zIndex: 60,
-          }}
-        />
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                commitActiveText();
+              }
+            }}
+            style={{
+              position: "fixed",
+              top: `${activeText.screenPoint.y}px`,
+              left: `${activeText.screenPoint.x}px`,
+              width: `${activeText.width}px`,
+              height: `${activeText.height}px`,
+              minWidth: activeText.value.length > 0 ? "48px" : "2px",
+              minHeight: activeText.value.length > 0 ? "30px" : "24px",
+              padding: activeText.value.length > 0 ? "2px 4px" : 0,
+              border: "none",
+              borderRadius: "2px",
+              outline: "none",
+              background: "transparent",
+              boxShadow: "none",
+              color:
+                canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
+              caretColor:
+                canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
+              fontSize: `${activeText.fontSize}px`,
+              fontFamily: "Arial, sans-serif",
+              lineHeight: 1.25,
+              whiteSpace: "pre",
+              resize: "none",
+              overflow: "hidden",
+              boxSizing: "border-box",
+              zIndex: 60,
+            }}
+          />
+        </>
       )}
 
       {selectionMenu && (
@@ -1113,9 +1377,9 @@ export default function Page() {
             minWidth: "82px",
             padding: "3px",
             borderRadius: "6px",
-            background: "#ffffff",
+            background: popoverBackground,
             boxShadow: "0 6px 16px rgba(0,0,0,0.16)",
-            border: "1px solid rgba(17,24,39,0.12)",
+            border: `1px solid ${panelBorderColor}`,
             zIndex: 80,
           }}
         >
@@ -1126,7 +1390,7 @@ export default function Page() {
               border: "none",
               borderRadius: "4px",
               background: "transparent",
-              color: "#111827",
+              color: panelTextColor,
               fontSize: "12px",
               textAlign: "left",
               cursor: "pointer",
@@ -1141,7 +1405,7 @@ export default function Page() {
               border: "none",
               borderRadius: "4px",
               background: "transparent",
-              color: "#111827",
+              color: panelTextColor,
               fontSize: "12px",
               textAlign: "left",
               cursor: "pointer",
@@ -1163,7 +1427,35 @@ export default function Page() {
             "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
           zIndex: 50,
         }}
-      />
+      >
+        <button
+          aria-label={isDarkCanvas ? "Use white canvas" : "Use dark grey canvas"}
+          onClick={() =>
+            setCanvasBackground((current) =>
+              current === darkCanvasColor ? lightCanvasColor : darkCanvasColor
+            )
+          }
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: "16px",
+            transform: "translateY(-50%)",
+            width: "34px",
+            height: "34px",
+            borderRadius: "8px",
+            border: "1px solid rgba(255,255,255,0.45)",
+            background: "rgba(255,255,255,0.18)",
+            color: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          {isDarkCanvas ? <Sun size={17} /> : <Moon size={17} />}
+        </button>
+      </div>
 
       <div
         style={{
@@ -1176,7 +1468,7 @@ export default function Page() {
           gap: "10px",
           padding: "8px",
           borderRadius: "12px",
-          background: "rgba(255,255,255,0.92)",
+          background: toolbarBackground,
           backdropFilter: "blur(10px)",
           boxShadow: "0 8px 25px rgba(0,0,0,0.18)",
           zIndex: 20,
@@ -1194,8 +1486,8 @@ export default function Page() {
             height: "42px",
             borderRadius: "8px",
             border: "none",
-            background: isCursorActive ? "#7c3aed" : "#f3f4f6",
-            color: isCursorActive ? "white" : "#111827",
+            background: isCursorActive ? "#7c3aed" : inactiveToolBackground,
+            color: isCursorActive ? "white" : panelTextColor,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1218,8 +1510,8 @@ export default function Page() {
             height: "42px",
             borderRadius: "8px",
             border: "none",
-            background: isTextActive ? "#7c3aed" : "#f3f4f6",
-            color: isTextActive ? "white" : "#111827",
+            background: isTextActive ? "#7c3aed" : inactiveToolBackground,
+            color: isTextActive ? "white" : panelTextColor,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1244,8 +1536,8 @@ export default function Page() {
               height: "42px",
               borderRadius: "8px",
               border: "none",
-              background: tool === "pen" ? "#7c3aed" : "#f3f4f6",
-              color: tool === "pen" ? "white" : "#111827",
+              background: tool === "pen" ? "#7c3aed" : inactiveToolBackground,
+              color: tool === "pen" ? "white" : panelTextColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1266,8 +1558,8 @@ export default function Page() {
                 minWidth: "206px",
                 padding: "9px 12px",
                 borderRadius: "12px",
-                background: "rgba(255,255,255,0.96)",
-                color: "#111827",
+                background: popoverBackground,
+                color: panelTextColor,
                 display: "flex",
                 flexDirection: "column",
                 alignItems: "center",
@@ -1375,7 +1667,7 @@ export default function Page() {
                   justifyContent: "flex-start",
                   gap: "3px",
                   paddingTop: "6px",
-                  borderTop: "1px solid rgba(15,23,42,0.08)",
+                  borderTop: `1px solid ${panelDividerColor}`,
                 }}
               >
                 {(["solid", "dashed", "dotted"] as StrokeStyle[]).map(
@@ -1397,11 +1689,11 @@ export default function Page() {
                         border:
                           strokeStyle === styleOption
                             ? "2px solid #7c3aed"
-                            : "1px solid rgba(15,23,42,0.12)",
+                            : `1px solid ${panelBorderColor}`,
                         background:
                           strokeStyle === styleOption
-                            ? "rgba(124,58,237,0.12)"
-                            : "#ffffff",
+                            ? selectedControlBackground
+                            : controlBackground,
                         display: "grid",
                         placeItems: "center",
                         cursor: "pointer",
@@ -1413,7 +1705,7 @@ export default function Page() {
                           style={{
                             width: "10px",
                             height: "2px",
-                            background: "#111827",
+                            background: panelTextColor,
                           }}
                         />
                       ) : styleOption === "dashed" ? (
@@ -1431,7 +1723,7 @@ export default function Page() {
                               style={{
                                 width: "3px",
                                 height: "3px",
-                                background: "#111827",
+                                background: panelTextColor,
                               }}
                             />
                           ))}
@@ -1452,7 +1744,7 @@ export default function Page() {
                                 width: "3px",
                                 height: "3px",
                                 borderRadius: "999px",
-                                background: "#111827",
+                                background: panelTextColor,
                               }}
                             />
                           ))}
@@ -1480,8 +1772,9 @@ export default function Page() {
               height: "42px",
               borderRadius: "8px",
               border: "none",
-              background: tool === "eraser" ? "#7c3aed" : "#f3f4f6",
-              color: tool === "eraser" ? "white" : "#111827",
+              background:
+                tool === "eraser" ? "#7c3aed" : inactiveToolBackground,
+              color: tool === "eraser" ? "white" : panelTextColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1502,8 +1795,8 @@ export default function Page() {
                 minWidth: "190px",
                 padding: "12px 14px",
                 borderRadius: "12px",
-                background: "rgba(255,255,255,0.96)",
-                color: "#111827",
+                background: popoverBackground,
+                color: panelTextColor,
                 display: "flex",
                 alignItems: "center",
                 gap: "12px",
@@ -1537,7 +1830,7 @@ export default function Page() {
                   width: `${Math.max(8, eraserWidth)}px`,
                   height: `${Math.max(8, eraserWidth)}px`,
                   borderRadius: "999px",
-                  background: "white",
+                  background: canvasBackground,
                   flexShrink: 0,
                 }}
               />
@@ -1552,8 +1845,8 @@ export default function Page() {
             height: "42px",
             borderRadius: "8px",
             border: "none",
-            background: "#f3f4f6",
-            color: "#111827",
+            background: inactiveToolBackground,
+            color: panelTextColor,
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
@@ -1576,12 +1869,12 @@ export default function Page() {
               height: "42px",
               borderRadius: "8px",
               border: "none",
-              background: ["circle", "square", "arrow"].includes(tool)
+              background: ["circle", "square", "arrow", "line"].includes(tool)
                 ? "#7c3aed"
-                : "#f3f4f6",
-              color: ["circle", "square", "arrow"].includes(tool)
+                : inactiveToolBackground,
+              color: ["circle", "square", "arrow", "line"].includes(tool)
                 ? "#fff"
-                : "#111827",
+                : panelTextColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
@@ -1602,7 +1895,7 @@ export default function Page() {
                 gap: "10px",
                 padding: "10px",
                 borderRadius: "12px",
-                background: "rgba(255,255,255,0.96)",
+                background: popoverBackground,
                 boxShadow: "0 8px 25px rgba(0,0,0,0.18)",
               }}
             >
@@ -1619,7 +1912,7 @@ export default function Page() {
                   borderRadius: "6px",
                   border: "none",
                   background: "transparent",
-                  color: "#111827",
+                  color: panelTextColor,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -1642,7 +1935,7 @@ export default function Page() {
                   borderRadius: "6px",
                   border: "none",
                   background: "transparent",
-                  color: "#111827",
+                  color: panelTextColor,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -1665,7 +1958,7 @@ export default function Page() {
                   borderRadius: "6px",
                   border: "none",
                   background: "transparent",
-                  color: "#111827",
+                  color: panelTextColor,
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "center",
@@ -1673,6 +1966,29 @@ export default function Page() {
                 }}
               >
                 <ArrowRight size={18} />
+              </button>
+
+              <button
+                onClick={() => {
+                  setTool("line");
+                  setShowShapesMenu(false);
+                  setShowPenMenu(false);
+                  setShowEraserMenu(false);
+                }}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  color: panelTextColor,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <Minus size={20} />
               </button>
             </div>
           )}
