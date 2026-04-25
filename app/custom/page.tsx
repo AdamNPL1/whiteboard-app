@@ -33,14 +33,26 @@ type Shape = {
   tool: ShapeTool;
   start: Point;
   end: Point;
+  width: number;
+  color: string;
+  style: StrokeStyle;
 };
 type StrokeStyle = "solid" | "dashed" | "dotted";
+type TextRun = {
+  text: string;
+  color: string;
+  fontFamily: string;
+  fontWeight: number;
+};
 
 type TextElement = {
   kind: "text";
   point: Point;
   value: string;
   color: string;
+  runs: TextRun[];
+  fontFamily: string;
+  fontWeight: number;
   fontSize: number;
   width: number;
   height: number;
@@ -50,9 +62,13 @@ type ActiveText = {
   point: Point;
   screenPoint: Point;
   value: string;
+  color: string;
+  runs: TextRun[];
   width: number;
   height: number;
   fontSize: number;
+  fontFamily: string;
+  fontWeight: number;
   editingIndex?: number;
 };
 type SelectionBox = {
@@ -90,6 +106,22 @@ export default function Page() {
     { name: "red", value: "#fb7185" },
     { name: "red", value: "#ef4444" },
   ];
+  const textFonts = [
+    {
+      name: "Hand",
+      family: '"Comic Sans MS", "Comic Sans", "Trebuchet MS", cursive',
+      weight: 400,
+      preview: "Aa",
+    },
+    { name: "Serif", family: "Georgia, serif", weight: 400, preview: "Aa" },
+    {
+      name: "Round",
+      family: '"Trebuchet MS", Arial, sans-serif',
+      weight: 700,
+      preview: "Aa",
+    },
+    { name: "Clean", family: "Arial, sans-serif", weight: 400, preview: "Aa" },
+  ];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<
@@ -108,6 +140,8 @@ export default function Page() {
   const [penColor, setPenColor] = useState("#000000");
   const [eraserWidth, setEraserWidth] = useState(24);
   const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>("solid");
+  const [textFontFamily, setTextFontFamily] = useState(textFonts[0].family);
+  const [textFontWeight, setTextFontWeight] = useState(textFonts[0].weight);
   const [canvasBackground, setCanvasBackground] = useState(lightCanvasColor);
   const [activeText, setActiveText] = useState<ActiveText | null>(null);
   const [isPanning, setIsPanning] = useState(false);
@@ -133,6 +167,7 @@ export default function Page() {
     screenPoint: Point;
     width: number;
     height: number;
+    fontSize: number;
     handle: TextResizeHandle;
   } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
@@ -142,18 +177,126 @@ export default function Page() {
   const currentStroke = useRef<Stroke | null>(null);
   const activeTextScreenX = activeText?.screenPoint.x;
   const activeTextScreenY = activeText?.screenPoint.y;
+  const textPaddingX = 4;
+  const textPaddingY = 2;
+  const textLineHeight = 1.25;
 
-  const getTextFontSize = (width: number, height: number) =>
-    Math.max(12, Math.min(96, Math.round(Math.min(width / 5, height * 0.55))));
+  const getTextRuns = (
+    text: Pick<TextElement, "value" | "color" | "fontFamily"> & {
+      fontWeight?: number;
+      runs?: TextRun[];
+    }
+  ) =>
+    text.runs?.length
+      ? text.runs.map((run) => ({
+          text: run.text,
+          color: run.color,
+          fontFamily: run.fontFamily ?? text.fontFamily,
+          fontWeight: run.fontWeight ?? getTextFontWeight(text),
+        }))
+      : [
+          {
+            text: text.value,
+            color: text.color,
+            fontFamily: text.fontFamily,
+            fontWeight: getTextFontWeight(text),
+          },
+        ];
+  const getTextFontWeight = (text: { fontWeight?: number }) =>
+    text.fontWeight ?? 400;
 
-  const getTextEditorSize = (value: string, fontSize: number) => {
+  const updateTextRuns = (
+    previousValue: string,
+    nextValue: string,
+    runs: TextRun[],
+    nextColor: string,
+    nextFontFamily: string,
+    nextFontWeight: number
+  ) => {
+    if (nextValue === previousValue) return runs;
+
+    if (nextValue.startsWith(previousValue)) {
+      const insertedText = nextValue.slice(previousValue.length);
+      const lastRun = runs[runs.length - 1];
+
+      if (
+        lastRun?.color === nextColor &&
+        lastRun.fontFamily === nextFontFamily &&
+        lastRun.fontWeight === nextFontWeight
+      ) {
+        return [
+          ...runs.slice(0, -1),
+          { ...lastRun, text: lastRun.text + insertedText },
+        ];
+      }
+
+      return [
+        ...runs,
+        {
+          text: insertedText,
+          color: nextColor,
+          fontFamily: nextFontFamily,
+          fontWeight: nextFontWeight,
+        },
+      ];
+    }
+
+    if (previousValue.startsWith(nextValue)) {
+      let remainingLength = nextValue.length;
+      const nextRuns: TextRun[] = [];
+
+      for (const run of runs) {
+        if (remainingLength <= 0) break;
+
+        const text = run.text.slice(0, remainingLength);
+        if (text) {
+          nextRuns.push({ ...run, text });
+        }
+        remainingLength -= run.text.length;
+      }
+
+      return nextRuns;
+    }
+
+    return nextValue
+      ? [
+          {
+            text: nextValue,
+            color: nextColor,
+            fontFamily: nextFontFamily,
+            fontWeight: nextFontWeight,
+          },
+        ]
+      : [];
+  };
+
+  const renderTextRuns = (runs: TextRun[]) =>
+    runs.map((run, index) => (
+      <span
+        key={index}
+        style={{
+          color: run.color,
+          fontFamily: run.fontFamily,
+          fontWeight: run.fontWeight,
+        }}
+      >
+        {run.text}
+      </span>
+    ));
+
+  const getTextEditorSize = (
+    value: string,
+    fontSize: number,
+    fontFamily: string,
+    fontWeight: number
+  ) => {
     const measuringCanvas = document.createElement("canvas");
     const measuringContext = measuringCanvas.getContext("2d");
-    const lineHeight = fontSize * 1.25;
+    const lineHeight = fontSize * textLineHeight;
     const lines = value.split("\n");
 
     if (measuringContext) {
-      measuringContext.font = `${fontSize}px Arial, sans-serif`;
+      measuringContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
     }
 
     const longestLineWidth = Math.max(
@@ -163,8 +306,110 @@ export default function Page() {
     );
 
     return {
-      width: Math.max(48, Math.ceil(longestLineWidth) + 8),
-      height: Math.max(30, Math.ceil(lines.length * lineHeight) + 4),
+      width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2),
+      height: Math.max(30, Math.ceil(lines.length * lineHeight) + textPaddingY * 2),
+    };
+  };
+
+  const getTextRunsEditorSize = (runs: TextRun[], fontSize: number) => {
+    const measuringCanvas = document.createElement("canvas");
+    const measuringContext = measuringCanvas.getContext("2d");
+    const lineHeight = fontSize * textLineHeight;
+    let currentLineWidth = 0;
+    let longestLineWidth = 0;
+    let lineCount = 1;
+
+    for (const run of runs) {
+      if (measuringContext) {
+        measuringContext.font = `${run.fontWeight} ${fontSize}px ${run.fontFamily}`;
+      }
+
+      for (const character of run.text) {
+        if (character === "\n") {
+          longestLineWidth = Math.max(longestLineWidth, currentLineWidth);
+          currentLineWidth = 0;
+          lineCount += 1;
+          continue;
+        }
+
+        currentLineWidth += measuringContext
+          ? measuringContext.measureText(character).width
+          : 0;
+      }
+    }
+
+    longestLineWidth = Math.max(longestLineWidth, currentLineWidth);
+
+    return {
+      width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2),
+      height: Math.max(30, Math.ceil(lineCount * lineHeight) + textPaddingY * 2),
+    };
+  };
+
+  const drawTextElement = (
+    ctx: CanvasRenderingContext2D,
+    text: TextElement
+  ) => {
+    const lineHeight = text.fontSize * textLineHeight;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(text.point.x, text.point.y, text.width, text.height);
+    ctx.clip();
+    ctx.font = `${getTextFontWeight(text)} ${text.fontSize}px ${text.fontFamily}`;
+    ctx.textBaseline = "top";
+    ctx.setLineDash([]);
+
+    let currentX = text.point.x + textPaddingX;
+    let currentY = text.point.y + textPaddingY;
+
+    for (const run of getTextRuns(text)) {
+      ctx.fillStyle = run.color;
+      ctx.font = `${run.fontWeight} ${text.fontSize}px ${run.fontFamily}`;
+
+      for (const character of run.text) {
+        if (character === "\n") {
+          currentX = text.point.x + textPaddingX;
+          currentY += lineHeight;
+          continue;
+        }
+
+        ctx.fillText(character, currentX, currentY);
+        currentX += ctx.measureText(character).width;
+      }
+    }
+
+    ctx.restore();
+  };
+
+  const getTextCanvasPoint = (screenPoint: Point) => ({
+    x: (screenPoint.x - offsetRef.current.x) / zoomRef.current,
+    y: (screenPoint.y - topBarHeight - offsetRef.current.y) / zoomRef.current,
+  });
+
+  const keepTextBoxInViewport = (
+    screenPoint: Point,
+    width: number,
+    height: number
+  ) => {
+    const margin = 8;
+    const maxWidth = Math.max(48, window.innerWidth - margin * 2);
+    const maxHeight = Math.max(30, window.innerHeight - topBarHeight - margin * 2);
+    const nextWidth = Math.min(width, maxWidth);
+    const nextHeight = Math.min(height, maxHeight);
+    const minY = topBarHeight + margin;
+    const maxX = Math.max(margin, window.innerWidth - nextWidth - margin);
+    const maxY = Math.max(minY, window.innerHeight - nextHeight - margin);
+    const nextScreenPoint = {
+      x: Math.min(Math.max(screenPoint.x, margin), maxX),
+      y: Math.min(Math.max(screenPoint.y, minY), maxY),
+    };
+
+    return {
+      screenPoint: nextScreenPoint,
+      point: getTextCanvasPoint(nextScreenPoint),
+      width: nextWidth,
+      height: nextHeight,
     };
   };
 
@@ -196,31 +441,36 @@ export default function Page() {
     startX: number,
     startY: number,
     currentX: number,
-    currentY: number
+    currentY: number,
+    width = penWidth,
+    color = penColor,
+    style = strokeStyle
   ) => {
-    const width = currentX - startX;
+    const shapeWidth = currentX - startX;
     const height = currentY - startY;
 
     ctx.beginPath();
-    ctx.setLineDash([]);
-    ctx.strokeStyle = "black";
-    ctx.lineWidth = 4;
+    ctx.lineCap = getStrokeLineCap(style);
+    ctx.lineJoin = "round";
+    ctx.setLineDash(getStrokeDashPattern(style, width));
+    ctx.strokeStyle = color;
+    ctx.lineWidth = width;
 
     if (shape === "square") {
-      ctx.strokeRect(startX, startY, width, height);
+      ctx.strokeRect(startX, startY, shapeWidth, height);
       return;
     }
 
     if (shape === "circle") {
-      const radius = Math.sqrt(width * width + height * height);
+      const radius = Math.sqrt(shapeWidth * shapeWidth + height * height);
       ctx.arc(startX, startY, radius, 0, Math.PI * 2);
       ctx.stroke();
       return;
     }
 
     if (shape === "arrow") {
-      const angle = Math.atan2(height, width);
-      const headLength = 18;
+      const angle = Math.atan2(height, shapeWidth);
+      const headLength = Math.max(18, width * 4);
 
       ctx.moveTo(startX, startY);
       ctx.lineTo(currentX, currentY);
@@ -398,7 +648,11 @@ export default function Page() {
     ctx.translate(offset.x, offset.y);
     ctx.scale(zoom, zoom);
 
-    for (const element of elements) {
+    for (const [index, element] of elements.entries()) {
+      if (activeText?.editingIndex === index) {
+        continue;
+      }
+
       if (element.kind === "shape") {
         drawShape(
           ctx,
@@ -406,20 +660,16 @@ export default function Page() {
           element.start.x,
           element.start.y,
           element.end.x,
-          element.end.y
+          element.end.y,
+          element.width,
+          element.color,
+          element.style
         );
         continue;
       }
 
       if (element.kind === "text") {
-        ctx.fillStyle = element.color;
-        ctx.font = `${element.fontSize}px Arial, sans-serif`;
-        ctx.textBaseline = "top";
-        ctx.setLineDash([]);
-
-        element.value.split("\n").forEach((line, index) => {
-          ctx.fillText(line, element.point.x, element.point.y + index * element.fontSize * 1.25);
-        });
+        drawTextElement(ctx, element);
         continue;
       }
 
@@ -538,7 +788,7 @@ export default function Page() {
 
   useEffect(() => {
     redrawCanvas();
-  }, [offset, zoom, elements, selectionBox, canvasBackground]);
+  }, [offset, zoom, elements, selectionBox, canvasBackground, activeText?.editingIndex]);
 
   useEffect(() => {
     offsetRef.current = offset;
@@ -577,51 +827,67 @@ export default function Page() {
       if (isResizingTextRef.current && textResizeStart.current) {
         const dx = clientX - textResizeStart.current.screen.x;
         const dy = clientY - textResizeStart.current.screen.y;
-        const minWidth = 48;
-        const minHeight = 30;
         const startsOnLeft = textResizeStart.current.handle.includes("w");
         const startsOnTop = textResizeStart.current.handle.includes("n");
+        const startsOnRight = textResizeStart.current.handle.includes("e");
+        const startsOnBottom = textResizeStart.current.handle.includes("s");
         const changesWidth =
-          startsOnLeft || textResizeStart.current.handle.includes("e");
-        const changesHeight =
-          startsOnTop || textResizeStart.current.handle.includes("s");
-        const nextWidth = changesWidth
-          ? startsOnLeft
-            ? Math.max(minWidth, textResizeStart.current.width - dx)
-            : Math.max(minWidth, textResizeStart.current.width + dx)
-          : textResizeStart.current.width;
-        const nextHeight = changesHeight
-          ? startsOnTop
-            ? Math.max(minHeight, textResizeStart.current.height - dy)
-            : Math.max(minHeight, textResizeStart.current.height + dy)
-          : textResizeStart.current.height;
+          startsOnLeft || startsOnRight;
+        const changesHeight = startsOnTop || startsOnBottom;
+        const dragDirection = {
+          x: startsOnLeft ? -1 : startsOnRight ? 1 : 0,
+          y: startsOnTop ? -1 : startsOnBottom ? 1 : 0,
+        };
+        const scaleFromWidth = changesWidth
+          ? 1 + (dx * dragDirection.x) / textResizeStart.current.width
+          : 1;
+        const scaleFromHeight = changesHeight
+          ? 1 + (dy * dragDirection.y) / textResizeStart.current.height
+          : 1;
+        const textScale = Math.max(
+          0.05,
+          changesWidth && changesHeight
+            ? Math.max(scaleFromWidth, scaleFromHeight)
+            : changesWidth
+            ? scaleFromWidth
+            : scaleFromHeight
+        );
+        const nextWidth = textResizeStart.current.width * textScale;
+        const nextHeight = textResizeStart.current.height * textScale;
         const nextScreenPoint = {
           x: startsOnLeft
             ? textResizeStart.current.screenPoint.x +
-              (textResizeStart.current.width - nextWidth)
+              textResizeStart.current.width -
+              nextWidth
+            : changesHeight && !changesWidth
+            ? textResizeStart.current.screenPoint.x +
+              (textResizeStart.current.width - nextWidth) / 2
             : textResizeStart.current.screenPoint.x,
           y: startsOnTop
             ? textResizeStart.current.screenPoint.y +
-              (textResizeStart.current.height - nextHeight)
+              textResizeStart.current.height -
+              nextHeight
+            : changesWidth && !changesHeight
+            ? textResizeStart.current.screenPoint.y +
+              (textResizeStart.current.height - nextHeight) / 2
             : textResizeStart.current.screenPoint.y,
         };
+        const nextFontSize = Math.max(
+          1,
+          textResizeStart.current.fontSize * textScale
+        );
+        const boundedTextBox = keepTextBoxInViewport(
+          nextScreenPoint,
+          nextWidth,
+          nextHeight
+        );
 
         setActiveText((prev) =>
           prev
             ? {
                 ...prev,
-                screenPoint: nextScreenPoint,
-              point: {
-                x: (nextScreenPoint.x - offsetRef.current.x) / zoomRef.current,
-                y:
-                  (nextScreenPoint.y -
-                    topBarHeight -
-                    offsetRef.current.y) /
-                  zoomRef.current,
-              },
-              width: nextWidth,
-              height: nextHeight,
-              fontSize: getTextFontSize(nextWidth, nextHeight),
+              ...boundedTextBox,
+              fontSize: nextFontSize,
             }
           : prev
       );
@@ -735,7 +1001,10 @@ export default function Page() {
         kind: "text",
         point: activeText.point,
         value: trimmedValue,
-        color: canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
+        color: activeText.color,
+        runs: activeText.runs,
+        fontFamily: activeText.fontFamily,
+        fontWeight: activeText.fontWeight,
         fontSize: activeText.fontSize,
         width: activeText.width,
         height: activeText.height,
@@ -878,9 +1147,13 @@ export default function Page() {
               topBarHeight,
           },
           value: textElement.value,
+          color: textElement.color,
+          runs: getTextRuns(textElement),
           width: textElement.width,
           height: textElement.height,
           fontSize: textElement.fontSize,
+          fontFamily: textElement.fontFamily,
+          fontWeight: getTextFontWeight(textElement),
           editingIndex: textIndex,
         });
       }
@@ -892,9 +1165,13 @@ export default function Page() {
       point: { x, y },
       screenPoint: { x: e.clientX, y: e.clientY },
       value: "",
+      color: penColor,
+      runs: [],
       width: 48,
       height: 30,
       fontSize: 24,
+      fontFamily: textFontFamily,
+      fontWeight: textFontWeight,
       editingIndex: undefined,
     });
   };
@@ -1045,6 +1322,9 @@ export default function Page() {
           tool,
           start: shapeStart,
           end: finalShapeEnd,
+          width: penWidth,
+          color: penColor,
+          style: strokeStyle,
         },
       ]);
     }
@@ -1249,6 +1529,7 @@ export default function Page() {
                     screenPoint: activeText.screenPoint,
                     width: activeText.width,
                     height: activeText.height,
+                    fontSize: activeText.fontSize,
                     handle,
                   };
                 }}
@@ -1262,6 +1543,7 @@ export default function Page() {
                     screenPoint: activeText.screenPoint,
                     width: activeText.width,
                     height: activeText.height,
+                    fontSize: activeText.fontSize,
                     handle,
                   };
                 }}
@@ -1290,6 +1572,31 @@ export default function Page() {
                 />
               </div>
             ))}
+          <div
+            aria-hidden="true"
+            style={{
+              position: "fixed",
+              top: `${activeText.screenPoint.y}px`,
+              left: `${activeText.screenPoint.x}px`,
+              width: `${activeText.width}px`,
+              height: `${activeText.height}px`,
+              padding:
+                activeText.value.length > 0
+                  ? `${textPaddingY}px ${textPaddingX}px`
+                  : 0,
+              fontSize: `${activeText.fontSize}px`,
+              fontFamily: activeText.fontFamily,
+              fontWeight: activeText.fontWeight,
+              lineHeight: textLineHeight,
+              whiteSpace: "pre",
+              overflow: "hidden",
+              boxSizing: "border-box",
+              pointerEvents: "none",
+              zIndex: 59,
+            }}
+          >
+            {renderTextRuns(activeText.runs)}
+          </div>
           <textarea
             ref={textInputRef}
             autoFocus
@@ -1297,19 +1604,36 @@ export default function Page() {
             value={activeText.value}
             onChange={(e) => {
               const value = e.target.value;
-              const nextSize = activeText
-                ? getTextEditorSize(value, activeText.fontSize)
-                : { width: 48, height: 30 };
-              setActiveText((prev) =>
-                prev
-                  ? {
-                      ...prev,
-                      value,
-                      width: Math.max(prev.width, nextSize.width),
-                      height: Math.max(prev.height, nextSize.height),
-                    }
-                  : prev
-              );
+              const scrollHeight = e.currentTarget.scrollHeight;
+              setActiveText((prev) => {
+                if (!prev) return prev;
+
+                const nextRuns = updateTextRuns(
+                  prev.value,
+                  value,
+                  prev.runs,
+                  penColor,
+                  textFontFamily,
+                  textFontWeight
+                );
+                const nextSize = getTextRunsEditorSize(
+                  nextRuns,
+                  prev.fontSize
+                );
+
+                return {
+                  ...prev,
+                  value,
+                  runs: nextRuns,
+                  fontFamily: textFontFamily,
+                  fontWeight: textFontWeight,
+                  ...keepTextBoxInViewport(
+                    prev.screenPoint,
+                    Math.max(prev.width, nextSize.width),
+                    Math.max(prev.height, nextSize.height, scrollHeight)
+                  ),
+                };
+              });
             }}
             onMouseUp={(e) => {
               const target = e.currentTarget;
@@ -1317,8 +1641,11 @@ export default function Page() {
                 prev
                   ? {
                       ...prev,
-                      width: target.offsetWidth,
-                      height: target.offsetHeight,
+                      ...keepTextBoxInViewport(
+                        prev.screenPoint,
+                        target.offsetWidth,
+                        target.offsetHeight
+                      ),
                     }
                   : prev
               );
@@ -1342,19 +1669,18 @@ export default function Page() {
               height: `${activeText.height}px`,
               minWidth: activeText.value.length > 0 ? "48px" : "2px",
               minHeight: activeText.value.length > 0 ? "30px" : "24px",
-              padding: activeText.value.length > 0 ? "2px 4px" : 0,
+              padding: activeText.value.length > 0 ? `${textPaddingY}px ${textPaddingX}px` : 0,
               border: "none",
               borderRadius: "2px",
               outline: "none",
               background: "transparent",
               boxShadow: "none",
-              color:
-                canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
-              caretColor:
-                canvasBackground === darkCanvasColor ? "#f9fafb" : "#000000",
+              color: "transparent",
+              caretColor: penColor,
               fontSize: `${activeText.fontSize}px`,
-              fontFamily: "Arial, sans-serif",
-              lineHeight: 1.25,
+              fontFamily: activeText.fontFamily,
+              fontWeight: activeText.fontWeight,
+              lineHeight: textLineHeight,
               whiteSpace: "pre",
               resize: "none",
               overflow: "hidden",
@@ -1753,6 +2079,63 @@ export default function Page() {
                     </button>
                   )
                 )}
+              </div>
+
+              <div
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  justifyContent: "flex-start",
+                  gap: "4px",
+                  paddingTop: "6px",
+                  borderTop: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                {textFonts.map((font) => (
+                  <button
+                    key={font.name}
+                    aria-label={`${font.name} writing style`}
+                    onClick={() => {
+                      setTextFontFamily(font.family);
+                      setTextFontWeight(font.weight);
+                      setActiveText((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              fontFamily: font.family,
+                              fontWeight: font.weight,
+                            }
+                          : prev
+                      );
+                    }}
+                    style={{
+                      width: "34px",
+                      height: "28px",
+                      borderRadius: "7px",
+                      border:
+                        textFontFamily === font.family &&
+                        textFontWeight === font.weight
+                          ? "2px solid #7c3aed"
+                          : `1px solid ${panelBorderColor}`,
+                      background:
+                        textFontFamily === font.family &&
+                        textFontWeight === font.weight
+                          ? selectedControlBackground
+                          : controlBackground,
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                      fontFamily: font.family,
+                      fontSize: "14px",
+                      fontWeight: font.weight,
+                      lineHeight: 1,
+                    }}
+                  >
+                    {font.preview}
+                  </button>
+                ))}
               </div>
             </div>
           )}
