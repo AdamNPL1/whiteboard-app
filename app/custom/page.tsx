@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Pen,
   Eraser,
@@ -11,10 +11,23 @@ import {
   Minus,
   MousePointer2,
   Type,
+  AlignCenter,
+  AlignLeft,
+  AlignRight,
   ArrowRight,
-  Moon,
-  Sun,
-  SunDim,
+  Bold,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Italic,
+  List,
+  ListOrdered,
+  Lock,
+  Mail,
+  Settings,
+  Underline,
+  Upload,
+  X,
 } from "lucide-react";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
@@ -38,11 +51,15 @@ type Shape = {
   style: StrokeStyle;
 };
 type StrokeStyle = "solid" | "dashed" | "dotted";
+type TextAlign = "left" | "center" | "right";
 type TextRun = {
   text: string;
   color: string;
   fontFamily: string;
   fontWeight: number;
+  fontSize: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
 };
 
 type TextElement = {
@@ -54,6 +71,9 @@ type TextElement = {
   fontFamily: string;
   fontWeight: number;
   fontSize: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
+  textAlign: TextAlign;
   width: number;
   height: number;
   backgroundColor?: string;
@@ -70,6 +90,10 @@ type ActiveText = {
   fontSize: number;
   fontFamily: string;
   fontWeight: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
+  typingFontSize: number;
+  textAlign: TextAlign;
   backgroundColor?: string;
   editingIndex?: number;
 };
@@ -87,13 +111,23 @@ type SelectionMenu = {
   x: number;
   y: number;
 };
+type TextSelection = {
+  start: number;
+  end: number;
+};
+type SettingsSection = "background" | "tools" | "account";
+type GridMode = "none" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
+type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
 
 export default function Page() {
   const topBarHeight = 48;
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
   const darkCanvasColor = "#111111";
+  const floralCanvasBackground = "floral";
+  const floralBackgroundImage = "/floral-background.png";
+  const floralBackgroundTile = { width: 1600, height: 900 };
   const penColors = [
     { name: "black", value: "#000000" },
     { name: "white", value: "#ffffff" },
@@ -108,6 +142,30 @@ export default function Page() {
     { name: "green", value: "#4ade80" },
     { name: "red", value: "#fb7185" },
     { name: "red", value: "#ef4444" },
+  ];
+  const textColorPalette = [
+    { name: "White", value: "#ffffff" },
+    { name: "Off white", value: "#f8fafc" },
+    { name: "Light grey", value: "#d1d5db" },
+    { name: "Grey", value: "#6b7280" },
+    { name: "Black", value: "#111827" },
+    { name: "Rose", value: "#e7b8bf" },
+    { name: "Peach", value: "#edc99f" },
+    { name: "Cream", value: "#f2dda3" },
+    { name: "Mint", value: "#b9dfc0" },
+    { name: "Blue", value: "#7da6f2" },
+    { name: "Lavender", value: "#c4b5fd" },
+    { name: "Pink", value: "#e09aa3" },
+    { name: "Orange", value: "#edbd87" },
+    { name: "Yellow", value: "#efd37f" },
+    { name: "Green", value: "#9ccfa7" },
+    { name: "Purple", value: "#a78bfa" },
+    { name: "Red", value: "#c7332f" },
+    { name: "Brown", value: "#b26025" },
+    { name: "Ochre", value: "#c6922f" },
+    { name: "Dark green", value: "#57965d" },
+    { name: "Indigo", value: "#4f7cff" },
+    { name: "Violet", value: "#5525dd" },
   ];
   const textFonts = [
     {
@@ -126,16 +184,18 @@ export default function Page() {
     { name: "Clean", family: "Arial, sans-serif", weight: 400, preview: "Aa" },
   ];
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const fileUploadRef = useRef<HTMLInputElement | null>(null);
+  const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
+  const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [tool, setTool] = useState<
     "cursor" | "text" | "textbox" | StrokeTool | ShapeTool
   >("pen");
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
-  const [showTextMenu, setShowTextMenu] = useState(false);
+  const [, setShowTextMenu] = useState(false);
+  const textBoxOpacity = 0.75;
   const [showEraserMenu, setShowEraserMenu] = useState(false);
-  const lastPos = useRef<Point | null>(null);
-  const lastMid = useRef<Point | null>(null);
   const [shapeStart, setShapeStart] = useState<Point | null>(null);
   const [snapshot, setSnapshot] = useState<ImageData | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -147,11 +207,39 @@ export default function Page() {
   const [textFontFamily, setTextFontFamily] = useState(textFonts[0].family);
   const [textFontWeight, setTextFontWeight] = useState(textFonts[0].weight);
   const [canvasBackground, setCanvasBackground] = useState(lightCanvasColor);
+  const [customCanvasBackground, setCustomCanvasBackground] =
+    useState("#131619");
+  const [gridMode, setGridMode] = useState<GridMode>("none");
+  const [gridOpacity, setGridOpacity] = useState(24);
   const [activeText, setActiveText] = useState<ActiveText | null>(null);
+  const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
+  const [showTextFormatMenu, setShowTextFormatMenu] = useState(false);
+  const [showTextColorMenu, setShowTextColorMenu] = useState(false);
+  const [showTextAlignMenu, setShowTextAlignMenu] = useState(false);
+  const [showTextListMenu, setShowTextListMenu] = useState(false);
+  const [showTextBoxOpacityMenu, setShowTextBoxOpacityMenu] = useState(false);
+  const [textColorBase, setTextColorBase] = useState("#000000");
+  const [textColorOpacity, setTextColorOpacity] = useState(1);
+  const [textSelection, setTextSelection] = useState<TextSelection>({
+    start: 0,
+    end: 0,
+  });
   const [isPanning, setIsPanning] = useState(false);
+  const [penCursorPoint, setPenCursorPoint] = useState<Point | null>(null);
+  const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [activeSettingsSection, setActiveSettingsSection] =
+    useState<SettingsSection>("background");
+  const [isRegisterHovered, setIsRegisterHovered] = useState(false);
+  const [isFloralBackgroundLoaded, setIsFloralBackgroundLoaded] =
+    useState(false);
+  const [panningCursorPoint, setPanningCursorPoint] = useState<Point | null>(
+    null
+  );
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenu | null>(null);
+  const [textSizeMenu, setTextSizeMenu] = useState<SelectionMenu | null>(null);
   const shapeEnd = useRef<Point | null>(null);
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
   const offsetRef = useRef<Point>({ x: 0, y: 0 });
@@ -172,6 +260,7 @@ export default function Page() {
     width: number;
     height: number;
     fontSize: number;
+    runs: TextRun[];
     handle: TextResizeHandle;
   } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
@@ -179,27 +268,51 @@ export default function Page() {
   const [elements, setElements] = useState<CanvasElement[]>([]);
 
   const currentStroke = useRef<Stroke | null>(null);
+  const latestRedrawCanvasRef = useRef<() => void>(() => {});
+  const pendingRedrawFrame = useRef<number | null>(null);
+  const keepTextBoxInViewportRef = useRef(
+    (screenPoint: Point, width: number, height: number) => ({
+      screenPoint,
+      point: screenPoint,
+      width,
+      height,
+    })
+  );
   const activeTextScreenX = activeText?.screenPoint.x;
   const activeTextScreenY = activeText?.screenPoint.y;
   const textPaddingX = 4;
   const textPaddingY = 2;
   const textLineHeight = 1.25;
   const textBoxSize = 200;
-  const textBoxBackground = "#2f2f2f";
   const textBoxTextColor = "#ffffff";
+  const textEditorTypography = {
+    letterSpacing: "0",
+    wordSpacing: "0",
+    textTransform: "none",
+    fontVariantLigatures: "none",
+    fontKerning: "none",
+    tabSize: 4,
+  } as const;
 
   const getTextRuns = (
-    text: Pick<TextElement, "value" | "color" | "fontFamily"> & {
+    text: Pick<TextElement, "value" | "color" | "fontFamily" | "fontSize"> & {
       fontWeight?: number;
+      fontStyle?: "normal" | "italic";
+      underline?: boolean;
       runs?: TextRun[];
     }
-  ) =>
-    text.runs?.length
+  ) => {
+    const fallbackFontSize = clampTextFontSize(text.fontSize);
+
+    return text.runs?.length
       ? text.runs.map((run) => ({
           text: run.text,
           color: run.color,
           fontFamily: run.fontFamily ?? text.fontFamily,
           fontWeight: run.fontWeight ?? getTextFontWeight(text),
+          fontSize: clampTextFontSize(run.fontSize, fallbackFontSize),
+          fontStyle: run.fontStyle ?? text.fontStyle ?? "normal",
+          underline: run.underline ?? text.underline ?? false,
         }))
       : [
           {
@@ -207,10 +320,363 @@ export default function Page() {
             color: text.color,
             fontFamily: text.fontFamily,
             fontWeight: getTextFontWeight(text),
+            fontSize: fallbackFontSize,
+            fontStyle: text.fontStyle ?? "normal",
+            underline: text.underline ?? false,
           },
         ];
+  };
   const getTextFontWeight = (text: { fontWeight?: number }) =>
     text.fontWeight ?? 400;
+
+  const clampTextFontSize = (fontSize: number, fallback = 24) => {
+    const nextFontSize = Number.isFinite(fontSize)
+      ? fontSize
+      : Number.isFinite(fallback)
+      ? fallback
+      : 24;
+    return Math.min(100, Math.max(1, Math.round(nextFontSize)));
+  };
+
+  const componentToHex = (component: number) =>
+    component.toString(16).padStart(2, "0");
+
+  const parseCssColor = (color: string) => {
+    if (color.startsWith("#")) {
+      if (color.length === 4) {
+        return {
+          hex: `#${color[1]}${color[1]}${color[2]}${color[2]}${color[3]}${color[3]}`,
+          opacity: 1,
+        };
+      }
+
+      return { hex: color.slice(0, 7), opacity: 1 };
+    }
+
+    const match = color.match(
+      /rgba?\((\d+),\s*(\d+),\s*(\d+)(?:,\s*([.\d]+))?\)/
+    );
+
+    if (!match) {
+      return { hex: "#000000", opacity: 1 };
+    }
+
+    return {
+      hex: `#${componentToHex(Number(match[1]))}${componentToHex(
+        Number(match[2])
+      )}${componentToHex(Number(match[3]))}`,
+      opacity: match[4] === undefined ? 1 : Number(match[4]),
+    };
+  };
+
+  const getTextColorWithOpacity = (hex: string, opacity: number) => {
+    const normalizedOpacity = Math.min(1, Math.max(0.1, opacity));
+    if (normalizedOpacity >= 0.99) return hex;
+
+    const red = parseInt(hex.slice(1, 3), 16);
+    const green = parseInt(hex.slice(3, 5), 16);
+    const blue = parseInt(hex.slice(5, 7), 16);
+
+    return `rgba(${red}, ${green}, ${blue}, ${normalizedOpacity.toFixed(2)})`;
+  };
+
+  const syncTextColorControls = (color: string) => {
+    const parsedColor = parseCssColor(color);
+    setTextColorBase(parsedColor.hex);
+    setTextColorOpacity(parsedColor.opacity);
+  };
+
+  const applyTextFont = (fontFamily: string, fontWeight: number) => {
+    setTextFontFamily(fontFamily);
+    setTextFontWeight(fontWeight);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) =>
+      prev ? { ...prev, fontFamily, fontWeight } : prev
+    );
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextFormat = (
+    format: "bold" | "italic" | "underline"
+  ) => {
+    setShowTextFormatMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) => {
+      if (!prev) return prev;
+
+      if (format === "bold") {
+        return {
+          ...prev,
+          fontWeight: prev.fontWeight >= 700 ? 400 : 700,
+        };
+      }
+
+      if (format === "italic") {
+        return {
+          ...prev,
+          fontStyle: prev.fontStyle === "italic" ? "normal" : "italic",
+        };
+      }
+
+      return {
+        ...prev,
+        underline: !prev.underline,
+      };
+    });
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextAlign = (textAlign: TextAlign) => {
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) => (prev ? { ...prev, textAlign } : prev));
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const getListPrefixMatch = (line: string) =>
+    line.match(/^(\s*)(?:(•)\s+|(\d+)\.\s+)(.*)$/);
+
+  const applyTextList = (listStyle: "bullet" | "numbered") => {
+    const target = textInputRef.current;
+    setShowTextListMenu(false);
+
+    setActiveText((prev) => {
+      if (!prev || !target) return prev;
+
+      const selectionStart = target.selectionStart ?? prev.value.length;
+      const selectionEnd = target.selectionEnd ?? selectionStart;
+      const lineStart = prev.value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+      const nextBreak = prev.value.indexOf("\n", selectionEnd);
+      const lineEnd = nextBreak === -1 ? prev.value.length : nextBreak;
+      const selectedText = prev.value.slice(lineStart, lineEnd);
+      const lines = selectedText.split("\n");
+      const shouldRemove =
+        lines.length > 0 &&
+        lines.every((line) => {
+          const match = getListPrefixMatch(line);
+          return Boolean(listStyle === "bullet" ? match?.[2] : match?.[3]);
+        });
+      const nextLines = lines.map((line, index) => {
+        const match = getListPrefixMatch(line);
+        const indent = match?.[1] ?? "";
+        const content = match ? match[4] : line.trimStart();
+
+        if (shouldRemove) {
+          return `${indent}${content}`;
+        }
+
+        return listStyle === "bullet"
+          ? `${indent}• ${content}`
+          : `${indent}${index + 1}. ${content}`;
+      });
+      const nextValue = `${prev.value.slice(0, lineStart)}${nextLines.join(
+        "\n"
+      )}${prev.value.slice(lineEnd)}`;
+      const nextRuns = updateTextRuns(
+        prev.value,
+        nextValue,
+        prev.runs,
+        prev.color,
+        prev.fontFamily,
+        prev.fontWeight,
+        clampTextFontSize(prev.typingFontSize),
+        prev.fontStyle,
+        prev.underline
+      );
+      const nextSize = getTextRunsEditorSize(
+        nextRuns,
+        clampTextFontSize(prev.fontSize)
+      );
+
+      window.setTimeout(() => {
+        textInputRef.current?.focus();
+        textInputRef.current?.setSelectionRange(lineStart, lineStart);
+        syncTextSelection(textInputRef.current);
+      }, 0);
+
+      return {
+        ...prev,
+        value: nextValue,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
+  };
+
+  const continueTextList = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+      return false;
+    }
+
+    if (!activeText) return false;
+
+    const target = e.currentTarget;
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+    if (selectionStart !== selectionEnd) return false;
+
+    const lineStart = activeText.value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const currentLine = activeText.value.slice(lineStart, selectionStart);
+    const match = getListPrefixMatch(currentLine);
+    if (!match) return false;
+
+    e.preventDefault();
+    const content = match[4];
+    const replacement =
+      content.length === 0
+        ? "\n"
+        : match[2]
+        ? `\n${match[1]}• `
+        : `\n${match[1]}${Number(match[3]) + 1}. `;
+    const removeEmptyPrefixLength = content.length === 0 ? currentLine.length : 0;
+    const nextValue = `${activeText.value.slice(
+      0,
+      selectionStart - removeEmptyPrefixLength
+    )}${replacement}${activeText.value.slice(selectionEnd)}`;
+    const nextCursor =
+      selectionStart - removeEmptyPrefixLength + replacement.length;
+
+    setActiveText((prev) => {
+      if (!prev) return prev;
+
+      const nextRuns = updateTextRuns(
+        prev.value,
+        nextValue,
+        prev.runs,
+        prev.color,
+        prev.fontFamily,
+        prev.fontWeight,
+        clampTextFontSize(prev.typingFontSize),
+        prev.fontStyle,
+        prev.underline
+      );
+      const nextSize = getTextRunsEditorSize(
+        nextRuns,
+        clampTextFontSize(prev.fontSize)
+      );
+
+      return {
+        ...prev,
+        value: nextValue,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
+
+    window.setTimeout(() => {
+      textInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+      syncTextSelection(textInputRef.current);
+    }, 0);
+    return true;
+  };
+
+  const applyTextColor = (baseColor: string, opacity = textColorOpacity) => {
+    const nextColor = getTextColorWithOpacity(baseColor, opacity);
+
+    setPenColor(nextColor);
+    setTextColorBase(baseColor);
+    setTextColorOpacity(opacity);
+    setShowTextColorMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextAlignMenu(false);
+    setActiveText((prev) => (prev ? { ...prev, color: nextColor } : prev));
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextColorOpacity = (opacity: number) => {
+    applyTextColor(textColorBase, opacity);
+  };
+
+  const getTextBoxBackgroundWithOpacity = (opacity: number) => {
+    const normalizedOpacity = Math.min(1, Math.max(0.1, opacity));
+    return `rgba(47, 47, 47, ${normalizedOpacity.toFixed(2)})`;
+  };
+
+  const applyTextBoxOpacity = (opacity: number) => {
+    setActiveText((prev) =>
+      prev?.backgroundColor
+        ? {
+            ...prev,
+            backgroundColor: getTextBoxBackgroundWithOpacity(opacity),
+          }
+        : prev
+    );
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextSize = (fontSize: number) => {
+    if (!Number.isFinite(fontSize)) return;
+
+    const nextFontSize = clampTextFontSize(fontSize);
+    setActiveText((prev) =>
+      prev
+        ? {
+            ...prev,
+            fontSize: prev.value.length === 0 ? nextFontSize : prev.fontSize,
+            typingFontSize: nextFontSize,
+          }
+        : prev
+    );
+  };
+
+  const runsHaveSameStyle = (first: TextRun, second: TextRun) =>
+    first.color === second.color &&
+    first.fontFamily === second.fontFamily &&
+    first.fontWeight === second.fontWeight &&
+    first.fontSize === second.fontSize &&
+    first.fontStyle === second.fontStyle &&
+    first.underline === second.underline;
+
+  const compactTextRuns = (runs: TextRun[]) =>
+    runs.reduce<TextRun[]>((nextRuns, run) => {
+      if (!run.text) return nextRuns;
+
+      const previousRun = nextRuns[nextRuns.length - 1];
+      if (previousRun && runsHaveSameStyle(previousRun, run)) {
+        nextRuns[nextRuns.length - 1] = {
+          ...previousRun,
+          text: previousRun.text + run.text,
+        };
+        return nextRuns;
+      }
+
+      nextRuns.push(run);
+      return nextRuns;
+    }, []);
+
+  const sliceTextRuns = (runs: TextRun[], start: number, end: number) => {
+    const nextRuns: TextRun[] = [];
+    let position = 0;
+
+    for (const run of runs) {
+      const runStart = position;
+      const runEnd = position + run.text.length;
+      const sliceStart = Math.max(start, runStart);
+      const sliceEnd = Math.min(end, runEnd);
+
+      if (sliceStart < sliceEnd) {
+        nextRuns.push({
+          ...run,
+          text: run.text.slice(sliceStart - runStart, sliceEnd - runStart),
+        });
+      }
+
+      position = runEnd;
+      if (position >= end) break;
+    }
+
+    return nextRuns;
+  };
 
   const updateTextRuns = (
     previousValue: string,
@@ -218,124 +684,185 @@ export default function Page() {
     runs: TextRun[],
     nextColor: string,
     nextFontFamily: string,
-    nextFontWeight: number
+    nextFontWeight: number,
+    nextFontSize: number,
+    nextFontStyle: "normal" | "italic",
+    nextUnderline: boolean
   ) => {
+    const normalizedFontSize = clampTextFontSize(nextFontSize);
+
     if (nextValue === previousValue) return runs;
 
-    if (nextValue.startsWith(previousValue)) {
-      const insertedText = nextValue.slice(previousValue.length);
-      const lastRun = runs[runs.length - 1];
-
-      if (
-        lastRun?.color === nextColor &&
-        lastRun.fontFamily === nextFontFamily &&
-        lastRun.fontWeight === nextFontWeight
-      ) {
-        return [
-          ...runs.slice(0, -1),
-          { ...lastRun, text: lastRun.text + insertedText },
-        ];
-      }
-
-      return [
-        ...runs,
-        {
-          text: insertedText,
-          color: nextColor,
-          fontFamily: nextFontFamily,
-          fontWeight: nextFontWeight,
-        },
-      ];
+    let prefixLength = 0;
+    while (
+      prefixLength < previousValue.length &&
+      prefixLength < nextValue.length &&
+      previousValue[prefixLength] === nextValue[prefixLength]
+    ) {
+      prefixLength += 1;
     }
 
-    if (previousValue.startsWith(nextValue)) {
-      let remainingLength = nextValue.length;
-      const nextRuns: TextRun[] = [];
-
-      for (const run of runs) {
-        if (remainingLength <= 0) break;
-
-        const text = run.text.slice(0, remainingLength);
-        if (text) {
-          nextRuns.push({ ...run, text });
-        }
-        remainingLength -= run.text.length;
-      }
-
-      return nextRuns;
+    let suffixLength = 0;
+    while (
+      suffixLength < previousValue.length - prefixLength &&
+      suffixLength < nextValue.length - prefixLength &&
+      previousValue[previousValue.length - 1 - suffixLength] ===
+        nextValue[nextValue.length - 1 - suffixLength]
+    ) {
+      suffixLength += 1;
     }
 
-    return nextValue
+    const insertedText = nextValue.slice(
+      prefixLength,
+      nextValue.length - suffixLength
+    );
+    const beforeRuns = sliceTextRuns(runs, 0, prefixLength);
+    const afterRuns = sliceTextRuns(
+      runs,
+      previousValue.length - suffixLength,
+      previousValue.length
+    );
+    const insertedRuns = insertedText
       ? [
           {
-            text: nextValue,
+            text: insertedText,
             color: nextColor,
             fontFamily: nextFontFamily,
             fontWeight: nextFontWeight,
+            fontSize: normalizedFontSize,
+            fontStyle: nextFontStyle,
+            underline: nextUnderline,
           },
         ]
       : [];
+
+    return compactTextRuns([...beforeRuns, ...insertedRuns, ...afterRuns]);
   };
 
-  const renderTextRuns = (runs: TextRun[]) =>
-    runs.map((run, index) => (
-      <span
-        key={index}
-        style={{
-          color: run.color,
-          fontFamily: run.fontFamily,
-          fontWeight: run.fontWeight,
-        }}
-      >
-        {run.text}
-      </span>
-    ));
+  const renderInlineTextCaret = (color: string, key: string) => (
+    <span
+      key={key}
+      aria-hidden="true"
+      style={{
+        display: "inline-block",
+        width: "1px",
+        height: `${textLineHeight}em`,
+        margin: 0,
+        padding: 0,
+        background: color,
+        verticalAlign: `${(1 - textLineHeight) / 2}em`,
+        pointerEvents: "none",
+      }}
+    />
+  );
 
-  const getTextEditorSize = (
-    value: string,
-    fontSize: number,
-    fontFamily: string,
-    fontWeight: number
+  const renderTextRuns = (
+    runs: readonly TextRun[],
+    caretIndex?: number,
+    caretColor = penColor
   ) => {
-    const measuringCanvas = document.createElement("canvas");
-    const measuringContext = measuringCanvas.getContext("2d");
-    const lineHeight = fontSize * textLineHeight;
-    const lines = value.split("\n");
+    const renderedRuns: ReactNode[] = [];
+    let position = 0;
+    let insertedCaret = false;
 
-    if (measuringContext) {
-      measuringContext.font = `${fontWeight} ${fontSize}px ${fontFamily}`;
+    const getRunStyle = (run: TextRun) => ({
+      color: run.color,
+      fontFamily: run.fontFamily,
+      fontWeight: run.fontWeight,
+      fontSize: `${clampTextFontSize(run.fontSize)}px`,
+      fontStyle: run.fontStyle,
+      textDecoration: run.underline ? "underline" : "none",
+      ...textEditorTypography,
+    });
+
+    runs.forEach((run, index) => {
+      const runEnd = position + run.text.length;
+      const shouldPlaceCaret =
+        caretIndex !== undefined &&
+        !insertedCaret &&
+        caretIndex >= position &&
+        caretIndex <= runEnd;
+
+      if (shouldPlaceCaret) {
+        const caretOffset = caretIndex - position;
+        const beforeText = run.text.slice(0, caretOffset);
+        const afterText = run.text.slice(caretOffset);
+
+        if (beforeText) {
+          renderedRuns.push(
+            <span key={`${index}-before`} style={getRunStyle(run)}>
+              {beforeText}
+            </span>
+          );
+        }
+
+        renderedRuns.push(renderInlineTextCaret(caretColor, `${index}-caret`));
+        insertedCaret = true;
+
+        if (afterText) {
+          renderedRuns.push(
+            <span key={`${index}-after`} style={getRunStyle(run)}>
+              {afterText}
+            </span>
+          );
+        }
+      } else {
+        renderedRuns.push(
+          <span key={index} style={getRunStyle(run)}>
+            {run.text}
+          </span>
+        );
+      }
+
+      position = runEnd;
+    });
+
+    if (caretIndex !== undefined && !insertedCaret) {
+      renderedRuns.push(renderInlineTextCaret(caretColor, "end-caret"));
     }
 
-    const longestLineWidth = Math.max(
-      ...lines.map((line) =>
-        measuringContext ? measuringContext.measureText(line || " ").width : 0
-      )
-    );
+    return renderedRuns;
+  };
 
-    return {
-      width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2),
-      height: Math.max(30, Math.ceil(lines.length * lineHeight) + textPaddingY * 2),
-    };
+  const keepTextInputAligned = (target: HTMLTextAreaElement | null) => {
+    if (!target) return;
+
+    target.scrollLeft = 0;
+    target.scrollTop = 0;
+  };
+
+  const syncTextSelection = (target: HTMLTextAreaElement | null) => {
+    if (!target) return;
+
+    setTextSelection({
+      start: target.selectionStart ?? target.value.length,
+      end: target.selectionEnd ?? target.selectionStart ?? target.value.length,
+    });
   };
 
   const getTextRunsEditorSize = (runs: TextRun[], fontSize: number) => {
     const measuringCanvas = document.createElement("canvas");
     const measuringContext = measuringCanvas.getContext("2d");
-    const lineHeight = fontSize * textLineHeight;
     let currentLineWidth = 0;
     let longestLineWidth = 0;
-    let lineCount = 1;
+    let currentLineHeight = fontSize * textLineHeight;
+    let totalHeight = 0;
 
     for (const run of runs) {
+      const runFontSize = clampTextFontSize(run.fontSize, fontSize);
+      const runLineHeight = runFontSize * textLineHeight;
+      currentLineHeight = Math.max(currentLineHeight, runLineHeight);
+
       if (measuringContext) {
-        measuringContext.font = `${run.fontWeight} ${fontSize}px ${run.fontFamily}`;
+        measuringContext.font = `${run.fontStyle} ${run.fontWeight} ${runFontSize}px ${run.fontFamily}`;
       }
 
       for (const character of run.text) {
         if (character === "\n") {
           longestLineWidth = Math.max(longestLineWidth, currentLineWidth);
+          totalHeight += currentLineHeight;
           currentLineWidth = 0;
-          lineCount += 1;
+          currentLineHeight = fontSize * textLineHeight;
           continue;
         }
 
@@ -346,18 +873,42 @@ export default function Page() {
     }
 
     longestLineWidth = Math.max(longestLineWidth, currentLineWidth);
+    totalHeight += currentLineHeight;
 
     return {
       width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2),
-      height: Math.max(30, Math.ceil(lineCount * lineHeight) + textPaddingY * 2),
+      height: Math.max(30, Math.ceil(totalHeight) + textPaddingY * 2),
     };
+  };
+
+  const getTextRunsContentHeight = (
+    runs: readonly TextRun[],
+    fallbackFontSize: number
+  ) => {
+    let currentLineHeight = fallbackFontSize * textLineHeight;
+    let totalHeight = 0;
+
+    for (const run of runs) {
+      const runLineHeight =
+        clampTextFontSize(run.fontSize, fallbackFontSize) * textLineHeight;
+      currentLineHeight = Math.max(currentLineHeight, runLineHeight);
+
+      for (const character of run.text) {
+        if (character === "\n") {
+          totalHeight += currentLineHeight;
+          currentLineHeight = fallbackFontSize * textLineHeight;
+        }
+      }
+    }
+
+    return totalHeight + currentLineHeight;
   };
 
   const drawTextElement = (
     ctx: CanvasRenderingContext2D,
     text: TextElement
   ) => {
-    const lineHeight = text.fontSize * textLineHeight;
+    const baseFontSize = clampTextFontSize(text.fontSize);
 
     ctx.save();
     if (text.backgroundColor) {
@@ -368,72 +919,117 @@ export default function Page() {
     ctx.beginPath();
     ctx.rect(text.point.x, text.point.y, text.width, text.height);
     ctx.clip();
-    ctx.font = `${getTextFontWeight(text)} ${text.fontSize}px ${text.fontFamily}`;
+    ctx.font = `${text.fontStyle ?? "normal"} ${getTextFontWeight(text)} ${baseFontSize}px ${text.fontFamily}`;
     ctx.textBaseline = "top";
     ctx.setLineDash([]);
 
-    if (text.backgroundColor) {
-      const lines: TextRun[][] = [[]];
+    const lines: TextRun[][] = [[]];
 
-      for (const run of getTextRuns(text)) {
-        const parts = run.text.split("\n");
+    for (const run of getTextRuns(text)) {
+      const parts = run.text.split("\n");
 
-        parts.forEach((part, index) => {
-          if (index > 0) {
-            lines.push([]);
-          }
+      parts.forEach((part, index) => {
+        if (index > 0) {
+          lines.push([]);
+        }
 
-          if (part) {
-            lines[lines.length - 1].push({ ...run, text: part });
-          }
-        });
+        if (part) {
+          lines[lines.length - 1].push({ ...run, text: part });
+        }
+      });
+    }
+
+    const lineHeights = lines.map((line) =>
+      Math.max(
+        baseFontSize * textLineHeight,
+        ...line.map((run) => run.fontSize * textLineHeight)
+      )
+    );
+    const lineWidths = lines.map((line) =>
+      line.reduce((width, run) => {
+        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+        return width + ctx.measureText(run.text).width;
+      }, 0)
+    );
+    const textAlign = text.textAlign ?? (text.backgroundColor ? "center" : "left");
+    const getAlignedLineX = (lineWidth: number) => {
+      if (textAlign === "center") {
+        return text.point.x + Math.max(0, (text.width - lineWidth) / 2);
       }
 
-      const lineWidths = lines.map((line) =>
-        line.reduce((width, run) => {
-          ctx.font = `${run.fontWeight} ${text.fontSize}px ${run.fontFamily}`;
-          return width + ctx.measureText(run.text).width;
-        }, 0)
-      );
+      if (textAlign === "right") {
+        return text.point.x + Math.max(textPaddingX, text.width - lineWidth - textPaddingX);
+      }
+
+      return text.point.x + textPaddingX;
+    };
+
+    if (text.backgroundColor) {
+      const totalLineHeight = lineHeights.reduce((sum, height) => sum + height, 0);
       let currentY =
-        text.point.y + Math.max(0, (text.height - lines.length * lineHeight) / 2);
+        text.point.y + Math.max(0, (text.height - totalLineHeight) / 2);
 
       lines.forEach((line, lineIndex) => {
-        let currentX =
-          text.point.x + Math.max(0, (text.width - lineWidths[lineIndex]) / 2);
+        let currentX = getAlignedLineX(lineWidths[lineIndex]);
 
         line.forEach((run) => {
+          const textWidth = (() => {
+            ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+            return ctx.measureText(run.text).width;
+          })();
+
           ctx.fillStyle = run.color;
-          ctx.font = `${run.fontWeight} ${text.fontSize}px ${run.fontFamily}`;
+          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
           ctx.fillText(run.text, currentX, currentY);
-          currentX += ctx.measureText(run.text).width;
+          if (run.underline) {
+            ctx.save();
+            ctx.strokeStyle = run.color;
+            ctx.lineWidth = Math.max(1, run.fontSize / 14);
+            ctx.beginPath();
+            ctx.moveTo(currentX, currentY + run.fontSize * 0.96);
+            ctx.lineTo(currentX + textWidth, currentY + run.fontSize * 0.96);
+            ctx.stroke();
+            ctx.restore();
+          }
+          currentX += textWidth;
         });
 
-        currentY += lineHeight;
+        currentY += lineHeights[lineIndex];
       });
 
       ctx.restore();
       return;
     }
 
-    let currentX = text.point.x + textPaddingX;
     let currentY = text.point.y + textPaddingY;
 
-    for (const run of getTextRuns(text)) {
-      ctx.fillStyle = run.color;
-      ctx.font = `${run.fontWeight} ${text.fontSize}px ${run.fontFamily}`;
+    lines.forEach((line, lineIndex) => {
+      let currentX = getAlignedLineX(lineWidths[lineIndex]);
 
-      for (const character of run.text) {
-        if (character === "\n") {
-          currentX = text.point.x + textPaddingX;
-          currentY += lineHeight;
-          continue;
+      line.forEach((run) => {
+        const textWidth = (() => {
+          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+          return ctx.measureText(run.text).width;
+        })();
+
+        ctx.fillStyle = run.color;
+        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+        ctx.fillText(run.text, currentX, currentY);
+        if (run.underline) {
+          ctx.save();
+          ctx.strokeStyle = run.color;
+          ctx.lineWidth = Math.max(1, run.fontSize / 14);
+          ctx.beginPath();
+          ctx.moveTo(currentX, currentY + run.fontSize * 0.96);
+          ctx.lineTo(currentX + textWidth, currentY + run.fontSize * 0.96);
+          ctx.stroke();
+          ctx.restore();
         }
+        currentX += textWidth;
+      });
 
-        ctx.fillText(character, currentX, currentY);
-        currentX += ctx.measureText(character).width;
-      }
-    }
+      currentY += lineHeights[lineIndex];
+    });
 
     ctx.restore();
   };
@@ -468,6 +1064,9 @@ export default function Page() {
       height: nextHeight,
     };
   };
+  useEffect(() => {
+    keepTextBoxInViewportRef.current = keepTextBoxInViewport;
+  });
 
   const getTextBounds = (text: TextElement): Bounds => ({
     x: text.point.x,
@@ -490,6 +1089,57 @@ export default function Page() {
 
   const getStrokeLineCap = (style: StrokeStyle | undefined) =>
     style === "dashed" ? "butt" : "round";
+
+  const drawStrokePath = (
+    ctx: CanvasRenderingContext2D,
+    points: Point[],
+    width: number,
+    style?: StrokeStyle
+  ) => {
+    if (!points.length) return;
+
+    ctx.lineCap = getStrokeLineCap(style);
+    ctx.lineJoin = "round";
+    ctx.lineWidth = width;
+    ctx.setLineDash(getStrokeDashPattern(style, width));
+
+    if (points.length === 1) {
+      const point = points[0];
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, width / 2, 0, Math.PI * 2);
+      ctx.fill();
+      return;
+    }
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+
+    if (points.length === 2) {
+      ctx.lineTo(points[1].x, points[1].y);
+      ctx.stroke();
+      return;
+    }
+
+    const tension = 0.18;
+
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i - 1] ?? points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] ?? p2;
+
+      ctx.bezierCurveTo(
+        p1.x + (p2.x - p0.x) * tension,
+        p1.y + (p2.y - p0.y) * tension,
+        p2.x - (p3.x - p1.x) * tension,
+        p2.y - (p3.y - p1.y) * tension,
+        p2.x,
+        p2.y
+      );
+    }
+
+    ctx.stroke();
+  };
 
   const drawShape = (
     ctx: CanvasRenderingContext2D,
@@ -683,6 +1333,81 @@ export default function Page() {
     ctx.restore();
   };
 
+  const isFloralCanvas = canvasBackground === floralCanvasBackground;
+  const canvasFillColor = isFloralCanvas ? lightCanvasColor : canvasBackground;
+  const canvasCssBackground = canvasFillColor;
+
+  const drawCanvasBackground = (
+    ctx: CanvasRenderingContext2D,
+    width: number,
+    height: number
+  ) => {
+    ctx.fillStyle = canvasFillColor;
+    ctx.fillRect(0, 0, width, height);
+
+    const floralImage = floralBackgroundRef.current;
+    if (isFloralCanvas && floralImage?.complete) {
+      const { width: tileWidth, height: tileHeight } = floralBackgroundTile;
+      const floralVisibleLeft = -offset.x / zoom;
+      const floralVisibleTop = -offset.y / zoom;
+      const floralVisibleRight = (width - offset.x) / zoom;
+      const floralVisibleBottom = (height - offset.y) / zoom;
+      const floralStartX =
+        Math.floor(floralVisibleLeft / tileWidth) * tileWidth;
+      const floralStartY =
+        Math.floor(floralVisibleTop / tileHeight) * tileHeight;
+
+      ctx.save();
+      ctx.translate(offset.x, offset.y);
+      ctx.scale(zoom, zoom);
+
+      for (let x = floralStartX; x < floralVisibleRight; x += tileWidth) {
+        for (let y = floralStartY; y < floralVisibleBottom; y += tileHeight) {
+          ctx.drawImage(floralImage, x, y, tileWidth, tileHeight);
+        }
+      }
+
+      ctx.restore();
+    }
+
+    if (gridMode === "none" || gridOpacity <= 0) return;
+
+    const gridSpacing =
+      gridMode === "small" ? 24 : gridMode === "large" ? 72 : 40;
+    const gridVisibleLeft = -offset.x / zoom;
+    const gridVisibleTop = -offset.y / zoom;
+    const gridVisibleRight = (width - offset.x) / zoom;
+    const gridVisibleBottom = (height - offset.y) / zoom;
+    const gridStartX = Math.floor(gridVisibleLeft / gridSpacing) * gridSpacing;
+    const gridStartY = Math.floor(gridVisibleTop / gridSpacing) * gridSpacing;
+    const shouldUseLightGrid =
+      canvasBackground === darkCanvasColor || canvasBackground === greyCanvasColor;
+    const gridColor =
+      shouldUseLightGrid
+        ? `rgba(255,255,255,${(gridOpacity / 100).toFixed(2)})`
+        : `rgba(15,23,42,${(gridOpacity / 100).toFixed(2)})`;
+
+    ctx.save();
+    ctx.translate(offset.x, offset.y);
+    ctx.scale(zoom, zoom);
+    ctx.beginPath();
+    ctx.lineWidth = 1 / zoom;
+    ctx.strokeStyle = gridColor;
+
+    for (let x = gridStartX; x <= gridVisibleRight; x += gridSpacing) {
+      ctx.moveTo(x, gridVisibleTop);
+      ctx.lineTo(x, gridVisibleBottom);
+    }
+
+    for (let y = gridStartY; y <= gridVisibleBottom; y += gridSpacing) {
+      ctx.moveTo(gridVisibleLeft, y);
+      ctx.lineTo(gridVisibleRight, y);
+    }
+
+    ctx.stroke();
+    ctx.restore();
+  };
+
   const redrawCanvas = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -697,8 +1422,7 @@ export default function Page() {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
-    ctx.fillStyle = canvasBackground;
-    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    drawCanvasBackground(ctx, cssWidth, cssHeight);
 
     ctx.save();
     ctx.translate(offset.x, offset.y);
@@ -729,72 +1453,21 @@ export default function Page() {
         continue;
       }
 
-      if (!element.points.length) continue;
-
-      ctx.beginPath();
-      ctx.lineCap = getStrokeLineCap(element.style);
-      ctx.lineJoin = "round";
       ctx.strokeStyle =
-        element.tool === "pen" ? element.color ?? "black" : canvasBackground;
-      ctx.lineWidth = element.width;
-      ctx.setLineDash(getStrokeDashPattern(element.style, element.width));
-
-      if (element.points.length === 1) {
-        const p = element.points[0];
-        ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle =
-          element.tool === "pen" ? element.color ?? "black" : canvasBackground;
-        ctx.fill();
-        continue;
-      }
-
-      ctx.moveTo(element.points[0].x, element.points[0].y);
-
-      for (let i = 1; i < element.points.length; i++) {
-        const prev = element.points[i - 1];
-        const curr = element.points[i];
-        const midX = (prev.x + curr.x) / 2;
-        const midY = (prev.y + curr.y) / 2;
-        ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
-      }
-
-      const lastPoint = element.points[element.points.length - 1];
-      ctx.lineTo(lastPoint.x, lastPoint.y);
-      ctx.stroke();
+        element.tool === "pen" ? element.color ?? "black" : canvasFillColor;
+      ctx.fillStyle =
+        element.tool === "pen" ? element.color ?? "black" : canvasFillColor;
+      drawStrokePath(ctx, element.points, element.width, element.style);
     }
 
     if (currentStroke.current && currentStroke.current.points.length > 0) {
       const stroke = currentStroke.current;
 
-      ctx.beginPath();
-      ctx.lineCap = getStrokeLineCap(stroke.style);
-      ctx.lineJoin = "round";
       ctx.strokeStyle =
-        stroke.tool === "pen" ? stroke.color ?? "black" : canvasBackground;
-      ctx.lineWidth = stroke.width;
-      ctx.setLineDash(getStrokeDashPattern(stroke.style, stroke.width));
-
-      if (stroke.points.length === 1) {
-        const p = stroke.points[0];
-        ctx.arc(p.x, p.y, ctx.lineWidth / 2, 0, Math.PI * 2);
-        ctx.fillStyle =
-          stroke.tool === "pen" ? stroke.color ?? "black" : canvasBackground;
-        ctx.fill();
-      } else {
-        ctx.moveTo(stroke.points[0].x, stroke.points[0].y);
-
-        for (let i = 1; i < stroke.points.length; i++) {
-          const prev = stroke.points[i - 1];
-          const curr = stroke.points[i];
-          const midX = (prev.x + curr.x) / 2;
-          const midY = (prev.y + curr.y) / 2;
-          ctx.quadraticCurveTo(prev.x, prev.y, midX, midY);
-        }
-
-        const lastPoint = stroke.points[stroke.points.length - 1];
-        ctx.lineTo(lastPoint.x, lastPoint.y);
-        ctx.stroke();
-      }
+        stroke.tool === "pen" ? stroke.color ?? "black" : canvasFillColor;
+      ctx.fillStyle =
+        stroke.tool === "pen" ? stroke.color ?? "black" : canvasFillColor;
+      drawStrokePath(ctx, stroke.points, stroke.width, stroke.style);
     }
 
     if (selectionBox) {
@@ -804,47 +1477,113 @@ export default function Page() {
 
     ctx.restore();
   };
+  useEffect(() => {
+    latestRedrawCanvasRef.current = redrawCanvas;
+  });
+
+  const scheduleRedrawCanvas = () => {
+    if (pendingRedrawFrame.current !== null) return;
+
+    pendingRedrawFrame.current = window.requestAnimationFrame(() => {
+      pendingRedrawFrame.current = null;
+      latestRedrawCanvasRef.current();
+    });
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
 
+    let resizeFrame: number | null = null;
+
     const resizeCanvas = () => {
-      const dpr = window.devicePixelRatio || 1;
-      const cssWidth = window.innerWidth;
-      const cssHeight = window.innerHeight - topBarHeight;
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
 
-      canvas.style.width = `${cssWidth}px`;
-      canvas.style.height = `${cssHeight}px`;
+      resizeFrame = window.requestAnimationFrame(() => {
+        const dpr = window.devicePixelRatio || 1;
+        const cssWidth = window.innerWidth;
+        const cssHeight = window.innerHeight - topBarHeight;
 
-      canvas.width = cssWidth * dpr;
-      canvas.height = cssHeight * dpr;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
 
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
+        canvas.width = Math.round(cssWidth * dpr);
+        canvas.height = Math.round(cssHeight * dpr);
 
-      ctx.setTransform(1, 0, 0, 1, 0, 0);
-      ctx.clearRect(0, 0, canvas.width, canvas.height);
-      ctx.scale(dpr, dpr);
+        const ctx = canvas.getContext("2d");
+        if (!ctx) return;
 
-      ctx.fillStyle = canvasBackground;
-      ctx.fillRect(0, 0, cssWidth, cssHeight);
-
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-
-      redrawCanvas();
+        ctx.lineCap = "round";
+        ctx.lineJoin = "round";
+        latestRedrawCanvasRef.current();
+      });
     };
 
     resizeCanvas();
     window.addEventListener("resize", resizeCanvas);
 
-    return () => window.removeEventListener("resize", resizeCanvas);
+    return () => {
+      if (resizeFrame !== null) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+
+      window.removeEventListener("resize", resizeCanvas);
+    };
+  }, []);
+
+  useEffect(
+    () => () => {
+      if (pendingRedrawFrame.current !== null) {
+        window.cancelAnimationFrame(pendingRedrawFrame.current);
+      }
+    },
+    []
+  );
+
+  useEffect(() => {
+    let isMounted = true;
+    let loadFrame: number | null = null;
+    const image = new Image();
+    const markFloralBackgroundLoaded = () => {
+      if (!isMounted) return;
+
+      floralBackgroundRef.current = image;
+      setIsFloralBackgroundLoaded(true);
+    };
+
+    image.decoding = "async";
+    image.src = floralBackgroundImage;
+    image.onload = markFloralBackgroundLoaded;
+
+    if (image.complete) {
+      loadFrame = window.requestAnimationFrame(markFloralBackgroundLoaded);
+    }
+
+    return () => {
+      isMounted = false;
+      if (loadFrame !== null) {
+        window.cancelAnimationFrame(loadFrame);
+      }
+
+      image.onload = null;
+    };
   }, []);
 
   useEffect(() => {
-    redrawCanvas();
-  }, [offset, zoom, elements, selectionBox, canvasBackground, activeText?.editingIndex]);
+    latestRedrawCanvasRef.current();
+  }, [
+    offset,
+    zoom,
+    elements,
+    selectionBox,
+    canvasBackground,
+    gridMode,
+    gridOpacity,
+    isFloralBackgroundLoaded,
+    activeText?.editingIndex,
+  ]);
 
   useEffect(() => {
     offsetRef.current = offset;
@@ -855,17 +1594,39 @@ export default function Page() {
   }, [zoom]);
 
   useEffect(() => {
-    setActiveText((prev) =>
-      prev
-        ? {
-            ...prev,
-            screenPoint: {
-              x: prev.point.x * zoom + offset.x,
-              y: prev.point.y * zoom + offset.y + topBarHeight,
-            },
-          }
-        : prev
-    );
+    const previousBodyCursor = document.body.style.cursor;
+    const previousRootCursor = document.documentElement.style.cursor;
+    const previousUserSelect = document.body.style.userSelect;
+
+    if (isPanning) {
+      document.body.style.cursor = "none";
+      document.documentElement.style.cursor = "none";
+      document.body.style.userSelect = "none";
+    }
+
+    return () => {
+      document.body.style.cursor = previousBodyCursor;
+      document.documentElement.style.cursor = previousRootCursor;
+      document.body.style.userSelect = previousUserSelect;
+    };
+  }, [isPanning]);
+
+  useEffect(() => {
+    const positionTimer = window.setTimeout(() => {
+      setActiveText((prev) =>
+        prev
+          ? {
+              ...prev,
+              screenPoint: {
+                x: prev.point.x * zoom + offset.x,
+                y: prev.point.y * zoom + offset.y + topBarHeight,
+              },
+            }
+          : prev
+      );
+    }, 0);
+
+    return () => window.clearTimeout(positionTimer);
   }, [offset, zoom]);
 
   useEffect(() => {
@@ -873,10 +1634,15 @@ export default function Page() {
 
     const focusTimer = window.setTimeout(() => {
       textInputRef.current?.focus();
+      keepTextInputAligned(textInputRef.current);
     }, 0);
 
     return () => window.clearTimeout(focusTimer);
   }, [activeTextScreenX, activeTextScreenY]);
+
+  useEffect(() => {
+    keepTextInputAligned(textInputRef.current);
+  }, [activeText?.value, activeText?.width, activeText?.height]);
 
   useEffect(() => {
     const moveOrResizeText = (clientX: number, clientY: number) => {
@@ -928,11 +1694,15 @@ export default function Page() {
               (textResizeStart.current.height - nextHeight) / 2
             : textResizeStart.current.screenPoint.y,
         };
-        const nextFontSize = Math.max(
-          1,
-          textResizeStart.current.fontSize * textScale
+        const nextFontSize = clampTextFontSize(
+          textResizeStart.current.fontSize * textScale,
+          textResizeStart.current.fontSize
         );
-        const boundedTextBox = keepTextBoxInViewport(
+        const nextRuns = textResizeStart.current.runs.map((run) => ({
+          ...run,
+          fontSize: clampTextFontSize(run.fontSize * textScale, run.fontSize),
+        }));
+        const boundedTextBox = keepTextBoxInViewportRef.current(
           nextScreenPoint,
           nextWidth,
           nextHeight
@@ -942,11 +1712,13 @@ export default function Page() {
           prev
             ? {
                 ...prev,
-              ...boundedTextBox,
-              fontSize: nextFontSize,
-            }
-          : prev
-      );
+                ...boundedTextBox,
+                fontSize: nextFontSize,
+                typingFontSize: nextFontSize,
+                runs: nextRuns,
+              }
+            : prev
+        );
 
         return;
       }
@@ -1010,16 +1782,53 @@ export default function Page() {
     };
   }, []);
 
-  const getCanvasCoordinates = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const getCanvasCoordinatesFromClient = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
     if (!canvas) return { x: 0, y: 0 };
 
     const rect = canvas.getBoundingClientRect();
 
     return {
-      x: (e.clientX - rect.left - offset.x) / zoom,
-      y: (e.clientY - rect.top - offset.y) / zoom,
+      x: (clientX - rect.left - offsetRef.current.x) / zoomRef.current,
+      y: (clientY - rect.top - offsetRef.current.y) / zoomRef.current,
     };
+  };
+
+  const getCanvasCoordinates = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
+  ) => getCanvasCoordinatesFromClient(e.clientX, e.clientY);
+
+  const syncPenCursorPoint = (
+    e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
+  ) => {
+    if (tool === "pen") {
+      setPenCursorPoint({ x: e.clientX, y: e.clientY });
+      return;
+    }
+
+    setPenCursorPoint(null);
+  };
+
+  const appendStrokePoint = (point: Point) => {
+    const stroke = currentStroke.current;
+    if (!stroke) return false;
+
+    const previousPoint = stroke.points[stroke.points.length - 1];
+    const minDistance = Math.max(0.25, 0.7 / zoomRef.current);
+
+    if (previousPoint) {
+      const distance = Math.hypot(
+        point.x - previousPoint.x,
+        point.y - previousPoint.y
+      );
+
+      if (distance < minDistance) {
+        return false;
+      }
+    }
+
+    stroke.points.push(point);
+    return true;
   };
 
   const handleWheel = (e: React.WheelEvent<HTMLCanvasElement>) => {
@@ -1053,15 +1862,22 @@ export default function Page() {
 
     const trimmedValue = activeText.value.trim();
     if (trimmedValue || activeText.backgroundColor) {
+      const safeFontSize = clampTextFontSize(activeText.fontSize);
       const nextText: TextElement = {
         kind: "text",
         point: activeText.point,
         value: trimmedValue,
         color: activeText.color,
-        runs: activeText.runs,
+        runs: activeText.runs.map((run) => ({
+          ...run,
+          fontSize: clampTextFontSize(run.fontSize, safeFontSize),
+        })),
         fontFamily: activeText.fontFamily,
         fontWeight: activeText.fontWeight,
-        fontSize: activeText.fontSize,
+        fontSize: safeFontSize,
+        fontStyle: activeText.fontStyle,
+        underline: activeText.underline,
+        textAlign: activeText.textAlign,
         width: activeText.width,
         height: activeText.height,
         backgroundColor: activeText.backgroundColor,
@@ -1079,6 +1895,13 @@ export default function Page() {
     }
 
     setActiveText(null);
+    setTextSizeMenu(null);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextColorMenu(false);
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setShowTextBoxOpacityMenu(false);
   };
 
   const copySelection = () => {
@@ -1108,24 +1931,88 @@ export default function Page() {
     setSelectionMenu(null);
   };
 
-  const startDrawing = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const openTextAtPoint = (point: Point) => {
+    const textIndex = elements.findLastIndex(
+      (element) =>
+        element.kind === "text" &&
+        pointInBounds(point, getTextBounds(element))
+    );
+
+    if (textIndex === -1) return false;
+
+    const textElement = elements[textIndex];
+    if (textElement.kind !== "text") return false;
+
+    const textElementFontSize = clampTextFontSize(textElement.fontSize);
+    setTextFontFamily(textElement.fontFamily);
+    setTextFontWeight(getTextFontWeight(textElement));
+    syncTextColorControls(textElement.color);
+    setTextSelection({
+      start: textElement.value.length,
+      end: textElement.value.length,
+    });
+    setActiveText({
+      point: textElement.point,
+      screenPoint: {
+        x: textElement.point.x * zoomRef.current + offsetRef.current.x,
+        y:
+          textElement.point.y * zoomRef.current +
+          offsetRef.current.y +
+          topBarHeight,
+      },
+      value: textElement.value,
+      color: textElement.color,
+      runs: getTextRuns(textElement),
+      width: textElement.width,
+      height: textElement.height,
+      fontSize: textElementFontSize,
+      fontFamily: textElement.fontFamily,
+      fontWeight: getTextFontWeight(textElement),
+      fontStyle: textElement.fontStyle ?? "normal",
+      underline: textElement.underline ?? false,
+      typingFontSize: textElementFontSize,
+      textAlign: textElement.textAlign ?? "left",
+      backgroundColor: textElement.backgroundColor,
+      editingIndex: textIndex,
+    });
+    setTool("cursor");
+    return true;
+  };
+
+  const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    syncPenCursorPoint(e);
+
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
 
-    if (tool === "cursor") {
-      if (e.button === 2) {
-        e.preventDefault();
-        isPanningRef.current = true;
-        didPanRef.current = false;
-        setIsPanning(true);
-        panStart.current = {
-          screen: { x: e.clientX, y: e.clientY },
-          offset: offsetRef.current,
-        };
-      }
+    e.currentTarget.setPointerCapture(e.pointerId);
 
+    if (e.button === 2) {
+      e.preventDefault();
+      isPanningRef.current = true;
+      didPanRef.current = false;
+      setIsPanning(true);
+      setPanningCursorPoint({ x: e.clientX, y: e.clientY });
+      panStart.current = {
+        screen: { x: e.clientX, y: e.clientY },
+        offset: offsetRef.current,
+      };
+      return;
+    }
+
+    if (tool === "cursor") {
       if (e.button === 0) {
         const point = getCanvasCoordinates(e);
+
+        if (activeText) {
+          commitActiveText();
+          return;
+        }
+
+        if (openTextAtPoint(point)) {
+          return;
+        }
+
         setSelectionMenu(null);
         selectionStart.current = point;
         isSelectingRef.current = true;
@@ -1162,6 +2049,7 @@ export default function Page() {
     }
 
     if (tool === "pen" || tool === "eraser") {
+      e.preventDefault();
       currentStroke.current = {
         kind: "stroke",
         points: [{ x, y }],
@@ -1172,8 +2060,6 @@ export default function Page() {
       };
     }
 
-    lastPos.current = { x, y };
-    lastMid.current = { x, y };
     setIsDrawing(true);
   };
 
@@ -1181,68 +2067,21 @@ export default function Page() {
     if (tool !== "text" && tool !== "textbox") return;
 
     const { x, y } = getCanvasCoordinates(e);
-    const textIndex = elements.findLastIndex(
-      (element) =>
-        element.kind === "text" &&
-        pointInBounds({ x, y }, getTextBounds(element))
-    );
 
     if (activeText) {
       commitActiveText();
     }
 
-    if (textIndex !== -1) {
-      const textElement = elements[textIndex];
-      if (textElement.kind === "text") {
-        setActiveText({
-          point: textElement.point,
-          screenPoint: {
-            x: textElement.point.x * zoomRef.current + offsetRef.current.x,
-            y:
-              textElement.point.y * zoomRef.current +
-              offsetRef.current.y +
-              topBarHeight,
-          },
-          value: textElement.value,
-          color: textElement.color,
-          runs: getTextRuns(textElement),
-          width: textElement.width,
-          height: textElement.height,
-          fontSize: textElement.fontSize,
-          fontFamily: textElement.fontFamily,
-          fontWeight: getTextFontWeight(textElement),
-          backgroundColor: textElement.backgroundColor,
-          editingIndex: textIndex,
-        });
-      }
-
+    if (openTextAtPoint({ x, y })) {
       return;
     }
 
     if (tool === "textbox") {
-      const boundedTextBox = keepTextBoxInViewport(
-        { x: e.clientX, y: e.clientY },
-        textBoxSize,
-        textBoxSize
-      );
-
-      setActiveText({
-        point: boundedTextBox.point,
-        screenPoint: boundedTextBox.screenPoint,
-        value: "",
-        color: textBoxTextColor,
-        runs: [],
-        width: boundedTextBox.width,
-        height: boundedTextBox.height,
-        fontSize: 24,
-        fontFamily: textFontFamily,
-        fontWeight: textFontWeight,
-        backgroundColor: textBoxBackground,
-        editingIndex: undefined,
-      });
       return;
     }
 
+    syncTextColorControls(penColor);
+    setTextSelection({ start: 0, end: 0 });
     setActiveText({
       point: { x, y },
       screenPoint: { x: e.clientX, y: e.clientY },
@@ -1254,13 +2093,39 @@ export default function Page() {
       fontSize: 24,
       fontFamily: textFontFamily,
       fontWeight: textFontWeight,
+      fontStyle: "normal",
+      underline: false,
+      typingFontSize: 24,
+      textAlign: "left",
       editingIndex: undefined,
     });
+    setTool("cursor");
   };
 
-  const draw = (e: React.MouseEvent<HTMLCanvasElement>) => {
+  const handleTextContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+
+    if (
+      selectionStart === null ||
+      selectionEnd === null ||
+      selectionStart === selectionEnd
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    setSelectionMenu(null);
+    setTextSizeMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    syncPenCursorPoint(e);
+
     if (isPanningRef.current && panStart.current) {
       e.preventDefault();
+      setPanningCursorPoint({ x: e.clientX, y: e.clientY });
       const dx = e.clientX - panStart.current.screen.x;
       const dy = e.clientY - panStart.current.screen.y;
 
@@ -1315,18 +2180,29 @@ export default function Page() {
       return;
     }
 
-    if (!lastPos.current || !lastMid.current) return;
-
-    const midX = (lastPos.current.x + x) / 2;
-    const midY = (lastPos.current.y + y) / 2;
-
     if (currentStroke.current) {
-      currentStroke.current.points.push({ x, y });
-      redrawCanvas();
+      const samples =
+        typeof e.nativeEvent.getCoalescedEvents === "function"
+          ? e.nativeEvent.getCoalescedEvents()
+          : [e.nativeEvent];
+      let didAppendPoint = false;
+
+      for (const sample of samples as CanvasPointerInput[]) {
+        didAppendPoint =
+          appendStrokePoint(
+            getCanvasCoordinatesFromClient(sample.clientX, sample.clientY)
+          ) || didAppendPoint;
+      }
+
+      if (!didAppendPoint) {
+        didAppendPoint = appendStrokePoint({ x, y });
+      }
+
+      if (didAppendPoint) {
+        scheduleRedrawCanvas();
+      }
     }
 
-    lastPos.current = { x, y };
-    lastMid.current = { x: midX, y: midY };
   };
 
   const clearCanvas = () => {
@@ -1345,10 +2221,16 @@ export default function Page() {
 
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
-    ctx.fillStyle = canvasBackground;
-    ctx.fillRect(0, 0, cssWidth, cssHeight);
+    drawCanvasBackground(ctx, cssWidth, cssHeight);
   };
-  const stopDrawing = (e?: React.MouseEvent<HTMLCanvasElement>) => {
+  const stopDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
+    if (e) {
+      syncPenCursorPoint(e);
+      if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+        e.currentTarget.releasePointerCapture(e.pointerId);
+      }
+    }
+
     if (isPanningRef.current) {
       const shouldOpenMenu =
         e &&
@@ -1358,6 +2240,7 @@ export default function Page() {
 
       isPanningRef.current = false;
       setIsPanning(false);
+      setPanningCursorPoint(null);
       didPanRef.current = false;
       panStart.current = null;
 
@@ -1412,6 +2295,16 @@ export default function Page() {
     }
 
     if (currentStroke.current) {
+      if (currentStroke.current.tool === "eraser") {
+        currentStroke.current = null;
+        setIsDrawing(false);
+        setShapeStart(null);
+        setSnapshot(null);
+        shapeEnd.current = null;
+        redrawCanvas();
+        return;
+      }
+
       const finishedStroke = {
         kind: "stroke" as const,
         points: [...currentStroke.current.points],
@@ -1426,15 +2319,13 @@ export default function Page() {
     }
 
     setIsDrawing(false);
-    lastPos.current = null;
-    lastMid.current = null;
     setShapeStart(null);
     setSnapshot(null);
     shapeEnd.current = null;
   };
 
   const canvasCursor: string =
-    tool === "cursor" ? isPanning ? "grabbing" : isSelecting ? "crosshair" : "grab" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : "crosshair";
+    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? "crosshair" : "default" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : "crosshair";
 
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
@@ -1452,11 +2343,7 @@ export default function Page() {
     : isGreyCanvas
     ? "rgba(82,92,106,0.96)"
     : "rgba(255,255,255,0.96)";
-  const inactiveToolBackground = isDarkCanvas
-    ? "#2a2a2a"
-    : isGreyCanvas
-    ? "#64748b"
-    : "#f3f4f6";
+  const inactiveToolBackground = "transparent";
   const panelTextColor = isDarkCanvas || isGreyCanvas ? "#f9fafb" : "#111827";
   const panelBorderColor = isDarkCanvas
     ? "rgba(255,255,255,0.12)"
@@ -1478,34 +2365,109 @@ export default function Page() {
     : isGreyCanvas
     ? "#596579"
     : "#ffffff";
-  const nextCanvasTheme =
-    canvasBackground === lightCanvasColor
-      ? greyCanvasColor
-      : canvasBackground === greyCanvasColor
-      ? darkCanvasColor
-      : lightCanvasColor;
-  const themeButtonLabel =
-    nextCanvasTheme === greyCanvasColor
-      ? "Use grey canvas"
-      : nextCanvasTheme === darkCanvasColor
-      ? "Use dark canvas"
-      : "Use white canvas";
+  const activeTextToolbar = activeText
+    ? (() => {
+        const viewportWidth =
+          typeof window === "undefined" ? 0 : window.innerWidth;
+        const margin = 12;
+        const toolbarWidth = viewportWidth
+          ? Math.min(390, Math.max(360, viewportWidth - margin * 2))
+          : 390;
+        const centeredLeft =
+          activeText.screenPoint.x + activeText.width / 2 - toolbarWidth / 2;
+        const left = viewportWidth
+          ? Math.min(
+              Math.max(margin, centeredLeft),
+              Math.max(margin, viewportWidth - toolbarWidth - margin)
+            )
+          : centeredLeft;
+        const topAbove = activeText.screenPoint.y - 58;
+        const topBelow = activeText.screenPoint.y + activeText.height + 14;
+
+        return {
+          left,
+          top: topAbove > topBarHeight + margin ? topAbove : topBelow,
+          width: toolbarWidth,
+        };
+      })()
+    : null;
+  const activeTextFont =
+    textFonts.find(
+      (font) =>
+        font.family === activeText?.fontFamily &&
+        font.weight === activeText.fontWeight
+    ) ?? textFonts[0];
+  const activeTextColor = activeText
+    ? parseCssColor(activeText.color).hex
+    : textColorBase;
+  const activeTextBoxOpacity = activeText?.backgroundColor
+    ? Math.round(parseCssColor(activeText.backgroundColor).opacity * 100)
+    : Math.round(textBoxOpacity * 100);
+  const activeTextLayoutSize = activeText
+    ? clampTextFontSize(activeText.value ? activeText.fontSize : activeText.typingFontSize)
+    : 24;
+  const activeTextSize = activeText
+    ? clampTextFontSize(activeText.typingFontSize)
+    : 24;
+  const activeTextCaretIndex =
+    activeText && textSelection.start === textSelection.end
+      ? Math.min(textSelection.start, activeText.value.length)
+      : undefined;
+  const activeTextDisplayRuns = activeText
+    ? activeText.runs.length
+      ? activeText.runs.map((run) => ({ ...run }))
+      : getTextRuns({
+          value: activeText.value,
+          color: activeText.color,
+          fontFamily: activeText.fontFamily,
+          fontWeight: activeText.fontWeight,
+          fontSize: activeTextLayoutSize,
+          fontStyle: activeText.fontStyle,
+          underline: activeText.underline,
+        })
+    : [];
+  const activeTextContentHeight = activeText
+    ? getTextRunsContentHeight(activeTextDisplayRuns, activeTextLayoutSize)
+    : activeTextLayoutSize * textLineHeight;
+  const activeTextBoxPaddingTop = activeText?.backgroundColor
+    ? textPaddingY +
+      Math.max(
+        0,
+        (activeText.height - textPaddingY * 2 - activeTextContentHeight) / 2
+      )
+    : textPaddingY;
 
   return (
     <div
+      onMouseDown={() => {
+        setSelectionMenu(null);
+        setTextSizeMenu(null);
+        setShowTextStyleMenu(false);
+        setShowTextFormatMenu(false);
+        setShowTextColorMenu(false);
+        setShowTextAlignMenu(false);
+        setShowTextListMenu(false);
+        setShowTextBoxOpacityMenu(false);
+      }}
       style={{
         width: "100vw",
         height: "100vh",
         overflow: "hidden",
-        background: canvasBackground,
+        background: canvasCssBackground,
       }}
     >
       <canvas
         ref={canvasRef}
-        onMouseDown={startDrawing}
-        onMouseMove={draw}
-        onMouseUp={(e) => stopDrawing(e)}
-        onMouseLeave={() => stopDrawing()}
+        onPointerDown={startDrawing}
+        onPointerMove={draw}
+        onPointerUp={(e) => stopDrawing(e)}
+        onPointerCancel={(e) => stopDrawing(e)}
+        onPointerLeave={(e) => {
+          if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
+            setPenCursorPoint(null);
+            stopDrawing(e);
+          }
+        }}
         onClick={handleCanvasClick}
         onContextMenu={(e) => e.preventDefault()}
         onWheel={handleWheel}
@@ -1516,13 +2478,846 @@ export default function Page() {
           width: "100vw",
           height: `calc(100vh - ${topBarHeight}px)`,
           display: "block",
-          background: canvasBackground,
+          background: canvasCssBackground,
           cursor: canvasCursor,
+          touchAction: "none",
+          userSelect: "none",
         }}
       />
 
+      {penCursorPoint && tool === "pen" && !isPanning && (
+        <div
+          aria-hidden="true"
+          className="board-pen-cursor"
+          style={{
+            position: "fixed",
+            left: `${penCursorPoint.x}px`,
+            top: `${penCursorPoint.y}px`,
+            width: "20px",
+            height: "20px",
+            transform: `translate(-2px, -18px) rotate(43deg) ${
+              isDrawing ? "scale(0.96)" : "scale(1)"
+            }`,
+            pointerEvents: "none",
+            zIndex: 200,
+          }}
+        >
+          <svg
+            viewBox="0 0 20 20"
+            width="20"
+            height="20"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              d="M9.8 2.5H12.9C13.6 2.5 14.2 3.1 14.2 3.8V13.8L11.4 17.5L8.6 13.8V3.8C8.6 3.1 9.1 2.5 9.8 2.5Z"
+              fill="#ffffff"
+              stroke="#111827"
+              strokeWidth="1.4"
+              strokeLinejoin="round"
+            />
+            <path d="M8.6 13.6H14.2" stroke="#111827" strokeWidth="1.4" />
+            <path
+              d="M9.5 5.7H13.3"
+              stroke="#111827"
+              strokeWidth="1.2"
+              strokeLinecap="round"
+            />
+            <path
+              d="M11.4 17.5L10.4 14.9H12.4L11.4 17.5Z"
+              fill={penColor}
+            />
+          </svg>
+        </div>
+      )}
+
+      {panningCursorPoint && (
+        <div
+          aria-hidden="true"
+          className="board-pan-cursor"
+          style={{
+            position: "fixed",
+            left: `${panningCursorPoint.x}px`,
+            top: `${panningCursorPoint.y}px`,
+            width: "22px",
+            height: "22px",
+            transform: "translate(-7px, -6px)",
+            pointerEvents: "none",
+            zIndex: 200,
+          }}
+        >
+          <svg
+            viewBox="0 0 32 32"
+            width="22"
+            height="22"
+            fill="none"
+            xmlns="http://www.w3.org/2000/svg"
+          >
+            <path
+              className="board-pan-cursor-hand"
+              d="M10 14V8.4C10 7.2 10.9 6.3 12 6.3C13.1 6.3 14 7.2 14 8.4V13V6.8C14 5.6 14.9 4.7 16 4.7C17.1 4.7 18 5.6 18 6.8V13V8.3C18 7.1 18.9 6.2 20 6.2C21.1 6.2 22 7.1 22 8.3V14V10.4C22 9.3 22.9 8.4 24 8.4C25.1 8.4 26 9.3 26 10.4V18.2C26 23.6 21.6 28 16.2 28H15C10 28 6 24 6 19V15.5C6 14.4 6.9 13.5 8 13.5C9.1 13.5 10 14.4 10 15.5V14Z"
+              fill="#ffffff"
+              stroke="#2f3137"
+              strokeWidth="3"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </svg>
+        </div>
+      )}
+
       {activeText && (
         <>
+          {activeTextToolbar && (
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "fixed",
+                top: `${activeTextToolbar.top}px`,
+                left: `${activeTextToolbar.left}px`,
+                width: `${activeTextToolbar.width}px`,
+                minHeight: "38px",
+                padding: "5px 7px",
+                borderRadius: "10px",
+                background: popoverBackground,
+                color: panelTextColor,
+                border: `1px solid ${panelBorderColor}`,
+                boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "5px",
+                boxSizing: "border-box",
+                zIndex: 95,
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingRight: "6px",
+                  borderRight: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose writing style"
+                  title="Choose writing style"
+                  onClick={() => {
+                    setShowTextColorMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextStyleMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "36px",
+                    height: "28px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    color: panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontFamily: activeTextFont.family,
+                    fontSize: "14px",
+                    fontWeight: activeTextFont.weight,
+                    lineHeight: 1,
+                  }}
+                >
+                  {activeTextFont.preview}
+                </button>
+
+                {showTextStyleMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      gap: "6px",
+                      padding: "8px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 110,
+                    }}
+                  >
+                    {textFonts.map((font) => (
+                      <button
+                        key={font.name}
+                        aria-label={`${font.name} writing style`}
+                        title={`${font.name} writing style`}
+                        onClick={() => applyTextFont(font.family, font.weight)}
+                        style={{
+                          width: "34px",
+                          height: "28px",
+                          borderRadius: "7px",
+                          border:
+                            activeText.fontFamily === font.family &&
+                            activeText.fontWeight === font.weight
+                              ? "2px solid #7c3aed"
+                              : `1px solid ${panelBorderColor}`,
+                          background:
+                            activeText.fontFamily === font.family &&
+                            activeText.fontWeight === font.weight
+                              ? selectedControlBackground
+                              : controlBackground,
+                          color: panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                          fontFamily: font.family,
+                          fontSize: "14px",
+                          fontWeight: font.weight,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {font.preview}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <input
+                  aria-label="Text size"
+                  inputMode="numeric"
+                  value={activeTextSize}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    if (!value) return;
+                    applyTextSize(Number(value));
+                  }}
+                  style={{
+                    width: "45px",
+                    height: "28px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: controlBackground,
+                    color: panelTextColor,
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    textAlign: "center",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    gap: "1px",
+                    width: "16px",
+                    height: "28px",
+                  }}
+                >
+                  <button
+                    aria-label="Increase text size"
+                    onClick={() => applyTextSize(activeTextSize + 1)}
+                    style={{
+                      width: "16px",
+                      height: "13px",
+                      border: "none",
+                      background: "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <ChevronUp size={16} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    aria-label="Decrease text size"
+                    onClick={() => applyTextSize(activeTextSize - 1)}
+                    style={{
+                      width: "16px",
+                      height: "13px",
+                      border: "none",
+                      background: "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <ChevronDown size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text formatting"
+                  title="Choose text formatting"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextFormatMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "38px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextFormatMenu
+                      ? "#4f7cff"
+                      : "transparent",
+                    color: showTextFormatMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontSize: "16px",
+                    fontWeight: 800,
+                    lineHeight: 1,
+                  }}
+                >
+                  AA
+                </button>
+
+                {showTextFormatMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      padding: "4px",
+                      borderRadius: "10px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 112,
+                    }}
+                  >
+                    {(["bold", "italic", "underline"] as const).map((format) => {
+                      const isActive =
+                        format === "bold"
+                          ? activeText.fontWeight >= 700
+                          : format === "italic"
+                          ? activeText.fontStyle === "italic"
+                          : activeText.underline;
+
+                      return (
+                      <button
+                        key={format}
+                        aria-label={
+                          format === "bold"
+                            ? "Bold"
+                            : format === "italic"
+                            ? "Italic"
+                            : "Underline"
+                        }
+                        title={
+                          format === "bold"
+                            ? "Bold"
+                            : format === "italic"
+                            ? "Italic"
+                            : "Underline"
+                        }
+                        onClick={() => applyTextFormat(format)}
+                        style={{
+                          width: "34px",
+                          height: "30px",
+                          borderRadius: "7px",
+                          border: "none",
+                          background: isActive
+                            ? "#4f7cff"
+                            : "transparent",
+                          color: isActive ? "#ffffff" : panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {format === "bold" ? (
+                          <Bold size={19} strokeWidth={3} />
+                        ) : format === "italic" ? (
+                          <Italic size={19} strokeWidth={3} />
+                        ) : (
+                          <Underline size={19} strokeWidth={3} />
+                        )}
+                      </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {activeText.backgroundColor && (
+                <div
+                  style={{
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    paddingLeft: "6px",
+                    borderLeft: `1px solid ${panelDividerColor}`,
+                  }}
+                >
+                  <button
+                    aria-label="Square opacity"
+                    title="Square opacity"
+                    onClick={() => {
+                      setShowTextStyleMenu(false);
+                      setShowTextFormatMenu(false);
+                      setShowTextColorMenu(false);
+                      setShowTextAlignMenu(false);
+                      setShowTextListMenu(false);
+                      setShowTextBoxOpacityMenu((prev) => !prev);
+                    }}
+                    style={{
+                      width: "32px",
+                      height: "28px",
+                      borderRadius: "7px",
+                      border: "none",
+                      background: showTextBoxOpacityMenu
+                        ? selectedControlBackground
+                        : "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="8"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                      />
+                      <path
+                        d="M12 4a8 8 0 0 1 0 16V4Z"
+                        fill="currentColor"
+                        opacity="0.35"
+                      />
+                    </svg>
+                  </button>
+
+                  {showTextBoxOpacityMenu && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "42px",
+                        right: 0,
+                        width: "190px",
+                        padding: "10px 12px 12px",
+                        borderRadius: "12px",
+                        background: popoverBackground,
+                        color: panelTextColor,
+                        border: `1px solid ${panelBorderColor}`,
+                        boxShadow: "0 16px 36px rgba(0,0,0,0.2)",
+                        boxSizing: "border-box",
+                        zIndex: 116,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontSize: "13px",
+                          fontWeight: 700,
+                          marginBottom: "9px",
+                        }}
+                      >
+                        <span>Opacity</span>
+                        <span>{activeTextBoxOpacity}%</span>
+                      </div>
+                      <input
+                        aria-label="Square opacity"
+                        type="range"
+                        className="modern-range"
+                        min="10"
+                        max="100"
+                        value={activeTextBoxOpacity}
+                        onChange={(e) =>
+                          applyTextBoxOpacity(Number(e.target.value) / 100)
+                        }
+                        style={{
+                          width: "100%",
+                          accentColor: "#4f7cff",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text color"
+                  title="Choose text color"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextColorMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "32px",
+                    height: "28px",
+                    borderRadius: "7px",
+                    border: "none",
+                    background: showTextColorMenu
+                      ? selectedControlBackground
+                      : "transparent",
+                    color: activeText.color,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontSize: "17px",
+                    fontWeight: 700,
+                    lineHeight: 1,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      paddingBottom: "2px",
+                      borderBottom: `3px solid ${activeText.color}`,
+                    }}
+                  >
+                    A
+                  </span>
+                </button>
+
+                {showTextColorMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "42px",
+                      right: 0,
+                      width: "226px",
+                      padding: "11px 13px 14px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      color: panelTextColor,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 16px 36px rgba(0,0,0,0.2)",
+                      boxSizing: "border-box",
+                      zIndex: 115,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 500,
+                        marginBottom: "9px",
+                      }}
+                    >
+                      Opacity
+                    </div>
+                    <input
+                      aria-label="Text opacity"
+                      type="range"
+                      className="modern-range"
+                      min="10"
+                      max="100"
+                      value={Math.round(textColorOpacity * 100)}
+                      onChange={(e) =>
+                        applyTextColorOpacity(Number(e.target.value) / 100)
+                      }
+                      style={{
+                        width: "100%",
+                        accentColor: "#4f7cff",
+                        marginBottom: "11px",
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(6, 24px)",
+                        gap: "8px",
+                      }}
+                    >
+                      {textColorPalette.map((color) => {
+                        const isSelected = activeTextColor === color.value;
+
+                        return (
+                          <button
+                            key={`${color.name}-${color.value}`}
+                            aria-label={`${color.name} text color`}
+                            title={color.name}
+                            onClick={() => applyTextColor(color.value)}
+                            style={{
+                              width: "24px",
+                              height: "24px",
+                              borderRadius: "6px",
+                              border: isSelected
+                                ? "3px solid #4f7cff"
+                                : `1px solid ${panelBorderColor}`,
+                              background: color.value,
+                              boxShadow:
+                                color.value === "#ffffff" ||
+                                color.value === "#f8fafc"
+                                  ? "inset 0 0 0 1px rgba(15,23,42,0.12)"
+                                  : "none",
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "grid",
+                              placeItems: "center",
+                            }}
+                          >
+                            {isSelected && (
+                              <Check
+                                size={14}
+                                strokeWidth={3}
+                                color={
+                                  color.value === "#ffffff" ||
+                                  color.value === "#f8fafc"
+                                    ? "#4f7cff"
+                                    : "#ffffff"
+                                }
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text alignment"
+                  title="Choose text alignment"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextAlignMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "34px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextAlignMenu
+                      ? "#4f7cff"
+                      : "transparent",
+                    color: showTextAlignMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {activeText.textAlign === "center" ? (
+                    <AlignCenter size={20} strokeWidth={2.6} />
+                  ) : activeText.textAlign === "right" ? (
+                    <AlignRight size={20} strokeWidth={2.6} />
+                  ) : (
+                    <AlignLeft size={20} strokeWidth={2.6} />
+                  )}
+                </button>
+
+                {showTextAlignMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      gap: "8px",
+                      padding: "6px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 113,
+                    }}
+                  >
+                    {(["left", "center", "right"] as TextAlign[]).map((alignment) => {
+                      const isActive = activeText.textAlign === alignment;
+
+                      return (
+                        <button
+                          key={alignment}
+                          aria-label={`${alignment} align text`}
+                          title={`${alignment} align text`}
+                          onClick={() => applyTextAlign(alignment)}
+                          style={{
+                            width: "34px",
+                            height: "30px",
+                            borderRadius: "8px",
+                            border: isActive
+                              ? "2px solid #4f7cff"
+                              : "none",
+                            background: isActive
+                              ? "#4f7cff"
+                              : "transparent",
+                            color: isActive ? "#ffffff" : panelTextColor,
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          {alignment === "center" ? (
+                            <AlignCenter size={20} strokeWidth={2.6} />
+                          ) : alignment === "right" ? (
+                            <AlignRight size={20} strokeWidth={2.6} />
+                          ) : (
+                            <AlignLeft size={20} strokeWidth={2.6} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose list style"
+                  title="Choose list style"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextListMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "34px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextListMenu ? "#4f7cff" : "transparent",
+                    color: showTextListMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <List size={20} strokeWidth={2.6} />
+                </button>
+
+                {showTextListMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      right: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      padding: "4px",
+                      borderRadius: "10px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 114,
+                    }}
+                  >
+                    {(["bullet", "numbered"] as const).map((listStyle) => (
+                      <button
+                        key={listStyle}
+                        aria-label={
+                          listStyle === "bullet"
+                            ? "Bulleted list"
+                            : "Numbered list"
+                        }
+                        title={
+                          listStyle === "bullet"
+                            ? "Bulleted list"
+                            : "Numbered list"
+                        }
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyTextList(listStyle)}
+                        style={{
+                          width: "34px",
+                          height: "30px",
+                          borderRadius: "7px",
+                          border: "none",
+                          background: "transparent",
+                          color: panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {listStyle === "bullet" ? (
+                          <List size={20} strokeWidth={2.6} />
+                        ) : (
+                          <ListOrdered size={20} strokeWidth={2.6} />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
           {(activeText.value.length > 0 || activeText.backgroundColor) && (
             <div
               style={{
@@ -1543,29 +3338,29 @@ export default function Page() {
               {
                 edge: "top",
                 x: activeText.screenPoint.x,
-                y: activeText.screenPoint.y - 5,
+                y: activeText.screenPoint.y - 4,
                 width: activeText.width,
-                height: 10,
+                height: 4,
               },
               {
                 edge: "right",
-                x: activeText.screenPoint.x + activeText.width - 5,
+                x: activeText.screenPoint.x + activeText.width,
                 y: activeText.screenPoint.y,
-                width: 10,
+                width: 4,
                 height: activeText.height,
               },
               {
                 edge: "bottom",
                 x: activeText.screenPoint.x,
-                y: activeText.screenPoint.y + activeText.height - 5,
+                y: activeText.screenPoint.y + activeText.height,
                 width: activeText.width,
-                height: 10,
+                height: 4,
               },
               {
                 edge: "left",
-                x: activeText.screenPoint.x - 5,
+                x: activeText.screenPoint.x - 4,
                 y: activeText.screenPoint.y,
-                width: 10,
+                width: 4,
                 height: activeText.height,
               },
             ]).map(({ edge, x, y, width, height }) => (
@@ -1665,7 +3460,8 @@ export default function Page() {
                     screenPoint: activeText.screenPoint,
                     width: activeText.width,
                     height: activeText.height,
-                    fontSize: activeText.fontSize,
+                    fontSize: activeTextLayoutSize,
+                    runs: activeText.runs,
                     handle,
                   };
                 }}
@@ -1679,7 +3475,8 @@ export default function Page() {
                     screenPoint: activeText.screenPoint,
                     width: activeText.width,
                     height: activeText.height,
-                    fontSize: activeText.fontSize,
+                    fontSize: activeTextLayoutSize,
+                    runs: activeText.runs,
                     handle,
                   };
                 }}
@@ -1701,7 +3498,7 @@ export default function Page() {
                     position: "absolute",
                     inset: "4px",
                     border: "1.5px solid #2563eb",
-                    background: canvasBackground,
+                    background: canvasFillColor,
                     boxSizing: "border-box",
                     pointerEvents: "none",
                   }}
@@ -1720,64 +3517,88 @@ export default function Page() {
                 activeText.value.length > 0 || activeText.backgroundColor
                   ? `${textPaddingY}px ${textPaddingX}px`
                   : 0,
-              fontSize: `${activeText.fontSize}px`,
+              fontSize: `${activeTextLayoutSize}px`,
               fontFamily: activeText.fontFamily,
               fontWeight: activeText.fontWeight,
+              fontStyle: activeText.fontStyle,
               lineHeight: textLineHeight,
               whiteSpace: "pre",
               overflow: "hidden",
               background: activeText.backgroundColor ?? "transparent",
               display: activeText.backgroundColor ? "grid" : "block",
               placeItems: activeText.backgroundColor ? "center" : undefined,
-              textAlign: activeText.backgroundColor ? "center" : undefined,
+              textAlign: activeText.textAlign,
               boxSizing: "border-box",
               pointerEvents: "none",
               zIndex: 59,
+              ...textEditorTypography,
             }}
           >
-            <div>{renderTextRuns(activeText.runs)}</div>
+            <div>
+              {renderTextRuns(
+                activeTextDisplayRuns,
+                activeTextCaretIndex,
+                activeText.backgroundColor ? activeText.color : penColor
+              )}
+            </div>
           </div>
           <textarea
             ref={textInputRef}
+            className="custom-text-input"
             autoFocus
             wrap="off"
             value={activeText.value}
             onChange={(e) => {
               const value = e.target.value;
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+              const scrollWidth = e.currentTarget.scrollWidth;
               const scrollHeight = e.currentTarget.scrollHeight;
               setActiveText((prev) => {
                 if (!prev) return prev;
 
-                const nextColor = prev.backgroundColor ? prev.color : penColor;
+                const nextColor = prev.color;
                 const nextRuns = updateTextRuns(
                   prev.value,
                   value,
                   prev.runs,
                   nextColor,
-                  textFontFamily,
-                  textFontWeight
+                  prev.fontFamily,
+                  prev.fontWeight,
+                  clampTextFontSize(prev.typingFontSize),
+                  prev.fontStyle,
+                  prev.underline
                 );
                 const nextSize = getTextRunsEditorSize(
                   nextRuns,
-                  prev.fontSize
+                  clampTextFontSize(prev.fontSize)
                 );
 
                 return {
                   ...prev,
                   value,
                   runs: nextRuns,
-                  fontFamily: textFontFamily,
-                  fontWeight: textFontWeight,
                   ...keepTextBoxInViewport(
                     prev.screenPoint,
-                    Math.max(prev.width, nextSize.width),
+                    Math.max(prev.width, nextSize.width, scrollWidth),
                     Math.max(prev.height, nextSize.height, scrollHeight)
                   ),
                 };
               });
             }}
+            onInput={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+            }}
+            onScroll={(e) => keepTextInputAligned(e.currentTarget)}
+            onSelect={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+            }}
             onMouseUp={(e) => {
               const target = e.currentTarget;
+              keepTextInputAligned(target);
+              syncTextSelection(target);
               setActiveText((prev) =>
                 prev
                   ? {
@@ -1791,9 +3612,21 @@ export default function Page() {
                   : prev
               );
             }}
+            onKeyUp={(e) => syncTextSelection(e.currentTarget)}
             onClick={(e) => e.stopPropagation()}
-            onMouseDown={(e) => e.stopPropagation()}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              syncTextSelection(e.currentTarget);
+            }}
+            onContextMenu={handleTextContextMenu}
             onKeyDown={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+
+              if (continueTextList(e)) {
+                return;
+              }
+
               if (e.key === "Escape") {
                 setActiveText(null);
               }
@@ -1819,12 +3652,7 @@ export default function Page() {
               padding:
                 activeText.value.length > 0 || activeText.backgroundColor
                   ? activeText.backgroundColor
-                    ? `${Math.max(
-                        0,
-                        (activeText.height -
-                          activeText.fontSize * textLineHeight) /
-                          2
-                      )}px ${textPaddingX}px 0`
+                    ? `${activeTextBoxPaddingTop}px ${textPaddingX}px 0`
                     : `${textPaddingY}px ${textPaddingX}px`
                   : 0,
               border: "none",
@@ -1833,17 +3661,19 @@ export default function Page() {
               background: "transparent",
               boxShadow: "none",
               color: "transparent",
-              caretColor: activeText.backgroundColor ? activeText.color : penColor,
-              fontSize: `${activeText.fontSize}px`,
+              caretColor: "transparent",
+              fontSize: `${activeTextLayoutSize}px`,
               fontFamily: activeText.fontFamily,
               fontWeight: activeText.fontWeight,
+              fontStyle: activeText.fontStyle,
               lineHeight: textLineHeight,
               whiteSpace: "pre",
-              textAlign: activeText.backgroundColor ? "center" : "left",
+              textAlign: activeText.textAlign,
               resize: "none",
               overflow: "hidden",
               boxSizing: "border-box",
               zIndex: 60,
+              ...textEditorTypography,
             }}
           />
         </>
@@ -1900,7 +3730,379 @@ export default function Page() {
         </div>
       )}
 
+      {textSizeMenu && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: `${textSizeMenu.y}px`,
+            left: `${textSizeMenu.x}px`,
+            display: "flex",
+            flexDirection: "column",
+            minWidth: "110px",
+            maxWidth: "130px",
+            padding: "8px",
+            borderRadius: "16px",
+            background: popoverBackground,
+            boxShadow: "0 12px 28px rgba(0,0,0,0.14)",
+            border: `1px solid ${panelBorderColor}`,
+            zIndex: 90,
+          }}
+        >
+          <div
+            style={{
+              marginBottom: "8px",
+              fontSize: "13px",
+              fontWeight: 700,
+              color: panelTextColor,
+            }}
+          >
+            Text size
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "220px",
+              overflowY: "auto",
+              paddingRight: "2px",
+            }}
+          >
+            {Array.from({ length: 100 }, (_, index) => index + 1).map((size) => (
+              <button
+                key={size}
+                onClick={() => {
+                  applyTextSize(size);
+                  setTextSizeMenu(null);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  border: "none",
+                  borderRadius: "10px",
+                  background: "transparent",
+                  color: panelTextColor,
+                  textAlign: "left",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  borderBottom: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {showLoginModal && (
+        <div
+          role="presentation"
+          onMouseDown={(e) => {
+            if (e.target === e.currentTarget) {
+              setShowLoginModal(false);
+            }
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            padding: "20px",
+            background: "rgba(15, 23, 42, 0.34)",
+            backdropFilter: "blur(14px)",
+            zIndex: 150,
+          }}
+        >
+          <form
+            onMouseDown={(e) => e.stopPropagation()}
+            onSubmit={(e) => e.preventDefault()}
+            style={{
+              width: "min(390px, calc(100vw - 32px))",
+              padding: "22px",
+              borderRadius: "22px",
+              border: "1px solid rgba(255,255,255,0.34)",
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.92))",
+              boxShadow:
+                "0 26px 80px rgba(17,24,39,0.32), inset 0 1px 0 rgba(255,255,255,0.85)",
+              color: "#111827",
+            }}
+          >
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "14px",
+                marginBottom: "18px",
+              }}
+            >
+              <div>
+                <div
+                  style={{
+                    fontSize: "24px",
+                    fontWeight: 800,
+                    letterSpacing: "0",
+                    lineHeight: 1.05,
+                  }}
+                >
+                  Zaloguj się
+                </div>
+                <div
+                  style={{
+                    marginTop: "6px",
+                    color: "#64748b",
+                    fontSize: "14px",
+                    fontWeight: 500,
+                  }}
+                >
+                  Wróć do swojej tablicy.
+                </div>
+              </div>
+              <button
+                type="button"
+                aria-label="Zamknij logowanie"
+                onClick={() => setShowLoginModal(false)}
+                style={{
+                  width: "34px",
+                  height: "34px",
+                  borderRadius: "10px",
+                  border: "none",
+                  background: "rgba(15,23,42,0.06)",
+                  color: "#111827",
+                  display: "grid",
+                  placeItems: "center",
+                  cursor: "pointer",
+                  flexShrink: 0,
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+                marginBottom: "14px",
+              }}
+            >
+              {["Google", "Apple"].map((provider) => (
+                <button
+                  key={provider}
+                  type="button"
+                  style={{
+                    height: "42px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(15,23,42,0.12)",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    boxShadow: "0 8px 20px rgba(15,23,42,0.06)",
+                  }}
+                >
+                  {provider}
+                </button>
+              ))}
+            </div>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: "10px",
+                margin: "12px 0",
+                color: "#94a3b8",
+                fontSize: "12px",
+                fontWeight: 700,
+              }}
+            >
+              <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+              lub
+              <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+            </div>
+
+            <label
+              style={{
+                display: "block",
+                marginBottom: "10px",
+              }}
+            >
+              <span
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                }}
+              >
+                Email
+              </span>
+              <div style={{ position: "relative" }}>
+                <Mail
+                  size={17}
+                  style={{
+                    position: "absolute",
+                    left: "13px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#7c3aed",
+                  }}
+                />
+                <input
+                  type="email"
+                  autoComplete="email"
+                  placeholder="twoj@email.pl"
+                  style={{
+                    width: "100%",
+                    height: "44px",
+                    padding: "0 14px 0 40px",
+                    borderRadius: "13px",
+                    border: "1px solid rgba(15,23,42,0.14)",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    outlineColor: "#7c3aed",
+                  }}
+                />
+              </div>
+            </label>
+
+            <label style={{ display: "block", marginBottom: "14px" }}>
+              <span
+                style={{
+                  display: "block",
+                  marginBottom: "6px",
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                }}
+              >
+                Hasło
+              </span>
+              <div style={{ position: "relative" }}>
+                <Lock
+                  size={17}
+                  style={{
+                    position: "absolute",
+                    left: "13px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#7c3aed",
+                  }}
+                />
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="Wpisz hasło"
+                  style={{
+                    width: "100%",
+                    height: "44px",
+                    padding: "0 14px 0 40px",
+                    borderRadius: "13px",
+                    border: "1px solid rgba(15,23,42,0.14)",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    outlineColor: "#7c3aed",
+                  }}
+                />
+              </div>
+            </label>
+
+            <div
+              style={{
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                gap: "12px",
+                marginBottom: "16px",
+                color: "#64748b",
+                fontSize: "13px",
+                fontWeight: 700,
+              }}
+            >
+              <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <input type="checkbox" style={{ accentColor: "#7c3aed" }} />
+                Zapamiętaj mnie
+              </label>
+              <button
+                type="button"
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#7c3aed",
+                  fontSize: "13px",
+                  fontWeight: 800,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Nie pamiętasz?
+              </button>
+            </div>
+
+            <button
+              type="submit"
+              style={{
+                width: "100%",
+                height: "46px",
+                borderRadius: "14px",
+                border: "none",
+                background:
+                  "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                color: "#ffffff",
+                fontSize: "16px",
+                fontWeight: 800,
+                cursor: "pointer",
+                boxShadow: "0 14px 30px rgba(79,70,229,0.28)",
+              }}
+            >
+              Zaloguj się
+            </button>
+
+            <div
+              style={{
+                marginTop: "16px",
+                textAlign: "center",
+                color: "#64748b",
+                fontSize: "13px",
+                fontWeight: 700,
+              }}
+            >
+              Nie masz konta?{" "}
+              <button
+                type="button"
+                style={{
+                  border: "none",
+                  background: "transparent",
+                  color: "#7c3aed",
+                  fontSize: "13px",
+                  fontWeight: 900,
+                  cursor: "pointer",
+                  padding: 0,
+                }}
+              >
+                Zarejestruj się
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
       <div
+        onPointerEnter={() => setPenCursorPoint(null)}
+        onPointerMove={() => setPenCursorPoint(null)}
         style={{
           position: "fixed",
           top: 0,
@@ -1909,41 +4111,718 @@ export default function Page() {
           height: `${topBarHeight}px`,
           background:
             "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+          cursor: "default",
           zIndex: 50,
         }}
       >
         <button
-          aria-label={themeButtonLabel}
-          onClick={() => setCanvasBackground(nextCanvasTheme)}
+          aria-label="Ustawienia"
+          onClick={() => {
+            setShowSettingsMenu((prev) => !prev);
+            setShowPenMenu(false);
+            setShowTextMenu(false);
+            setShowEraserMenu(false);
+            setShowShapesMenu(false);
+          }}
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "16px",
+            transform: "translateY(-50%)",
+            width: "34px",
+            height: "34px",
+            border: "none",
+            background: "transparent",
+            color: "#ffffff",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            padding: 0,
+          }}
+        >
+          <Settings size={18} />
+        </button>
+
+        {showSettingsMenu && (
+          <div
+            onMouseDown={(e) => {
+              if (e.target === e.currentTarget) {
+                setShowSettingsMenu(false);
+              }
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.28)",
+              backdropFilter: "blur(8px)",
+              display: "grid",
+              placeItems: "center",
+              zIndex: 100,
+            }}
+          >
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              style={{
+                width: "min(920px, calc(100vw - 32px))",
+                height: "min(610px, calc(100vh - 82px))",
+                borderRadius: "18px",
+                border: `1px solid ${panelBorderColor}`,
+                background: popoverBackground,
+                color: panelTextColor,
+                fontFamily:
+                  'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                WebkitFontSmoothing: "antialiased",
+                MozOsxFontSmoothing: "grayscale",
+                textRendering: "geometricPrecision",
+                boxShadow: "0 24px 70px rgba(15,23,42,0.28)",
+                display: "grid",
+                gridTemplateColumns: "260px minmax(0, 1fr)",
+                overflow: "hidden",
+              }}
+            >
+              <aside
+                style={{
+                  padding: "22px 18px",
+                  borderRight: `1px solid ${panelDividerColor}`,
+                  background: isDarkCanvas
+                    ? "rgba(20,20,20,0.72)"
+                    : isGreyCanvas
+                    ? "rgba(31,41,55,0.22)"
+                    : "rgba(248,250,252,0.72)",
+                }}
+              >
+                <div
+                  style={{
+                    marginBottom: "22px",
+                    fontSize: "26px",
+                    fontWeight: 700,
+                    letterSpacing: "0",
+                    lineHeight: 1.1,
+                  }}
+                >
+                  Ustawienia
+                </div>
+
+                <nav style={{ display: "grid", gap: "8px" }}>
+                  {[
+                    { id: "background", label: "Tło i wygląd" },
+                    { id: "tools", label: "Narzędzia" },
+                    { id: "account", label: "Konto" },
+                  ].map((item) => {
+                    const isActive = activeSettingsSection === item.id;
+
+                    return (
+                      <button
+                        key={item.id}
+                        onClick={() =>
+                          setActiveSettingsSection(item.id as SettingsSection)
+                        }
+                        style={{
+                          height: "46px",
+                          padding: "0 14px",
+                          borderRadius: "8px",
+                          border: "none",
+                          background: isActive
+                            ? selectedControlBackground
+                            : "transparent",
+                          color: isActive ? panelTextColor : "#94a3b8",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "11px",
+                          fontSize: "15px",
+                          fontWeight: isActive ? 650 : 500,
+                          lineHeight: 1,
+                          textAlign: "left",
+                          cursor: "pointer",
+                        }}
+                      >
+                        {item.id === "background" ? (
+                          <Square size={18} />
+                        ) : item.id === "tools" ? (
+                          <Pen size={18} />
+                        ) : (
+                          <Lock size={18} />
+                        )}
+                        {item.label}
+                      </button>
+                    );
+                  })}
+                </nav>
+              </aside>
+
+              <main
+                style={{
+                  position: "relative",
+                  padding: "56px 36px 34px",
+                  overflowY: "auto",
+                }}
+              >
+                <button
+                  aria-label="Zamknij ustawienia"
+                  onClick={() => setShowSettingsMenu(false)}
+                  style={{
+                    position: "absolute",
+                    top: "18px",
+                    right: "18px",
+                    width: "34px",
+                    height: "34px",
+                    border: "none",
+                    borderRadius: "8px",
+                    background: "transparent",
+                    color: "#94a3b8",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={22} />
+                </button>
+
+                {activeSettingsSection === "background" && (
+                  <>
+                    <h2
+                      style={{
+                        margin: "0 0 24px",
+                        fontSize: "24px",
+                        fontWeight: 700,
+                        letterSpacing: "0",
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      Tło i wygląd
+                    </h2>
+                    <div
+                      style={{
+                        marginBottom: "12px",
+                        color: "#94a3b8",
+                        fontSize: "14px",
+                        fontWeight: 500,
+                        lineHeight: 1.25,
+                      }}
+                    >
+                      Tło tablicy
+                    </div>
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(auto-fit, minmax(96px, 1fr))",
+                        gap: "14px",
+                      }}
+                    >
+                      <input
+                        ref={backgroundColorInputRef}
+                        type="color"
+                        value={customCanvasBackground}
+                        onChange={(e) => {
+                          const nextColor = e.currentTarget.value;
+                          setCustomCanvasBackground(nextColor);
+                          setCanvasBackground(nextColor);
+                        }}
+                        aria-label="Wybierz własny kolor tła"
+                        style={{
+                          position: "absolute",
+                          opacity: 0,
+                          width: 0,
+                          height: 0,
+                          pointerEvents: "none",
+                        }}
+                      />
+                      {[
+                        {
+                          label: "Białe",
+                          value: lightCanvasColor,
+                          preview: lightCanvasColor,
+                        },
+                        {
+                          label: "Szare",
+                          value: greyCanvasColor,
+                          preview: greyCanvasColor,
+                        },
+                        {
+                          label: "Czarne",
+                          value: darkCanvasColor,
+                          preview: darkCanvasColor,
+                        },
+                        {
+                          label: "Kwiatowe",
+                          value: floralCanvasBackground,
+                          preview: `#ffffff url(${floralBackgroundImage}) center / cover no-repeat`,
+                        },
+                        {
+                          label: "Kolor",
+                          value: customCanvasBackground,
+                          preview:
+                            "linear-gradient(135deg, #ef4444 0%, #facc15 22%, #4ade80 42%, #38bdf8 58%, #7c3aed 76%, #ec4899 100%)",
+                          isCustom: true,
+                        },
+                      ].map((option) => {
+                        const isActive = option.isCustom
+                          ? canvasBackground === customCanvasBackground
+                          : canvasBackground === option.value;
+
+                        return (
+                          <button
+                            key={option.label}
+                            onClick={() => {
+                              if (option.isCustom) {
+                                setCanvasBackground(customCanvasBackground);
+                                backgroundColorInputRef.current?.click();
+                                return;
+                              }
+
+                              setCanvasBackground(option.value);
+                            }}
+                            style={{
+                              minHeight: "128px",
+                              padding: "12px",
+                              borderRadius: "14px",
+                              border: isActive
+                                ? "2px solid rgba(124,58,237,0.72)"
+                                : `1px solid ${panelBorderColor}`,
+                              background: isActive
+                                ? selectedControlBackground
+                                : controlBackground,
+                              color: panelTextColor,
+                              display: "flex",
+                              flexDirection: "column",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              gap: "11px",
+                              fontSize: "14px",
+                              fontWeight: 600,
+                              lineHeight: 1,
+                              cursor: "pointer",
+                              boxShadow: isActive
+                                ? "0 12px 30px rgba(124,58,237,0.14)"
+                                : "0 8px 20px rgba(15,23,42,0.06)",
+                            }}
+                          >
+                            <span
+                              style={{
+                                position: "relative",
+                                width: "64px",
+                                height: "64px",
+                                borderRadius: "16px",
+                                border:
+                                  option.value === lightCanvasColor
+                                    ? "1px solid rgba(15,23,42,0.14)"
+                                    : "1px solid rgba(255,255,255,0.35)",
+                                background:
+                                  option.isCustom && isActive
+                                    ? customCanvasBackground
+                                    : option.preview,
+                                display: "grid",
+                                placeItems: "center",
+                                boxShadow:
+                                  "inset 0 0 0 1px rgba(255,255,255,0.28)",
+                                overflow: "hidden",
+                              }}
+                            >
+                              {option.isCustom && !isActive && (
+                                <span
+                                  style={{
+                                    position: "absolute",
+                                    inset: "9px",
+                                    borderRadius: "999px",
+                                    border: "2px solid rgba(255,255,255,0.92)",
+                                    background: customCanvasBackground,
+                                    boxShadow:
+                                      "0 8px 18px rgba(15,23,42,0.18)",
+                                  }}
+                                />
+                              )}
+                              {isActive && (
+                                <span
+                                  style={{
+                                    width: "26px",
+                                    height: "26px",
+                                    borderRadius: "999px",
+                                    background: "#a3e635",
+                                    color: "#111827",
+                                    display: "grid",
+                                    placeItems: "center",
+                                    boxShadow:
+                                      "0 8px 18px rgba(132,204,22,0.28)",
+                                  }}
+                                >
+                                  <Check size={15} strokeWidth={3} />
+                                </span>
+                              )}
+                            </span>
+                            <span>{option.label}</span>
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div
+                      style={{
+                        marginTop: "26px",
+                        paddingTop: "22px",
+                        borderTop: `1px solid ${panelDividerColor}`,
+                      }}
+                    >
+                      <div
+                        style={{
+                          marginBottom: "12px",
+                          color: "#94a3b8",
+                          fontSize: "14px",
+                          fontWeight: 500,
+                          lineHeight: 1.25,
+                        }}
+                      >
+                        Tryb siatki
+                      </div>
+                      <div
+                        style={{
+                          display: "grid",
+                          gridTemplateColumns:
+                            "repeat(auto-fit, minmax(116px, 1fr))",
+                          gap: "12px",
+                        }}
+                      >
+                        {[
+                          {
+                            label: "Brak",
+                            value: "none",
+                            spacing: 0,
+                          },
+                          {
+                            label: "Mała",
+                            value: "small",
+                            spacing: 13,
+                          },
+                          {
+                            label: "Standard",
+                            value: "standard",
+                            spacing: 20,
+                          },
+                          {
+                            label: "Duża",
+                            value: "large",
+                            spacing: 32,
+                          },
+                        ].map((option) => {
+                          const isActive = gridMode === option.value;
+                          const previewBackground =
+                            option.value === "none"
+                              ? "linear-gradient(135deg, rgba(148,163,184,0.12), rgba(148,163,184,0.04))"
+                              : `linear-gradient(rgba(100,116,139,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,0.28) 1px, transparent 1px)`;
+
+                          return (
+                            <button
+                              key={option.value}
+                              onClick={() =>
+                                setGridMode(option.value as GridMode)
+                              }
+                              style={{
+                                minHeight: "98px",
+                                padding: "10px",
+                                borderRadius: "14px",
+                                border: isActive
+                                  ? "2px solid rgba(124,58,237,0.72)"
+                                  : `1px solid ${panelBorderColor}`,
+                                background: isActive
+                                  ? selectedControlBackground
+                                  : controlBackground,
+                                color: panelTextColor,
+                                display: "flex",
+                                flexDirection: "column",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                gap: "9px",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                                cursor: "pointer",
+                                boxShadow: isActive
+                                  ? "0 12px 30px rgba(124,58,237,0.12)"
+                                  : "0 8px 18px rgba(15,23,42,0.05)",
+                              }}
+                            >
+                              <span
+                                style={{
+                                  position: "relative",
+                                  width: "58px",
+                                  height: "42px",
+                                  borderRadius: "10px",
+                                  border: "1px solid rgba(148,163,184,0.26)",
+                                  background: previewBackground,
+                                  backgroundSize:
+                                    option.value === "none"
+                                      ? "100% 100%"
+                                      : `${option.spacing}px ${option.spacing}px`,
+                                  overflow: "hidden",
+                                }}
+                              >
+                                {option.value === "none" && (
+                                  <span
+                                    style={{
+                                      position: "absolute",
+                                      left: "9px",
+                                      right: "9px",
+                                      top: "50%",
+                                      height: "2px",
+                                      borderRadius: "999px",
+                                      background: "rgba(100,116,139,0.48)",
+                                      transform: "rotate(-28deg)",
+                                    }}
+                                  />
+                                )}
+                                {isActive && (
+                                  <span
+                                    style={{
+                                      position: "absolute",
+                                      right: "5px",
+                                      bottom: "5px",
+                                      width: "20px",
+                                      height: "20px",
+                                      borderRadius: "999px",
+                                      background: "#a3e635",
+                                      color: "#111827",
+                                      display: "grid",
+                                      placeItems: "center",
+                                      boxShadow:
+                                        "0 8px 18px rgba(132,204,22,0.24)",
+                                    }}
+                                  >
+                                    <Check size={12} strokeWidth={3} />
+                                  </span>
+                                )}
+                              </span>
+                              <span>{option.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop: "18px",
+                          padding: "14px 16px",
+                          borderRadius: "14px",
+                          border: `1px solid ${panelBorderColor}`,
+                          background: controlBackground,
+                          boxShadow: "0 8px 18px rgba(15,23,42,0.04)",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            gap: "12px",
+                            marginBottom: "10px",
+                            color: panelTextColor,
+                            fontSize: "13px",
+                            fontWeight: 600,
+                          }}
+                        >
+                          <span>Przezroczystość siatki</span>
+                          <span style={{ color: "#94a3b8" }}>
+                            {gridOpacity}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          className="modern-range"
+                          min="0"
+                          max="80"
+                          value={gridOpacity}
+                          onChange={(e) =>
+                            setGridOpacity(Number(e.currentTarget.value))
+                          }
+                          style={{
+                            accentColor: "#7c3aed",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  </>
+                )}
+
+                {activeSettingsSection === "tools" && (
+                  <>
+                    <h2
+                      style={{
+                        margin: "0 0 24px",
+                        fontSize: "24px",
+                        fontWeight: 700,
+                        letterSpacing: "0",
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      Narzędzia
+                    </h2>
+                    <div style={{ display: "grid", gap: "12px" }}>
+                      {[
+                        { label: "Kursor", value: "cursor" },
+                        { label: "Pióro", value: "pen" },
+                        { label: "Gumka", value: "eraser" },
+                      ].map((option) => {
+                        const isActive = tool === option.value;
+
+                        return (
+                          <button
+                            key={option.value}
+                            onClick={() =>
+                              setTool(option.value as "cursor" | "pen" | "eraser")
+                            }
+                            style={{
+                              minHeight: "58px",
+                              padding: "0 16px",
+                              borderRadius: "10px",
+                              border: `1px solid ${panelBorderColor}`,
+                              background: isActive
+                                ? selectedControlBackground
+                                : controlBackground,
+                              color: panelTextColor,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              fontSize: "15px",
+                              fontWeight: 600,
+                              lineHeight: 1,
+                              cursor: "pointer",
+                            }}
+                          >
+                            {option.label}
+                            {isActive && <Check size={18} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
+                {activeSettingsSection === "account" && (
+                  <>
+                    <h2
+                      style={{
+                        margin: "0 0 24px",
+                        fontSize: "24px",
+                        fontWeight: 700,
+                        letterSpacing: "0",
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      Konto
+                    </h2>
+                    <button
+                      onClick={() => {
+                        setShowSettingsMenu(false);
+                        setShowLoginModal(true);
+                      }}
+                      style={{
+                        width: "220px",
+                        height: "42px",
+                        borderRadius: "10px",
+                        border: "none",
+                        background:
+                          "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                        color: "#ffffff",
+                        fontSize: "14px",
+                        fontWeight: 650,
+                        cursor: "pointer",
+                      }}
+                    >
+                      Zaloguj się
+                    </button>
+                  </>
+                )}
+              </main>
+            </div>
+          </div>
+        )}
+
+        <button
+          aria-label="Zaloguj się"
+          onClick={() => setShowLoginModal(true)}
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: "153px",
+            transform: "translateY(-50%)",
+            height: "30px",
+            padding: "0 17px",
+            borderRadius: "999px",
+            border: "1.5px solid rgba(255,255,255,0.34)",
+            background: "rgba(255,255,255,0.08)",
+            color: "#ffffff",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontFamily:
+              'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fontSize: "14px",
+            fontWeight: 500,
+            letterSpacing: "0.01em",
+            lineHeight: 1,
+            cursor: "pointer",
+            backdropFilter: "blur(8px)",
+            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
+          }}
+        >
+          Zaloguj się
+        </button>
+
+        <button
+          aria-label="Zarejestruj się"
+          onMouseEnter={() => setIsRegisterHovered(true)}
+          onMouseLeave={() => setIsRegisterHovered(false)}
           style={{
             position: "absolute",
             top: "50%",
             right: "16px",
             transform: "translateY(-50%)",
-            width: "34px",
-            height: "34px",
-            borderRadius: "8px",
-            border: "1px solid rgba(255,255,255,0.45)",
-            background: "rgba(255,255,255,0.18)",
-            color: "#ffffff",
+            height: "30px",
+            padding: "0 17px",
+            borderRadius: "999px",
+            border: "1.5px solid rgba(255,255,255,0.74)",
+            background: isRegisterHovered
+              ? "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)"
+              : "#ffffff",
+            color: isRegisterHovered ? "#ffffff" : "#7c3aed",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",
+            fontFamily:
+              'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fontSize: "14px",
+            fontWeight: 500,
+            letterSpacing: "0.01em",
+            lineHeight: 1,
             cursor: "pointer",
-            backdropFilter: "blur(8px)",
+            boxShadow: "0 0 0 1px rgba(255,255,255,0.45)",
+            transition: "background 0.2s ease, color 0.2s ease",
           }}
         >
-          {nextCanvasTheme === greyCanvasColor ? (
-            <SunDim size={17} />
-          ) : nextCanvasTheme === darkCanvasColor ? (
-            <Moon size={17} />
-          ) : (
-            <Sun size={17} />
-          )}
+          <span
+            style={{
+              backgroundImage: isRegisterHovered
+                ? "none"
+                : "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+              backgroundClip: isRegisterHovered ? "border-box" : "text",
+              WebkitBackgroundClip: isRegisterHovered ? "border-box" : "text",
+              WebkitTextFillColor: isRegisterHovered
+                ? "#ffffff"
+                : "transparent",
+              display: "inline-block",
+              lineHeight: 1.25,
+              paddingBottom: "1px",
+              WebkitFontSmoothing: "antialiased",
+              MozOsxFontSmoothing: "grayscale",
+              textRendering: "geometricPrecision",
+            }}
+          >
+            Zarejestruj się
+          </span>
         </button>
+
       </div>
 
       <div
+        onPointerEnter={() => setPenCursorPoint(null)}
+        onPointerMove={() => setPenCursorPoint(null)}
         style={{
           position: "fixed",
           top: "50%",
@@ -1951,15 +4830,56 @@ export default function Page() {
           transform: "translateY(-50%)",
           display: "flex",
           flexDirection: "column",
-          gap: "10px",
-          padding: "8px",
-          borderRadius: "12px",
+          gap: "9px",
+          padding: "6px",
+          borderRadius: "11px",
           background: toolbarBackground,
           backdropFilter: "blur(10px)",
           boxShadow: "0 8px 25px rgba(0,0,0,0.18)",
+          cursor: "default",
           zIndex: 20,
         }}
       >
+        <input
+          ref={fileUploadRef}
+          type="file"
+          multiple
+          onChange={(e) => {
+            e.currentTarget.value = "";
+          }}
+          style={{ display: "none" }}
+        />
+
+        <button
+          aria-label="Upload files"
+          onClick={() => {
+            if (activeText) {
+              commitActiveText();
+            }
+
+            setShowPenMenu(false);
+            setShowTextMenu(false);
+            setShowEraserMenu(false);
+            setShowShapesMenu(false);
+            fileUploadRef.current?.click();
+          }}
+          style={{
+            width: "38px",
+            height: "38px",
+            borderRadius: "8px",
+            border: "none",
+            background: inactiveToolBackground,
+            color: panelTextColor,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Upload size={18} />
+        </button>
+
         <button
           onClick={() => {
             setTool("cursor");
@@ -1969,8 +4889,8 @@ export default function Page() {
             setShowShapesMenu(false);
           }}
           style={{
-            width: "42px",
-            height: "42px",
+            width: "38px",
+            height: "38px",
             borderRadius: "8px",
             border: "none",
             background: isCursorActive ? "#7c3aed" : inactiveToolBackground,
@@ -1982,22 +4902,21 @@ export default function Page() {
             transition: "all 0.2s ease",
           }}
         >
-          <MousePointer2 size={18} />
+          <MousePointer2 size={17} />
         </button>
 
         <div style={{ position: "relative" }}>
           <button
             onClick={() => {
-              const nextIsOpen = !(tool === "text" && showTextMenu);
               setTool("text");
-              setShowTextMenu(nextIsOpen);
+              setShowTextMenu(false);
               setShowPenMenu(false);
               setShowEraserMenu(false);
               setShowShapesMenu(false);
             }}
             style={{
-              width: "42px",
-              height: "42px",
+              width: "38px",
+              height: "38px",
               borderRadius: "8px",
               border: "none",
               background: isTextActive ? "#7c3aed" : inactiveToolBackground,
@@ -2009,138 +4928,86 @@ export default function Page() {
               transition: "all 0.2s ease",
             }}
           >
-            <Type size={19} />
+            <Type size={18} />
           </button>
-
-          {showTextMenu && isTextActive && (
-            <div
-              style={{
-                position: "absolute",
-                top: "50%",
-                left: "54px",
-                transform: "translateY(-50%)",
-                padding: "10px",
-                borderRadius: "12px",
-                background: popoverBackground,
-                color: panelTextColor,
-                display: "flex",
-                gap: "4px",
-                boxSizing: "border-box",
-                boxShadow: "0 8px 25px rgba(0,0,0,0.18)",
-              }}
-            >
-              {textFonts.map((font) => (
-                <button
-                  key={font.name}
-                  aria-label={`${font.name} writing style`}
-                  onClick={() => {
-                    setTextFontFamily(font.family);
-                    setTextFontWeight(font.weight);
-                    setActiveText((prev) =>
-                      prev
-                        ? {
-                            ...prev,
-                            fontFamily: font.family,
-                            fontWeight: font.weight,
-                          }
-                        : prev
-                    );
-                  }}
-                  style={{
-                    width: "34px",
-                    height: "28px",
-                    borderRadius: "7px",
-                    border:
-                      textFontFamily === font.family &&
-                      textFontWeight === font.weight
-                        ? "2px solid #7c3aed"
-                        : `1px solid ${panelBorderColor}`,
-                    background:
-                      textFontFamily === font.family &&
-                      textFontWeight === font.weight
-                        ? selectedControlBackground
-                        : controlBackground,
-                    color: panelTextColor,
-                    display: "grid",
-                    placeItems: "center",
-                    cursor: "pointer",
-                    padding: 0,
-                    fontFamily: font.family,
-                    fontSize: "14px",
-                    fontWeight: font.weight,
-                    lineHeight: 1,
-                  }}
-                >
-                  {font.preview}
-                </button>
-              ))}
-            </div>
-          )}
         </div>
 
-        <button
-          aria-label="Add writable square"
-          onClick={() => {
-            if (activeText) {
-              commitActiveText();
-            }
+        <div style={{ position: "relative" }}>
+          <button
+            aria-label="Add writable square"
+            onClick={() => {
+              if (activeText) {
+                commitActiveText();
+              }
 
-            const boundedTextBox = keepTextBoxInViewport(
-              {
-                x: window.innerWidth / 2 - textBoxSize / 2,
-                y:
-                  topBarHeight +
-                  (window.innerHeight - topBarHeight) / 2 -
-                  textBoxSize / 2,
-              },
-              textBoxSize,
-              textBoxSize
-            );
+              const boundedTextBox = keepTextBoxInViewport(
+                {
+                  x: window.innerWidth / 2 - textBoxSize / 2,
+                  y:
+                    topBarHeight +
+                    (window.innerHeight - topBarHeight) / 2 -
+                    textBoxSize / 2,
+                },
+                textBoxSize,
+                textBoxSize
+              );
 
-            setTool("textbox");
-            setShowPenMenu(false);
-            setShowTextMenu(false);
-            setShowEraserMenu(false);
-            setShowShapesMenu(false);
-            setActiveText({
-              point: boundedTextBox.point,
-              screenPoint: boundedTextBox.screenPoint,
-              value: "",
-              color: textBoxTextColor,
-              runs: [],
-              width: boundedTextBox.width,
-              height: boundedTextBox.height,
-              fontSize: 24,
-              fontFamily: textFontFamily,
-              fontWeight: textFontWeight,
-              backgroundColor: textBoxBackground,
-              editingIndex: undefined,
-            });
-          }}
-          style={{
-            width: "42px",
-            height: "42px",
-            borderRadius: "8px",
-            border: "none",
-            background: isTextBoxActive ? "#7c3aed" : inactiveToolBackground,
-            color: isTextBoxActive ? "white" : panelTextColor,
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            transition: "all 0.2s ease",
-            position: "relative",
-          }}
-        >
-          <Square size={19} />
-          <Type
-            size={11}
-            style={{
-              position: "absolute",
-              right: "9px",
-              bottom: "8px",
+              setTool("textbox");
+              setShowPenMenu(false);
+              setShowTextMenu(false);
+              setShowEraserMenu(false);
+              setShowShapesMenu(false);
+              setTextSelection({ start: 0, end: 0 });
+              setActiveText((prev) =>
+                prev && prev.backgroundColor
+                  ? prev
+                  : {
+                      point: boundedTextBox.point,
+                      screenPoint: boundedTextBox.screenPoint,
+                      value: "",
+                      color: textBoxTextColor,
+                      runs: [],
+                      width: boundedTextBox.width,
+                      height: boundedTextBox.height,
+                      fontSize: 24,
+                      fontFamily: textFontFamily,
+                      fontWeight: textFontWeight,
+                      fontStyle: "normal",
+                      underline: false,
+                      typingFontSize: 24,
+                      textAlign: "center",
+                      backgroundColor: getTextBoxBackgroundWithOpacity(textBoxOpacity),
+                      editingIndex: undefined,
+                    }
+              );
             }}
-          />
-        </button>
+            style={{
+              width: "38px",
+              height: "38px",
+              borderRadius: "8px",
+              border: "none",
+              background: isTextBoxActive ? "#7c3aed" : inactiveToolBackground,
+              color: isTextBoxActive ? "white" : panelTextColor,
+              display: "grid",
+              placeItems: "center",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+              position: "relative",
+            }}
+          >
+            <Square size={18} />
+            <Type
+              size={11}
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "50%",
+                transform: "translate(-50%, -50%)",
+              }}
+            />
+          </button>
+
+        </div>
 
         <div style={{ position: "relative" }}>
           <button
@@ -2153,8 +5020,8 @@ export default function Page() {
               setShowShapesMenu(false);
             }}
             style={{
-              width: "42px",
-              height: "42px",
+              width: "38px",
+              height: "38px",
               borderRadius: "8px",
               border: "none",
               background: tool === "pen" ? "#7c3aed" : inactiveToolBackground,
@@ -2166,7 +5033,7 @@ export default function Page() {
               transition: "all 0.2s ease",
             }}
           >
-            <Pen size={18} />
+            <Pen size={17} />
           </button>
 
           {showPenMenu && isPenActive && (
@@ -2391,8 +5258,8 @@ export default function Page() {
               setShowShapesMenu(false);
             }}
             style={{
-              width: "42px",
-              height: "42px",
+              width: "38px",
+              height: "38px",
               borderRadius: "8px",
               border: "none",
               background:
@@ -2405,7 +5272,7 @@ export default function Page() {
               transition: "all 0.2s ease",
             }}
           >
-            <Eraser size={18} />
+            <Eraser size={17} />
           </button>
 
           {showEraserMenu && tool === "eraser" && (
@@ -2453,7 +5320,7 @@ export default function Page() {
                   width: `${Math.max(8, eraserWidth)}px`,
                   height: `${Math.max(8, eraserWidth)}px`,
                   borderRadius: "999px",
-                  background: canvasBackground,
+                  background: canvasFillColor,
                   flexShrink: 0,
                 }}
               />
@@ -2464,8 +5331,8 @@ export default function Page() {
         <button
           onClick={clearCanvas}
           style={{
-            width: "42px",
-            height: "42px",
+            width: "38px",
+            height: "38px",
             borderRadius: "8px",
             border: "none",
             background: inactiveToolBackground,
@@ -2477,7 +5344,7 @@ export default function Page() {
             transition: "all 0.2s ease",
           }}
         >
-          <Trash2 size={18} />
+          <Trash2 size={17} />
         </button>
 
         <div style={{ position: "relative" }}>
@@ -2489,8 +5356,8 @@ export default function Page() {
               setShowEraserMenu(false);
             }}
             style={{
-              width: "42px",
-              height: "42px",
+              width: "38px",
+              height: "38px",
               borderRadius: "8px",
               border: "none",
               background: ["circle", "square", "arrow", "line"].includes(tool)
@@ -2505,7 +5372,7 @@ export default function Page() {
               cursor: "pointer",
             }}
           >
-            <Shapes size={18} />
+            <Shapes size={17} />
           </button>
 
           {showShapesMenu && (
