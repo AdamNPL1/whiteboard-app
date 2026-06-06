@@ -1244,6 +1244,167 @@ export default function Page() {
     point.y >= bounds.y &&
     point.y <= bounds.y + bounds.height;
 
+  const getDistanceToSegment = (point: Point, start: Point, end: Point) => {
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const lengthSquared = dx * dx + dy * dy;
+
+    if (lengthSquared === 0) {
+      return Math.hypot(point.x - start.x, point.y - start.y);
+    }
+
+    const t = Math.max(
+      0,
+      Math.min(
+        1,
+        ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared
+      )
+    );
+    const projection = {
+      x: start.x + t * dx,
+      y: start.y + t * dy,
+    };
+
+    return Math.hypot(point.x - projection.x, point.y - projection.y);
+  };
+
+  const getOrientation = (a: Point, b: Point, c: Point) =>
+    (b.y - a.y) * (c.x - b.x) - (b.x - a.x) * (c.y - b.y);
+
+  const areSegmentsIntersecting = (
+    firstStart: Point,
+    firstEnd: Point,
+    secondStart: Point,
+    secondEnd: Point
+  ) => {
+    const firstOrientation = getOrientation(firstStart, firstEnd, secondStart);
+    const secondOrientation = getOrientation(firstStart, firstEnd, secondEnd);
+    const thirdOrientation = getOrientation(secondStart, secondEnd, firstStart);
+    const fourthOrientation = getOrientation(secondStart, secondEnd, firstEnd);
+
+    return (
+      firstOrientation * secondOrientation < 0 &&
+      thirdOrientation * fourthOrientation < 0
+    );
+  };
+
+  const getSegmentDistance = (
+    firstStart: Point,
+    firstEnd: Point,
+    secondStart: Point,
+    secondEnd: Point
+  ) => {
+    if (areSegmentsIntersecting(firstStart, firstEnd, secondStart, secondEnd)) {
+      return 0;
+    }
+
+    return Math.min(
+      getDistanceToSegment(firstStart, secondStart, secondEnd),
+      getDistanceToSegment(firstEnd, secondStart, secondEnd),
+      getDistanceToSegment(secondStart, firstStart, firstEnd),
+      getDistanceToSegment(secondEnd, firstStart, firstEnd)
+    );
+  };
+
+  const isPointHitByEraser = (point: Point, eraser: Stroke, radius: number) => {
+    if (!eraser.points.length) return false;
+
+    if (eraser.points.length === 1) {
+      return Math.hypot(point.x - eraser.points[0].x, point.y - eraser.points[0].y) <= radius;
+    }
+
+    for (let index = 1; index < eraser.points.length; index += 1) {
+      if (
+        getDistanceToSegment(
+          point,
+          eraser.points[index - 1],
+          eraser.points[index]
+        ) <= radius
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const isSegmentHitByEraser = (
+    start: Point,
+    end: Point,
+    eraser: Stroke,
+    radius: number
+  ) => {
+    if (!eraser.points.length) return false;
+
+    if (eraser.points.length === 1) {
+      return getDistanceToSegment(eraser.points[0], start, end) <= radius;
+    }
+
+    for (let index = 1; index < eraser.points.length; index += 1) {
+      if (
+        getSegmentDistance(
+          start,
+          end,
+          eraser.points[index - 1],
+          eraser.points[index]
+        ) <= radius
+      ) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const erasePenStroke = (stroke: Stroke, eraser: Stroke) => {
+    const erasedSegments: Stroke[] = [];
+    let currentSegment: Point[] = [];
+    const hitRadius = eraser.width / 2 + stroke.width / 2;
+
+    const finishSegment = () => {
+      if (!currentSegment.length) return;
+
+      erasedSegments.push({
+        ...stroke,
+        points: currentSegment,
+      });
+      currentSegment = [];
+    };
+
+    for (let index = 0; index < stroke.points.length; index += 1) {
+      const point = stroke.points[index];
+      const previousPoint = stroke.points[index - 1];
+      const pointWasErased = isPointHitByEraser(point, eraser, hitRadius);
+      const segmentWasErased =
+        previousPoint &&
+        isSegmentHitByEraser(previousPoint, point, eraser, hitRadius);
+
+      if (pointWasErased || segmentWasErased) {
+        finishSegment();
+
+        if (!pointWasErased && segmentWasErased) {
+          currentSegment = [point];
+        }
+
+        continue;
+      }
+
+      currentSegment.push(point);
+    }
+
+    finishSegment();
+    return erasedSegments;
+  };
+
+  const eraseElements = (targetElements: CanvasElement[], eraser: Stroke) =>
+    targetElements.flatMap((element) => {
+      if (element.kind !== "stroke" || element.tool !== "pen") {
+        return [element];
+      }
+
+      return erasePenStroke(element, eraser);
+    });
+
   const getSelectedPenElementIndexes = (selection: SelectionBox) => {
     const selectedIndexes = new Set<number>();
     const selectionBounds = getSelectionBounds(selection);
@@ -2296,12 +2457,17 @@ export default function Page() {
 
     if (currentStroke.current) {
       if (currentStroke.current.tool === "eraser") {
+        const eraserStroke = {
+          ...currentStroke.current,
+          points: [...currentStroke.current.points],
+        };
+
+        setElements((prev) => eraseElements(prev, eraserStroke));
         currentStroke.current = null;
         setIsDrawing(false);
         setShapeStart(null);
         setSnapshot(null);
         shapeEnd.current = null;
-        redrawCanvas();
         return;
       }
 
@@ -4419,19 +4585,6 @@ export default function Page() {
                                 overflow: "hidden",
                               }}
                             >
-                              {option.isCustom && !isActive && (
-                                <span
-                                  style={{
-                                    position: "absolute",
-                                    inset: "9px",
-                                    borderRadius: "999px",
-                                    border: "2px solid rgba(255,255,255,0.92)",
-                                    background: customCanvasBackground,
-                                    boxShadow:
-                                      "0 8px 18px rgba(15,23,42,0.18)",
-                                  }}
-                                />
-                              )}
                               {isActive && (
                                 <span
                                   style={{
