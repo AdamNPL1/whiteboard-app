@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useRef, useState } from "react";
+import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   Pen,
   Eraser,
@@ -16,17 +16,27 @@ import {
   AlignRight,
   ArrowRight,
   Bold,
+  CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ChevronDown,
   ChevronUp,
   Italic,
+  LayoutGrid,
   List,
   ListOrdered,
   Lock,
   Mail,
+  Clock3,
+  Monitor,
+  Plus,
+  Search,
   Settings,
+  Star,
   Underline,
   Upload,
+  UserRound,
   X,
 } from "lucide-react";
 
@@ -119,9 +129,53 @@ type SettingsSection = "background" | "tools" | "account";
 type GridMode = "none" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
+type AuthMode = "login" | "register";
+type AuthStep = "credentials" | "verify";
+type PublicAccount = {
+  id: string;
+  name: string;
+  email: string;
+  emailVerified: boolean;
+  createdAt: string;
+};
+type BoardSummary = {
+  id: string;
+  name: string;
+  createdAt: string;
+  updatedAt: string;
+  deletedAt?: string;
+  starred?: boolean;
+  previewDocument: BoardDocument;
+};
+type CalendarEntry = {
+  id: string;
+  date: string;
+  startHour: string;
+  endHour: string;
+  title: string;
+  color: string;
+};
+type BoardDocument = {
+  elements: CanvasElement[];
+  canvasBackground: string;
+  customCanvasBackground: string;
+  gridMode: GridMode;
+  gridOpacity: number;
+  calendarEntries: CalendarEntry[];
+};
+type BoardBrowserView =
+  | "all"
+  | "recent"
+  | "mine"
+  | "starred"
+  | "trash"
+  | "calendar"
+  | "plan";
 
 export default function Page() {
   const topBarHeight = 48;
+  const appSansFontFamily =
+    'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
   const darkCanvasColor = "#111111";
@@ -169,20 +223,143 @@ export default function Page() {
   ];
   const textFonts = [
     {
-      name: "Hand",
-      family: '"Comic Sans MS", "Comic Sans", "Trebuchet MS", cursive',
+      name: "Sans",
+      family: appSansFontFamily,
       weight: 400,
       preview: "Aa",
     },
-    { name: "Serif", family: "Georgia, serif", weight: 400, preview: "Aa" },
     {
-      name: "Round",
-      family: '"Trebuchet MS", Arial, sans-serif',
-      weight: 700,
+      name: "UI",
+      family: '"Segoe UI", "Helvetica Neue", Arial, sans-serif',
+      weight: 400,
       preview: "Aa",
     },
-    { name: "Clean", family: "Arial, sans-serif", weight: 400, preview: "Aa" },
+    {
+      name: "Neo",
+      family: '"Trebuchet MS", "Verdana", Arial, sans-serif',
+      weight: 400,
+      preview: "Aa",
+    },
+    {
+      name: "Clean",
+      family: 'Arial, "Helvetica Neue", sans-serif',
+      weight: 400,
+      preview: "Aa",
+    },
   ];
+  const calendarHourOptions = Array.from({ length: 48 }, (_, index) => {
+    const hour = Math.floor(index / 2);
+    const minutes = index % 2 === 0 ? "00" : "30";
+    const hourLabel =
+      hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+    const meridiem = hour < 12 ? "AM" : "PM";
+    const minuteLabel = minutes === "00" ? "" : `:${minutes}`;
+    const compactLabel = `${hour.toString().padStart(2, "0")}:${minutes}`;
+
+    return {
+      value: `${hour.toString().padStart(2, "0")}:${minutes}`,
+      label: `${hourLabel}:${minutes} ${meridiem}`,
+      shortLabel: compactLabel,
+    };
+  });
+  const calendarEntryColors = [
+    "#7c3aed",
+    "#dc2626",
+    "#ea580c",
+    "#2563eb",
+    "#0891b2",
+    "#16a34a",
+    "#475569",
+    "#db2777",
+  ];
+  const isValidCalendarEntryColor = (
+    color: string | undefined
+  ): color is string => typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color);
+  const getFallbackCalendarEntryColor = (entryId: string) => {
+    const colorIndex = Array.from(entryId).reduce(
+      (total, character) => total + character.charCodeAt(0),
+      0
+    );
+
+    return calendarEntryColors[colorIndex % calendarEntryColors.length];
+  };
+  const normalizeCalendarEntryColor = (
+    color: string | undefined,
+    entryId: string
+  ) => {
+    if (isValidCalendarEntryColor(color)) {
+      return color;
+    }
+
+    return getFallbackCalendarEntryColor(entryId);
+  };
+  const normalizeCalendarHourValue = (
+    hour: string | undefined,
+    fallback: string
+  ) =>
+    typeof hour === "string" &&
+    calendarHourOptions.some((option) => option.value === hour)
+      ? hour
+      : fallback;
+  const getNextCalendarHourValue = (hour: string) => {
+    const currentIndex = calendarHourOptions.findIndex(
+      (option) => option.value === hour
+    );
+
+    if (currentIndex === -1) return "12:30";
+    return calendarHourOptions[Math.min(currentIndex + 1, calendarHourOptions.length - 1)]
+      .value;
+  };
+  const normalizeCalendarEntries = (entries: unknown[]): CalendarEntry[] =>
+    entries.flatMap((entry, index) => {
+      if (!entry || typeof entry !== "object") return [];
+
+      const candidate = entry as {
+        id?: string;
+        date?: string;
+        startHour?: string;
+        endHour?: string;
+        hour?: string;
+        title?: string;
+        color?: string;
+      };
+
+      if (typeof candidate.date !== "string") return [];
+
+      const startHour = normalizeCalendarHourValue(
+        typeof candidate.startHour === "string"
+          ? candidate.startHour
+          : candidate.hour,
+        "12:00"
+      );
+      const endHour = normalizeCalendarHourValue(
+        typeof candidate.endHour === "string"
+          ? candidate.endHour
+          : typeof candidate.startHour === "string"
+          ? candidate.startHour
+          : candidate.hour,
+        "13:00"
+      );
+
+      return [
+        {
+          id:
+            typeof candidate.id === "string" && candidate.id.length > 0
+              ? candidate.id
+              : `calendar-entry-${candidate.date}-${index}`,
+          date: candidate.date,
+          startHour,
+          endHour,
+          title: typeof candidate.title === "string" ? candidate.title : "",
+          color: normalizeCalendarEntryColor(
+            candidate.color,
+            typeof candidate.id === "string" && candidate.id.length > 0
+              ? candidate.id
+              : `calendar-entry-${candidate.date}-${index}`
+          ),
+        },
+      ];
+    });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
@@ -227,9 +404,37 @@ export default function Page() {
   const [isPanning, setIsPanning] = useState(false);
   const [penCursorPoint, setPenCursorPoint] = useState<Point | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [authMode, setAuthMode] = useState<AuthMode>("login");
+  const [authStep, setAuthStep] = useState<AuthStep>("credentials");
+  const [authName, setAuthName] = useState("");
+  const [authEmail, setAuthEmail] = useState("");
+  const [authPassword, setAuthPassword] = useState("");
+  const [authConfirmPassword, setAuthConfirmPassword] = useState("");
+  const [authCode, setAuthCode] = useState("");
+  const [authMessage, setAuthMessage] = useState("");
+  const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [currentAccountEmail, setCurrentAccountEmail] = useState("");
+  const [currentAccountId, setCurrentAccountId] = useState("");
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+  const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsSection>("background");
+  const [showBoardsMenu, setShowBoardsMenu] = useState(false);
+  const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [activeBoardId, setActiveBoardId] = useState("");
+  const [editingBoardId, setEditingBoardId] = useState("");
+  const [editingBoardName, setEditingBoardName] = useState("");
+  const [boardSearchQuery, setBoardSearchQuery] = useState("");
+  const [boardBrowserView, setBoardBrowserView] =
+    useState<BoardBrowserView>("all");
+  const [calendarCursor, setCalendarCursor] = useState(() => {
+    const now = new Date();
+    return new Date(now.getFullYear(), now.getMonth(), 1);
+  });
+  const [calendarEntries, setCalendarEntries] = useState<CalendarEntry[]>([]);
+  const [editingCalendarEntryId, setEditingCalendarEntryId] = useState("");
+  const [selectedCalendarEntryId, setSelectedCalendarEntryId] = useState("");
+  const [isBoardsLoading, setIsBoardsLoading] = useState(false);
   const [isRegisterHovered, setIsRegisterHovered] = useState(false);
   const [isFloralBackgroundLoaded, setIsFloralBackgroundLoaded] =
     useState(false);
@@ -242,6 +447,12 @@ export default function Page() {
   const [textSizeMenu, setTextSizeMenu] = useState<SelectionMenu | null>(null);
   const shapeEnd = useRef<Point | null>(null);
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const boardNameInputRef = useRef<HTMLInputElement | null>(null);
+  const boardsMenuContainerRef = useRef<HTMLDivElement | null>(null);
+  const profileMenuContainerRef = useRef<HTMLDivElement | null>(null);
+  const calendarScrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const calendarBottomScrollbarRef = useRef<HTMLDivElement | null>(null);
+  const activeCalendarScrollSyncRef = useRef<"main" | "bottom" | null>(null);
   const offsetRef = useRef<Point>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
   const panStart = useRef<{ screen: Point; offset: Point } | null>(null);
@@ -264,12 +475,19 @@ export default function Page() {
     handle: TextResizeHandle;
   } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
+  const penCursorPointRef = useRef<Point | null>(null);
+  const pendingPenCursorFrame = useRef<number | null>(null);
+  const pendingPenCursorPoint = useRef<Point | null>(null);
 
   const [elements, setElements] = useState<CanvasElement[]>([]);
 
   const currentStroke = useRef<Stroke | null>(null);
+  const isDrawingRef = useRef(false);
+  const renderedLiveStrokePointCountRef = useRef(0);
   const latestRedrawCanvasRef = useRef<() => void>(() => {});
   const pendingRedrawFrame = useRef<number | null>(null);
+  const autosaveBoardTimeoutRef = useRef<number | null>(null);
+  const suppressBoardAutosaveUntilRef = useRef(0);
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -601,6 +819,1126 @@ export default function Page() {
     const normalizedOpacity = Math.min(1, Math.max(0.1, opacity));
     return `rgba(47, 47, 47, ${normalizedOpacity.toFixed(2)})`;
   };
+
+  const openAuthModal = (mode: AuthMode) => {
+    setAuthMode(mode);
+    setAuthStep("credentials");
+    setAuthName("");
+    setAuthPassword("");
+    setAuthConfirmPassword("");
+    setAuthCode("");
+    setAuthMessage("");
+    setShowLoginModal(true);
+  };
+
+  const readAuthResponse = async (response: Response) => {
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      message?: string;
+      user?: PublicAccount;
+    };
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Something went wrong.");
+    }
+
+    return data;
+  };
+
+  const handleAuthSubmit = async () => {
+    if (isAuthSubmitting) return;
+
+    const email = authEmail.trim().toLowerCase();
+    const name = authName.trim();
+    const password = authPassword;
+    const confirmPassword = authConfirmPassword;
+
+    if (!email) {
+      setAuthMessage("Enter your email address.");
+      return;
+    }
+
+    setIsAuthSubmitting(true);
+    setAuthMessage("");
+
+    try {
+      if (authStep === "verify") {
+        const data = await readAuthResponse(
+          await fetch("/api/auth/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ email, code: authCode }),
+          })
+        );
+
+        setCurrentAccountId(data.user?.id ?? "");
+        setCurrentAccountEmail(data.user?.email ?? email);
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        setAuthCode("");
+        setShowLoginModal(false);
+        return;
+      }
+
+      if (!password) {
+        setAuthMessage("Enter your password.");
+        return;
+      }
+
+      if (authMode === "register") {
+        const data = await readAuthResponse(
+          await fetch("/api/auth/register", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name, email, password, confirmPassword }),
+          })
+        );
+
+        setAuthStep("verify");
+        setAuthPassword("");
+        setAuthConfirmPassword("");
+        setAuthCode("");
+        setAuthMessage(data.message ?? "Verification code sent.");
+        return;
+      }
+
+      const data = await readAuthResponse(
+        await fetch("/api/auth/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        })
+      );
+
+      setCurrentAccountId(data.user?.id ?? "");
+      setCurrentAccountEmail(data.user?.email ?? email);
+      setAuthPassword("");
+      setAuthMessage("");
+      setShowLoginModal(false);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Something went wrong.";
+      setAuthMessage(message);
+
+      if (message.toLowerCase().includes("verify")) {
+        setAuthStep("verify");
+      }
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
+  const resendVerificationCode = async () => {
+    if (!authEmail.trim() || isAuthSubmitting) return;
+
+    setIsAuthSubmitting(true);
+    setAuthMessage("");
+
+    try {
+      const data = await readAuthResponse(
+        await fetch("/api/auth/resend", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
+        })
+      );
+
+      setAuthMessage(data.message ?? "A new verification code was sent.");
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error ? error.message : "Could not resend the code."
+      );
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
+  const signOut = async () => {
+    setShowProfileMenu(false);
+
+    if (currentAccountId && activeBoardId) {
+      await persistBoard(activeBoardId).catch(() => null);
+    }
+
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    setCurrentAccountId("");
+    setCurrentAccountEmail("");
+    setBoards([]);
+    setActiveBoardId("");
+    applyBoardDocument({
+      elements: [],
+      canvasBackground: lightCanvasColor,
+      customCanvasBackground: "#131619",
+      gridMode: "none",
+      gridOpacity: 24,
+      calendarEntries: [],
+    });
+  };
+
+  const loadCurrentAccount = async () => {
+    const data = (await fetch("/api/auth/me")
+      .then((response) => response.json())
+      .catch(() => ({ user: null }))) as { user: PublicAccount | null };
+
+    setCurrentAccountId(data.user?.id ?? "");
+    setCurrentAccountEmail(data.user?.email ?? "");
+  };
+
+  const closeAuthModal = () => {
+    setShowLoginModal(false);
+    setAuthMessage("");
+    setAuthCode("");
+  };
+
+  const applyBoardDocument = (document: BoardDocument) => {
+    suppressBoardAutosaveUntilRef.current = Date.now() + 1200;
+    currentStroke.current = null;
+    setIsDrawing(false);
+    setShapeStart(null);
+    setSnapshot(null);
+    shapeEnd.current = null;
+    setActiveText(null);
+    setSelectionBox(null);
+    setSelectionMenu(null);
+    setElements(Array.isArray(document.elements) ? document.elements : []);
+    setCanvasBackground(document.canvasBackground);
+    setCustomCanvasBackground(document.customCanvasBackground);
+    setGridMode(document.gridMode);
+    setGridOpacity(document.gridOpacity);
+    setCalendarEntries(
+      normalizeCalendarEntries(
+        Array.isArray(document.calendarEntries) ? document.calendarEntries : []
+      )
+    );
+  };
+
+  const readBoardResponse = async (response: Response) => {
+    const data = (await response.json().catch(() => ({}))) as {
+      error?: string;
+      boards?: BoardSummary[];
+      activeBoardId?: string;
+      maxBoards?: number;
+      board?: {
+        id: string;
+        name: string;
+        createdAt?: string;
+        updatedAt?: string;
+        deletedAt?: string;
+        starred?: boolean;
+        previewDocument?: BoardDocument;
+        document: BoardDocument;
+      } | null;
+    };
+
+    if (!response.ok) {
+      throw new Error(data.error ?? "Could not load boards.");
+    }
+
+    return data;
+  };
+
+  const persistBoard = async (boardId: string) => {
+    if (!currentAccountId || !boardId) return;
+
+    const data = await readBoardResponse(
+      await fetch(`/api/boards/${boardId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          elements,
+          canvasBackground,
+          customCanvasBackground,
+          gridMode,
+          gridOpacity,
+          calendarEntries,
+        }),
+      })
+    );
+
+    if (data.board && typeof data.board.updatedAt === "string") {
+      const savedBoard = data.board as NonNullable<typeof data.board> & {
+        updatedAt: string;
+      };
+      const savedUpdatedAt: string = savedBoard.updatedAt;
+
+      setBoards((previousBoards) =>
+        previousBoards.map<BoardSummary>((board) =>
+          board.id === boardId
+            ? {
+                ...board,
+                name: savedBoard.name ?? board.name,
+                createdAt: savedBoard.createdAt ?? board.createdAt,
+                updatedAt: savedUpdatedAt,
+                deletedAt: savedBoard.deletedAt,
+                starred: savedBoard.starred ?? board.starred,
+                previewDocument: savedBoard.document ?? board.previewDocument,
+              }
+            : board
+        )
+      );
+    }
+  };
+
+  const loadBoards = async () => {
+    if (!currentAccountId) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(await fetch("/api/boards"));
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? "");
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      } else {
+        applyBoardDocument({
+          elements: [],
+          canvasBackground: lightCanvasColor,
+          customCanvasBackground: "#131619",
+          gridMode: "none",
+          gridOpacity: 24,
+          calendarEntries: [],
+        });
+      }
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const switchBoard = async (boardId: string) => {
+    if (!currentAccountId || !boardId || isBoardsLoading) return;
+    if (boardId === activeBoardId) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      if (activeBoardId) {
+        await persistBoard(activeBoardId);
+      }
+
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${boardId}/select`, {
+          method: "POST",
+        })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? boardId);
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      } else {
+        applyBoardDocument({
+          elements: [],
+          canvasBackground: lightCanvasColor,
+          customCanvasBackground: "#131619",
+          gridMode: "none",
+          gridOpacity: 24,
+          calendarEntries: [],
+        });
+      }
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const createBoard = async () => {
+    if (!currentAccountId || liveBoardsCount >= 10 || isBoardsLoading) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      if (activeBoardId) {
+        await persistBoard(activeBoardId);
+      }
+
+      const data = await readBoardResponse(
+        await fetch("/api/boards", {
+          method: "POST",
+        })
+      );
+
+      setBoardBrowserView("all");
+      setBoardSearchQuery("");
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? "");
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      }
+
+      if (data.board?.id) {
+        setEditingBoardId(data.board.id);
+        setEditingBoardName(data.board.name);
+      }
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error ? error.message : "Could not create a new board."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const moveBoardToTrash = async (board: BoardSummary) => {
+    if (board.deletedAt) return;
+
+    const confirmed = window.confirm(
+      `Do you really wanna remove this board?\n\n"${board.name}" will stay in Trash for 30 days.`
+    );
+
+    if (!confirmed) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${board.id}`, {
+          method: "DELETE",
+        })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? "");
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      } else {
+        applyBoardDocument({
+          elements: [],
+          canvasBackground: lightCanvasColor,
+          customCanvasBackground: "#131619",
+          gridMode: "none",
+          gridOpacity: 24,
+          calendarEntries: [],
+        });
+      }
+
+      if (boardBrowserView !== "trash") {
+        setBoardBrowserView("trash");
+      }
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not move this board to trash."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const startRenamingBoard = (board: BoardSummary) => {
+    setEditingBoardId(board.id);
+    setEditingBoardName(board.name);
+    window.setTimeout(() => {
+      boardNameInputRef.current?.focus();
+      boardNameInputRef.current?.select();
+    }, 0);
+  };
+
+  const renameBoard = async (boardId: string) => {
+    const nextName = editingBoardName.trim();
+
+    if (!boardId) return;
+
+    if (!nextName) {
+      setAuthMessage("Enter a board name.");
+      return;
+    }
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${boardId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: nextName }),
+        })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? activeBoardId);
+      setEditingBoardId("");
+      setEditingBoardName("");
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error ? error.message : "Could not rename this board."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const toggleBoardStarred = async (board: BoardSummary) => {
+    if (board.deletedAt) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${board.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ starred: !board.starred }),
+        })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? activeBoardId);
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error ? error.message : "Could not update this star."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const liveBoardsCount = boards.filter((board) => !board.deletedAt).length;
+  const isBoardsBrowserVisible = showBoardsMenu;
+  const isCalendarBrowserVisible =
+    isBoardsBrowserVisible && boardBrowserView === "calendar";
+
+  const getBoardTimestamp = (value: string) => {
+    const timestamp = new Date(value).getTime();
+    return Number.isNaN(timestamp) ? 0 : timestamp;
+  };
+
+  const visibleBoards = (() => {
+    if (!isBoardsBrowserVisible) {
+      return [] as BoardSummary[];
+    }
+
+    const searchQuery = boardSearchQuery.trim().toLowerCase();
+    const baseBoards =
+      boardBrowserView === "trash"
+        ? boards.filter((board) => Boolean(board.deletedAt))
+        : boards.filter((board) => !board.deletedAt);
+    const matchingBoards = baseBoards.filter((board) =>
+      board.name.toLowerCase().includes(searchQuery)
+    );
+
+    if (boardBrowserView === "recent") {
+      return [...matchingBoards].sort(
+        (first, second) =>
+          getBoardTimestamp(second.updatedAt) - getBoardTimestamp(first.updatedAt)
+      );
+    }
+
+    if (boardBrowserView === "starred") {
+      return matchingBoards
+        .filter((board) => Boolean(board.starred))
+        .sort(
+          (first, second) =>
+            getBoardTimestamp(second.updatedAt) - getBoardTimestamp(first.updatedAt)
+        );
+    }
+
+    if (boardBrowserView === "trash") {
+      return [...matchingBoards].sort(
+        (first, second) =>
+          getBoardTimestamp(second.deletedAt ?? second.updatedAt) -
+          getBoardTimestamp(first.deletedAt ?? first.updatedAt)
+      );
+    }
+
+    return matchingBoards;
+  })();
+
+  const calendarSchedules = isCalendarBrowserVisible
+    ? [...normalizeCalendarEntries(calendarEntries)]
+        .filter((entry) =>
+          entry.title.toLowerCase().includes(boardSearchQuery.trim().toLowerCase())
+        )
+        .sort(
+          (first, second) =>
+            first.date.localeCompare(second.date) ||
+            first.startHour.localeCompare(second.startHour) ||
+            first.endHour.localeCompare(second.endHour) ||
+            first.title.localeCompare(second.title)
+        )
+    : [];
+
+  const calendarMonthDate = new Date(
+    calendarCursor.getFullYear(),
+    calendarCursor.getMonth(),
+    1
+  );
+
+  const calendarMonthLabel = new Intl.DateTimeFormat("en", {
+    month: "long",
+    year: "numeric",
+  }).format(calendarMonthDate);
+
+  const calendarDayLabel = new Intl.DateTimeFormat("en", {
+    weekday: "short",
+  });
+
+  const calendarWeekdayLabels = Array.from({ length: 7 }, (_, index) =>
+    calendarDayLabel.format(new Date(Date.UTC(2026, 0, 4 + index)))
+  );
+
+  const getLocalCalendarDateKey = (date: Date) => {
+    const year = date.getFullYear();
+    const month = `${date.getMonth() + 1}`.padStart(2, "0");
+    const day = `${date.getDate()}`.padStart(2, "0");
+    return `${year}-${month}-${day}`;
+  };
+
+  const todayDate = new Date();
+  const todayDateKey = getLocalCalendarDateKey(todayDate);
+
+  const calendarDays = (() => {
+    if (!isCalendarBrowserVisible) {
+      return [] as Array<{
+        key: string;
+        date: Date;
+        dayNumber: number;
+        isCurrentMonth: boolean;
+        isToday: boolean;
+        entries: CalendarEntry[];
+      }>;
+    }
+
+    const year = calendarMonthDate.getFullYear();
+    const month = calendarMonthDate.getMonth();
+    const firstDayOfMonth = new Date(year, month, 1);
+    const firstWeekday = (firstDayOfMonth.getDay() + 6) % 7;
+    const daysInMonth = new Date(year, month + 1, 0).getDate();
+    const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
+    return Array.from({ length: totalCells }, (_, index) => {
+      const relativeDayNumber = index - firstWeekday + 1;
+      const date = new Date(year, month, relativeDayNumber);
+      const isCurrentMonth = date.getMonth() === month;
+      const dateKey = getLocalCalendarDateKey(date);
+      const dayEntries = calendarSchedules.filter((entry) => entry.date === dateKey);
+
+      return {
+        key: `${year}-${month}-${index}`,
+        date,
+        dayNumber: date.getDate(),
+        isCurrentMonth,
+        isToday: dateKey === todayDateKey,
+        entries: dayEntries,
+      };
+    });
+  })();
+
+  const createCalendarEntry = (date: string) => {
+    const entryId =
+      typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+        ? crypto.randomUUID()
+        : `${date}-${Date.now()}`;
+
+    setSelectedCalendarEntryId("");
+    setEditingCalendarEntryId(entryId);
+    setCalendarEntries((previousEntries) => [
+      ...previousEntries,
+      {
+        id: entryId,
+        date,
+        startHour: "12:00",
+        endHour: "12:30",
+        title: "",
+        color: calendarEntryColors[0],
+      },
+    ]);
+  };
+
+  const updateCalendarEntry = (entryId: string, title: string) => {
+    setCalendarEntries((previousEntries) =>
+      previousEntries.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              title: title.slice(0, 160),
+            }
+          : entry
+      )
+    );
+  };
+
+  const removeCalendarEntry = (entryId: string) => {
+    setEditingCalendarEntryId((previousId) =>
+      previousId === entryId ? "" : previousId
+    );
+    setSelectedCalendarEntryId((previousId) =>
+      previousId === entryId ? "" : previousId
+    );
+    setCalendarEntries((previousEntries) =>
+      previousEntries.filter((entry) => entry.id !== entryId)
+    );
+  };
+
+  const updateCalendarEntryHours = (
+    entryId: string,
+    field: "startHour" | "endHour",
+    hour: string
+  ) => {
+    const normalizedHour = normalizeCalendarHourValue(hour, "12:00");
+
+    setCalendarEntries((previousEntries) =>
+      previousEntries.map((entry) =>
+        entry.id === entryId
+          ? (() => {
+              const nextEntry: CalendarEntry = {
+                ...entry,
+                [field]: normalizedHour,
+              };
+
+              if (field === "startHour") {
+                nextEntry.endHour = getNextCalendarHourValue(normalizedHour);
+                return nextEntry;
+              }
+
+              if (nextEntry.startHour > nextEntry.endHour) {
+                nextEntry.startHour = normalizedHour;
+              }
+
+              return nextEntry;
+            })()
+          : entry
+      )
+    );
+  };
+
+  const updateCalendarEntryColor = (entryId: string, color: string) => {
+    const normalizedColor = normalizeCalendarEntryColor(color, entryId);
+
+    setCalendarEntries((previousEntries) =>
+      previousEntries.map((entry) =>
+        entry.id === entryId
+          ? {
+              ...entry,
+              color: normalizedColor,
+            }
+          : entry
+      )
+    );
+  };
+
+  const getCalendarHourLabel = (
+    hour: string,
+    format: "full" | "short" = "full"
+  ) => {
+    const option = calendarHourOptions.find((entry) => entry.value === hour);
+    if (!option) return hour;
+    return format === "short" ? option.shortLabel : option.label;
+  };
+
+  const getCalendarHourRangeLabel = (entry: CalendarEntry) =>
+    `${getCalendarHourLabel(entry.startHour, "short")} - ${getCalendarHourLabel(
+      entry.endHour,
+      "short"
+    )}`;
+
+  const getCalendarEntryColor = (entry: CalendarEntry) =>
+    normalizeCalendarEntryColor(entry.color, entry.id);
+
+  const beginEditingCalendarEntry = (entryId: string) => {
+    setSelectedCalendarEntryId(entryId);
+    setEditingCalendarEntryId(entryId);
+  };
+
+  const lockCalendarEntry = (entryId: string) => {
+    setEditingCalendarEntryId((previousId) =>
+      previousId === entryId ? "" : previousId
+    );
+    setSelectedCalendarEntryId("");
+  };
+
+  const selectCalendarEntry = (entryId: string) => {
+    setEditingCalendarEntryId("");
+    setSelectedCalendarEntryId(entryId);
+  };
+
+  const goToCalendarMonth = (offset: number) => {
+    setCalendarCursor(
+      (previous) => new Date(previous.getFullYear(), previous.getMonth() + offset, 1)
+    );
+  };
+
+  const jumpToCalendarToday = () => {
+    const today = new Date();
+    setCalendarCursor(new Date(today.getFullYear(), today.getMonth(), 1));
+  };
+
+  const scrollCalendarHorizontally = (direction: "left" | "right") => {
+    const container = calendarScrollContainerRef.current;
+    if (!container) return;
+
+    const distance = Math.max(320, Math.round(container.clientWidth * 0.6));
+    container.scrollBy({
+      left: direction === "left" ? -distance : distance,
+      behavior: "smooth",
+    });
+  };
+
+  const syncCalendarScrollFromMain = () => {
+    if (activeCalendarScrollSyncRef.current === "bottom") return;
+
+    const main = calendarScrollContainerRef.current;
+    const bottom = calendarBottomScrollbarRef.current;
+    if (!main || !bottom) return;
+
+    activeCalendarScrollSyncRef.current = "main";
+    bottom.scrollLeft = main.scrollLeft;
+    window.requestAnimationFrame(() => {
+      if (activeCalendarScrollSyncRef.current === "main") {
+        activeCalendarScrollSyncRef.current = null;
+      }
+    });
+  };
+
+  const syncCalendarScrollFromBottom = () => {
+    if (activeCalendarScrollSyncRef.current === "main") return;
+
+    const main = calendarScrollContainerRef.current;
+    const bottom = calendarBottomScrollbarRef.current;
+    if (!main || !bottom) return;
+
+    activeCalendarScrollSyncRef.current = "bottom";
+    main.scrollLeft = bottom.scrollLeft;
+    window.requestAnimationFrame(() => {
+      if (activeCalendarScrollSyncRef.current === "bottom") {
+        activeCalendarScrollSyncRef.current = null;
+      }
+    });
+  };
+
+  const boardBrowserHeading =
+    boardBrowserView === "recent"
+      ? "Recent boards"
+      : boardBrowserView === "mine"
+      ? "My boards"
+      : boardBrowserView === "starred"
+      ? "Starred boards"
+      : boardBrowserView === "trash"
+      ? "Trash"
+      : boardBrowserView === "calendar"
+      ? "Calendar"
+      : boardBrowserView === "plan"
+      ? "Your plan"
+      : "All boards";
+
+  const boardBrowserDescription =
+    boardBrowserView === "recent"
+      ? "Your most recently updated boards appear first."
+      : boardBrowserView === "mine"
+      ? "Boards connected to your account."
+      : boardBrowserView === "starred"
+      ? "Keep important boards close."
+      : boardBrowserView === "trash"
+      ? "Deleted boards stay here for 30 days before disappearing."
+      : boardBrowserView === "calendar"
+      ? "Type meetings, schedules, and reminders directly into each day."
+      : boardBrowserView === "plan"
+      ? "Choose the workspace plan that fits how you build, organize, and schedule."
+      : "Open, rename, and create boards from one clean workspace.";
+
+  const formatBoardDate = (value: string) => {
+    const date = new Date(value);
+
+    if (Number.isNaN(date.getTime())) {
+      return "Recently updated";
+    }
+
+    return new Intl.DateTimeFormat("en", {
+      month: "short",
+      day: "numeric",
+      year: "numeric",
+    }).format(date);
+  };
+
+  const getBoardPreviewBackground = (board: BoardSummary) => {
+    const previewBackground = board.previewDocument.canvasBackground;
+
+    if (previewBackground === floralCanvasBackground) {
+      return "#f8fafc";
+    }
+
+    if (previewBackground === board.previewDocument.customCanvasBackground) {
+      return board.previewDocument.customCanvasBackground;
+    }
+
+    return previewBackground;
+  };
+
+  const getBoardPreviewBounds = (elementsToPreview: CanvasElement[]) => {
+    let minX = Number.POSITIVE_INFINITY;
+    let minY = Number.POSITIVE_INFINITY;
+    let maxX = Number.NEGATIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+
+    const includePoint = (x: number, y: number, padding = 0) => {
+      minX = Math.min(minX, x - padding);
+      minY = Math.min(minY, y - padding);
+      maxX = Math.max(maxX, x + padding);
+      maxY = Math.max(maxY, y + padding);
+    };
+
+    elementsToPreview.forEach((element) => {
+      if (element.kind === "stroke") {
+        element.points.forEach((point) =>
+          includePoint(point.x, point.y, element.width * 0.75)
+        );
+        return;
+      }
+
+      if (element.kind === "shape") {
+        includePoint(element.start.x, element.start.y, element.width);
+        includePoint(element.end.x, element.end.y, element.width);
+        return;
+      }
+
+      includePoint(element.point.x, element.point.y, 2);
+      includePoint(
+        element.point.x + element.width,
+        element.point.y + element.height,
+        2
+      );
+    });
+
+    if (
+      !Number.isFinite(minX) ||
+      !Number.isFinite(minY) ||
+      !Number.isFinite(maxX) ||
+      !Number.isFinite(maxY)
+    ) {
+      return null;
+    }
+
+    return {
+      minX,
+      minY,
+      width: Math.max(1, maxX - minX),
+      height: Math.max(1, maxY - minY),
+    };
+  };
+
+  const renderBoardPreviewContent = (board: BoardSummary) => {
+    const previewWidth = 320;
+    const previewHeight = 160;
+    const previewPadding = 18;
+    const previewElements = board.previewDocument.elements.slice(-18);
+    const previewBounds = getBoardPreviewBounds(previewElements);
+
+    if (!previewBounds || previewElements.length === 0) {
+      return (
+        <div
+          style={{
+            position: "absolute",
+            inset: "14px",
+            borderRadius: "12px",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.92) 0%, rgba(255,255,255,0.58) 100%)",
+            border: "1px solid rgba(255,255,255,0.72)",
+          }}
+        />
+      );
+    }
+
+    const scale = Math.min(
+      (previewWidth - previewPadding * 2) / previewBounds.width,
+      (previewHeight - previewPadding * 2) / previewBounds.height
+    );
+    const offsetX =
+      (previewWidth - previewBounds.width * scale) / 2 -
+      previewBounds.minX * scale;
+    const offsetY =
+      (previewHeight - previewBounds.height * scale) / 2 -
+      previewBounds.minY * scale;
+
+    const getStrokeDashArray = (style?: StrokeStyle) =>
+      style === "dashed" ? "10 8" : style === "dotted" ? "2 6" : undefined;
+
+    const renderShapePreview = (element: Shape, index: number) => {
+      const x = Math.min(element.start.x, element.end.x);
+      const y = Math.min(element.start.y, element.end.y);
+      const width = Math.abs(element.end.x - element.start.x);
+      const height = Math.abs(element.end.y - element.start.y);
+      const dashArray = getStrokeDashArray(element.style);
+
+      if (element.tool === "circle") {
+        return (
+          <ellipse
+            key={index}
+            cx={x + width / 2}
+            cy={y + height / 2}
+            rx={Math.max(width / 2, 1)}
+            ry={Math.max(height / 2, 1)}
+            fill="none"
+            stroke={element.color}
+            strokeWidth={element.width}
+            strokeDasharray={dashArray}
+          />
+        );
+      }
+
+      if (element.tool === "square") {
+        return (
+          <rect
+            key={index}
+            x={x}
+            y={y}
+            width={Math.max(width, 1)}
+            height={Math.max(height, 1)}
+            rx={10}
+            fill="none"
+            stroke={element.color}
+            strokeWidth={element.width}
+            strokeDasharray={dashArray}
+          />
+        );
+      }
+
+      if (element.tool === "arrow") {
+        const angle = Math.atan2(
+          element.end.y - element.start.y,
+          element.end.x - element.start.x
+        );
+        const arrowSize = Math.max(14, element.width * 3.5);
+        const leftX =
+          element.end.x - arrowSize * Math.cos(angle - Math.PI / 6);
+        const leftY =
+          element.end.y - arrowSize * Math.sin(angle - Math.PI / 6);
+        const rightX =
+          element.end.x - arrowSize * Math.cos(angle + Math.PI / 6);
+        const rightY =
+          element.end.y - arrowSize * Math.sin(angle + Math.PI / 6);
+
+        return (
+          <g key={index}>
+            <line
+              x1={element.start.x}
+              y1={element.start.y}
+              x2={element.end.x}
+              y2={element.end.y}
+              stroke={element.color}
+              strokeWidth={element.width}
+              strokeDasharray={dashArray}
+              strokeLinecap="round"
+            />
+            <path
+              d={`M ${leftX} ${leftY} L ${element.end.x} ${element.end.y} L ${rightX} ${rightY}`}
+              fill="none"
+              stroke={element.color}
+              strokeWidth={element.width}
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            />
+          </g>
+        );
+      }
+
+      return (
+        <line
+          key={index}
+          x1={element.start.x}
+          y1={element.start.y}
+          x2={element.end.x}
+          y2={element.end.y}
+          stroke={element.color}
+          strokeWidth={element.width}
+          strokeDasharray={dashArray}
+          strokeLinecap="round"
+        />
+      );
+    };
+
+    return (
+      <>
+        <div
+          style={{
+            position: "absolute",
+            inset: "14px",
+            borderRadius: "12px",
+            background:
+              "linear-gradient(180deg, rgba(255,255,255,0.18) 0%, rgba(255,255,255,0.04) 100%)",
+            border: "1px solid rgba(255,255,255,0.42)",
+          }}
+        />
+        <svg
+          viewBox={`0 0 ${previewWidth} ${previewHeight}`}
+          style={{
+            position: "absolute",
+            inset: "14px",
+            width: "calc(100% - 28px)",
+            height: "calc(100% - 28px)",
+            borderRadius: "12px",
+            overflow: "hidden",
+          }}
+        >
+          <rect
+            x={0}
+            y={0}
+            width={previewWidth}
+            height={previewHeight}
+            fill={getBoardPreviewBackground(board)}
+          />
+          <g transform={`translate(${offsetX} ${offsetY}) scale(${scale})`}>
+            {previewElements.map((element, index) => {
+              if (element.kind === "stroke") {
+                return (
+                  <polyline
+                    key={index}
+                    points={element.points.map((point) => `${point.x},${point.y}`).join(" ")}
+                    fill="none"
+                    stroke={element.color ?? "#111827"}
+                    strokeWidth={element.width}
+                    strokeDasharray={getStrokeDashArray(element.style)}
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                );
+              }
+
+              if (element.kind === "shape") {
+                return renderShapePreview(element, index);
+              }
+
+              return (
+                <g key={index}>
+                  {element.backgroundColor && (
+                    <rect
+                      x={element.point.x}
+                      y={element.point.y}
+                      width={Math.max(element.width, 24)}
+                      height={Math.max(element.height, 20)}
+                      rx={10}
+                      fill={element.backgroundColor}
+                    />
+                  )}
+                  <text
+                    x={element.point.x}
+                    y={element.point.y + Math.max(element.fontSize, 16)}
+                    fill={element.color}
+                    fontFamily={appSansFontFamily}
+                    fontSize={Math.max(14, element.fontSize)}
+                    fontWeight={element.fontWeight}
+                  >
+                    {(element.value || "").slice(0, 22)}
+                  </text>
+                </g>
+              );
+            })}
+          </g>
+        </svg>
+      </>
+    );
+  };
+
+  const loadBoardsEffect = useEffectEvent(() => {
+    loadBoards().catch(() => null);
+  });
+
+  const persistBoardEffect = useEffectEvent((boardId: string) => {
+    persistBoard(boardId).catch(() => null);
+  });
 
   const applyTextBoxOpacity = (opacity: number) => {
     setActiveText((prev) =>
@@ -1139,6 +2477,35 @@ export default function Page() {
     }
 
     ctx.stroke();
+  };
+
+  const drawLivePenStrokeSegment = () => {
+    const stroke = currentStroke.current;
+    if (!stroke || stroke.tool !== "pen" || stroke.points.length === 0) return;
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const ctx = canvas.getContext("2d");
+    if (!ctx) return;
+
+    const renderedPointCount = renderedLiveStrokePointCountRef.current;
+    const segmentStartIndex = Math.max(0, renderedPointCount - 3);
+    const segmentPoints = stroke.points.slice(segmentStartIndex);
+    if (!segmentPoints.length) return;
+
+    const dpr = window.devicePixelRatio || 1;
+
+    ctx.save();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.translate(offsetRef.current.x, offsetRef.current.y);
+    ctx.scale(zoomRef.current, zoomRef.current);
+    ctx.strokeStyle = stroke.color ?? "black";
+    ctx.fillStyle = stroke.color ?? "black";
+    drawStrokePath(ctx, segmentPoints, stroke.width, stroke.style);
+    ctx.restore();
+
+    renderedLiveStrokePointCountRef.current = stroke.points.length;
   };
 
   const drawShape = (
@@ -1699,9 +3066,117 @@ export default function Page() {
       if (pendingRedrawFrame.current !== null) {
         window.cancelAnimationFrame(pendingRedrawFrame.current);
       }
+
+      if (pendingPenCursorFrame.current !== null) {
+        window.cancelAnimationFrame(pendingPenCursorFrame.current);
+      }
+
+      if (autosaveBoardTimeoutRef.current !== null) {
+        window.clearTimeout(autosaveBoardTimeoutRef.current);
+      }
     },
     []
   );
+
+  useEffect(() => {
+    loadCurrentAccount();
+  }, []);
+
+  useEffect(() => {
+    if (!currentAccountId) return;
+    loadBoardsEffect();
+  }, [currentAccountId]);
+
+  useEffect(() => {
+    if (!isCalendarBrowserVisible) return;
+
+    const latestEntry = [...calendarEntries]
+      .filter((entry) => typeof entry.date === "string" && entry.date.length > 0)
+      .sort((first, second) => second.date.localeCompare(first.date))[0];
+
+    if (!latestEntry) return;
+
+    const latestDate = new Date(latestEntry.date);
+    if (Number.isNaN(latestDate.getTime())) return;
+
+    setCalendarCursor((previous) =>
+      previous.getFullYear() === latestDate.getFullYear() &&
+      previous.getMonth() === latestDate.getMonth()
+        ? previous
+        : new Date(latestDate.getFullYear(), latestDate.getMonth(), 1)
+    );
+  }, [calendarEntries, isCalendarBrowserVisible]);
+
+  useEffect(() => {
+    if (!isCalendarBrowserVisible) return;
+
+    syncCalendarScrollFromMain();
+  }, [calendarMonthLabel, calendarDays.length, isCalendarBrowserVisible]);
+
+  useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target;
+      if (!(target instanceof Element)) return;
+      if (target.closest("[data-calendar-entry-shell='true']")) return;
+
+      setSelectedCalendarEntryId("");
+      setEditingCalendarEntryId("");
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!showBoardsMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      if (boardsMenuContainerRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowBoardsMenu(false);
+      setEditingBoardId("");
+      setEditingBoardName("");
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [showBoardsMenu]);
+
+  useEffect(() => {
+    if (!showProfileMenu) return;
+
+    const handlePointerDown = (event: PointerEvent) => {
+      if (event.button !== 0) return;
+
+      const target = event.target;
+      if (!(target instanceof Node)) return;
+
+      if (profileMenuContainerRef.current?.contains(target)) {
+        return;
+      }
+
+      setShowProfileMenu(false);
+    };
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
+    return () => {
+      document.removeEventListener("pointerdown", handlePointerDown);
+    };
+  }, [showProfileMenu]);
 
   useEffect(() => {
     let isMounted = true;
@@ -1747,8 +3222,41 @@ export default function Page() {
   ]);
 
   useEffect(() => {
+    if (!currentAccountId || !activeBoardId) return;
+    if (Date.now() < suppressBoardAutosaveUntilRef.current) return;
+
+    if (autosaveBoardTimeoutRef.current !== null) {
+      window.clearTimeout(autosaveBoardTimeoutRef.current);
+    }
+
+    autosaveBoardTimeoutRef.current = window.setTimeout(() => {
+      persistBoardEffect(activeBoardId);
+      autosaveBoardTimeoutRef.current = null;
+    }, 700);
+
+    return () => {
+      if (autosaveBoardTimeoutRef.current !== null) {
+        window.clearTimeout(autosaveBoardTimeoutRef.current);
+      }
+    };
+  }, [
+    activeBoardId,
+    canvasBackground,
+    calendarEntries,
+    currentAccountId,
+    customCanvasBackground,
+    elements,
+    gridMode,
+    gridOpacity,
+  ]);
+
+  useEffect(() => {
     offsetRef.current = offset;
   }, [offset]);
+
+  useEffect(() => {
+    penCursorPointRef.current = penCursorPoint;
+  }, [penCursorPoint]);
 
   useEffect(() => {
     zoomRef.current = zoom;
@@ -1963,10 +3471,55 @@ export default function Page() {
     e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
   ) => {
     if (tool === "pen") {
-      setPenCursorPoint({ x: e.clientX, y: e.clientY });
+      if (isDrawingRef.current) {
+        pendingPenCursorPoint.current = null;
+
+        if (pendingPenCursorFrame.current !== null) {
+          window.cancelAnimationFrame(pendingPenCursorFrame.current);
+          pendingPenCursorFrame.current = null;
+        }
+
+        if (penCursorPointRef.current !== null) {
+          penCursorPointRef.current = null;
+          setPenCursorPoint(null);
+        }
+
+        return;
+      }
+
+      pendingPenCursorPoint.current = { x: e.clientX, y: e.clientY };
+
+      if (pendingPenCursorFrame.current !== null) {
+        return;
+      }
+
+      pendingPenCursorFrame.current = window.requestAnimationFrame(() => {
+        pendingPenCursorFrame.current = null;
+        const nextPoint = pendingPenCursorPoint.current;
+        const previousPoint = penCursorPointRef.current;
+
+        if (
+          nextPoint &&
+          previousPoint &&
+          previousPoint.x === nextPoint.x &&
+          previousPoint.y === nextPoint.y
+        ) {
+          return;
+        }
+
+        penCursorPointRef.current = nextPoint;
+        setPenCursorPoint(nextPoint);
+      });
       return;
     }
 
+    if (pendingPenCursorFrame.current !== null) {
+      window.cancelAnimationFrame(pendingPenCursorFrame.current);
+      pendingPenCursorFrame.current = null;
+    }
+
+    pendingPenCursorPoint.current = null;
+    penCursorPointRef.current = null;
     setPenCursorPoint(null);
   };
 
@@ -1975,7 +3528,10 @@ export default function Page() {
     if (!stroke) return false;
 
     const previousPoint = stroke.points[stroke.points.length - 1];
-    const minDistance = Math.max(0.25, 0.7 / zoomRef.current);
+    const minDistance =
+      stroke.tool === "pen"
+        ? Math.max(0.18, 0.45 / zoomRef.current)
+        : Math.max(0.25, 0.7 / zoomRef.current);
 
     if (previousPoint) {
       const distance = Math.hypot(
@@ -1985,6 +3541,33 @@ export default function Page() {
 
       if (distance < minDistance) {
         return false;
+      }
+
+      if (stroke.tool === "pen") {
+        const smoothing =
+          distance > 18 ? 0.9 : distance > 10 ? 0.82 : distance > 4 ? 0.72 : 0.6;
+        const stabilizedPoint = {
+          x: previousPoint.x + (point.x - previousPoint.x) * smoothing,
+          y: previousPoint.y + (point.y - previousPoint.y) * smoothing,
+        };
+        const stabilizedDistance = Math.hypot(
+          stabilizedPoint.x - previousPoint.x,
+          stabilizedPoint.y - previousPoint.y
+        );
+        const interpolationSteps = Math.min(
+          4,
+          Math.max(1, Math.floor(stabilizedDistance / 3.5))
+        );
+
+        for (let step = 1; step <= interpolationSteps; step += 1) {
+          const t = step / interpolationSteps;
+          stroke.points.push({
+            x: previousPoint.x + (stabilizedPoint.x - previousPoint.x) * t,
+            y: previousPoint.y + (stabilizedPoint.y - previousPoint.y) * t,
+          });
+        }
+
+        return true;
       }
     }
 
@@ -2196,6 +3779,7 @@ export default function Page() {
       tool === "arrow" ||
       tool === "line"
     ) {
+      isDrawingRef.current = true;
       setIsDrawing(true);
       setShapeStart({ x, y });
       shapeEnd.current = { x, y };
@@ -2219,8 +3803,10 @@ export default function Page() {
         color: tool === "pen" ? penColor : undefined,
         style: tool === "pen" ? strokeStyle : undefined,
       };
+      renderedLiveStrokePointCountRef.current = 1;
     }
 
+    isDrawingRef.current = true;
     setIsDrawing(true);
   };
 
@@ -2281,6 +3867,27 @@ export default function Page() {
     setTextSizeMenu({ x: e.clientX, y: e.clientY });
   };
 
+  const startDraggingActiveText = (clientX: number, clientY: number) => {
+    if (!activeText || (!activeText.value.length && !activeText.backgroundColor)) {
+      return false;
+    }
+
+    setTextSizeMenu(null);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextColorMenu(false);
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setShowTextBoxOpacityMenu(false);
+    isDraggingTextRef.current = true;
+    textDragStart.current = {
+      screen: { x: clientX, y: clientY },
+      textScreen: activeText.screenPoint,
+    };
+
+    return true;
+  };
+
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     syncPenCursorPoint(e);
 
@@ -2312,7 +3919,7 @@ export default function Page() {
       return;
     }
 
-    if (!isDrawing) return;
+    if (!isDrawingRef.current) return;
 
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
@@ -2360,7 +3967,11 @@ export default function Page() {
       }
 
       if (didAppendPoint) {
-        scheduleRedrawCanvas();
+        if (currentStroke.current?.tool === "pen") {
+          drawLivePenStrokeSegment();
+        } else {
+          scheduleRedrawCanvas();
+        }
       }
     }
 
@@ -2387,6 +3998,9 @@ export default function Page() {
   const stopDrawing = (e?: React.PointerEvent<HTMLCanvasElement>) => {
     if (e) {
       syncPenCursorPoint(e);
+      if (currentStroke.current && currentStroke.current.tool === "pen") {
+        appendStrokePoint(getCanvasCoordinates(e));
+      }
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
       }
@@ -2400,6 +4014,7 @@ export default function Page() {
         pointInBounds(getCanvasCoordinates(e), getSelectionBounds(selectionBox));
 
       isPanningRef.current = false;
+      isDrawingRef.current = false;
       setIsPanning(false);
       setPanningCursorPoint(null);
       didPanRef.current = false;
@@ -2415,6 +4030,7 @@ export default function Page() {
     if (isSelectingRef.current) {
       const selection = selectionBox;
       isSelectingRef.current = false;
+      isDrawingRef.current = false;
       setIsSelecting(false);
       selectionStart.current = null;
 
@@ -2464,6 +4080,8 @@ export default function Page() {
 
         setElements((prev) => eraseElements(prev, eraserStroke));
         currentStroke.current = null;
+        isDrawingRef.current = false;
+        renderedLiveStrokePointCountRef.current = 0;
         setIsDrawing(false);
         setShapeStart(null);
         setSnapshot(null);
@@ -2482,8 +4100,10 @@ export default function Page() {
 
       setElements((prev) => [...prev, finishedStroke]);
       currentStroke.current = null;
+      renderedLiveStrokePointCountRef.current = 0;
     }
 
+    isDrawingRef.current = false;
     setIsDrawing(false);
     setShapeStart(null);
     setSnapshot(null);
@@ -3536,21 +5156,13 @@ export default function Page() {
                 onMouseDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
-                  isDraggingTextRef.current = true;
-                  textDragStart.current = {
-                    screen: { x: e.clientX, y: e.clientY },
-                    textScreen: activeText.screenPoint,
-                  };
+                  startDraggingActiveText(e.clientX, e.clientY);
                 }}
                 onPointerDown={(e) => {
                   e.stopPropagation();
                   e.preventDefault();
                   e.currentTarget.setPointerCapture(e.pointerId);
-                  isDraggingTextRef.current = true;
-                  textDragStart.current = {
-                    screen: { x: e.clientX, y: e.clientY },
-                    textScreen: activeText.screenPoint,
-                  };
+                  startDraggingActiveText(e.clientX, e.clientY);
                 }}
                 style={{
                   position: "fixed",
@@ -3782,7 +5394,19 @@ export default function Page() {
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => {
               e.stopPropagation();
+              if (e.button === 0 && startDraggingActiveText(e.clientX, e.clientY)) {
+                e.preventDefault();
+                return;
+              }
+
               syncTextSelection(e.currentTarget);
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              if (e.button === 0 && startDraggingActiveText(e.clientX, e.clientY)) {
+                e.preventDefault();
+                e.currentTarget.setPointerCapture(e.pointerId);
+              }
             }}
             onContextMenu={handleTextContextMenu}
             onKeyDown={(e) => {
@@ -3839,6 +5463,10 @@ export default function Page() {
               overflow: "hidden",
               boxSizing: "border-box",
               zIndex: 60,
+              cursor:
+                activeText.value.length > 0 || activeText.backgroundColor
+                  ? "move"
+                  : "text",
               ...textEditorTypography,
             }}
           />
@@ -3967,7 +5595,7 @@ export default function Page() {
           role="presentation"
           onMouseDown={(e) => {
             if (e.target === e.currentTarget) {
-              setShowLoginModal(false);
+              closeAuthModal();
             }
           }}
           style={{
@@ -3983,7 +5611,10 @@ export default function Page() {
         >
           <form
             onMouseDown={(e) => e.stopPropagation()}
-            onSubmit={(e) => e.preventDefault()}
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleAuthSubmit();
+            }}
             style={{
               width: "min(390px, calc(100vw - 32px))",
               padding: "22px",
@@ -4008,12 +5639,19 @@ export default function Page() {
               <div>
                 <div
                   style={{
-                    fontSize: "24px",
+                    fontSize: 0,
                     fontWeight: 800,
                     letterSpacing: "0",
                     lineHeight: 1.05,
                   }}
                 >
+                  <span style={{ fontSize: "24px" }}>
+                    {authStep === "verify"
+                      ? "Verify email"
+                      : authMode === "register"
+                      ? "Utworz konto"
+                      : "Zaloguj sie"}
+                  </span>
                   Zaloguj się
                 </div>
                 <div
@@ -4030,7 +5668,7 @@ export default function Page() {
               <button
                 type="button"
                 aria-label="Zamknij logowanie"
-                onClick={() => setShowLoginModal(false)}
+                onClick={closeAuthModal}
                 style={{
                   width: "34px",
                   height: "34px",
@@ -4050,7 +5688,7 @@ export default function Page() {
 
             <div
               style={{
-                display: "grid",
+                display: authStep === "credentials" ? "grid" : "none",
                 gridTemplateColumns: "1fr 1fr",
                 gap: "10px",
                 marginBottom: "14px",
@@ -4079,7 +5717,7 @@ export default function Page() {
 
             <div
               style={{
-                display: "flex",
+                display: authStep === "credentials" ? "flex" : "none",
                 alignItems: "center",
                 gap: "10px",
                 margin: "12px 0",
@@ -4092,6 +5730,47 @@ export default function Page() {
               lub
               <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
             </div>
+
+            {authMode === "register" && authStep === "credentials" && (
+              <label
+                style={{
+                  display: "block",
+                  marginBottom: "10px",
+                }}
+              >
+                <span
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                  }}
+                >
+                  Name
+                </span>
+                <input
+                  type="text"
+                  autoComplete="name"
+                  placeholder="Your name"
+                  value={authName}
+                  onChange={(e) => setAuthName(e.currentTarget.value)}
+                  style={{
+                    width: "100%",
+                    height: "44px",
+                    padding: "0 14px",
+                    borderRadius: "13px",
+                    border: "1px solid rgba(15,23,42,0.14)",
+                    background: "#ffffff",
+                    color: "#111827",
+                    fontSize: "15px",
+                    fontWeight: 600,
+                    boxSizing: "border-box",
+                    outlineColor: "#7c3aed",
+                  }}
+                />
+              </label>
+            )}
 
             <label
               style={{
@@ -4125,6 +5804,9 @@ export default function Page() {
                   type="email"
                   autoComplete="email"
                   placeholder="twoj@email.pl"
+                  value={authEmail}
+                  readOnly={authStep === "verify"}
+                  onChange={(e) => setAuthEmail(e.currentTarget.value)}
                   style={{
                     width: "100%",
                     height: "44px",
@@ -4142,7 +5824,12 @@ export default function Page() {
               </div>
             </label>
 
-            <label style={{ display: "block", marginBottom: "14px" }}>
+            <label
+              style={{
+                display: authStep === "credentials" ? "block" : "none",
+                marginBottom: "14px",
+              }}
+            >
               <span
                 style={{
                   display: "block",
@@ -4167,7 +5854,11 @@ export default function Page() {
                 />
                 <input
                   type="password"
-                  autoComplete="current-password"
+                  autoComplete={
+                    authMode === "register" ? "new-password" : "current-password"
+                  }
+                  value={authPassword}
+                  onChange={(e) => setAuthPassword(e.currentTarget.value)}
                   placeholder="Wpisz hasło"
                   style={{
                     width: "100%",
@@ -4186,9 +5877,124 @@ export default function Page() {
               </div>
             </label>
 
+            {authMode === "register" && authStep === "credentials" && (
+              <label style={{ display: "block", marginBottom: "14px" }}>
+                <span
+                  style={{
+                    display: "block",
+                    marginBottom: "6px",
+                    color: "#475569",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                  }}
+                >
+                  Powtorz haslo
+                </span>
+                <div style={{ position: "relative" }}>
+                  <Lock
+                    size={17}
+                    style={{
+                      position: "absolute",
+                      left: "13px",
+                      top: "50%",
+                      transform: "translateY(-50%)",
+                      color: "#7c3aed",
+                    }}
+                  />
+                  <input
+                    type="password"
+                    autoComplete="new-password"
+                    placeholder="Wpisz haslo ponownie"
+                    value={authConfirmPassword}
+                    onChange={(e) =>
+                      setAuthConfirmPassword(e.currentTarget.value)
+                    }
+                    style={{
+                      width: "100%",
+                      height: "44px",
+                      padding: "0 14px 0 40px",
+                      borderRadius: "13px",
+                      border: "1px solid rgba(15,23,42,0.14)",
+                      background: "#ffffff",
+                      color: "#111827",
+                      fontSize: "15px",
+                      fontWeight: 600,
+                      boxSizing: "border-box",
+                      outlineColor: "#7c3aed",
+                    }}
+                  />
+                </div>
+              </label>
+            )}
+
+            {authStep === "verify" && (
+              <div style={{ marginBottom: "14px" }}>
+                <label style={{ display: "block", marginBottom: "10px" }}>
+                  <span
+                    style={{
+                      display: "block",
+                      marginBottom: "6px",
+                      color: "#475569",
+                      fontSize: "13px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Verification code
+                  </span>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    autoComplete="one-time-code"
+                    maxLength={6}
+                    placeholder="123456"
+                    value={authCode}
+                    onChange={(e) =>
+                      setAuthCode(
+                        e.currentTarget.value.replace(/\D/g, "").slice(0, 6)
+                      )
+                    }
+                    style={{
+                      width: "100%",
+                      height: "50px",
+                      padding: "0 16px",
+                      borderRadius: "14px",
+                      border: "1px solid rgba(15,23,42,0.14)",
+                      background: "#ffffff",
+                      color: "#111827",
+                      fontSize: "22px",
+                      fontWeight: 800,
+                      letterSpacing: "0.18em",
+                      textAlign: "center",
+                      boxSizing: "border-box",
+                      outlineColor: "#7c3aed",
+                    }}
+                  />
+                </label>
+                <button
+                  type="button"
+                  onClick={resendVerificationCode}
+                  disabled={isAuthSubmitting}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#7c3aed",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    cursor: isAuthSubmitting ? "default" : "pointer",
+                    padding: 0,
+                  }}
+                >
+                  Send a new code
+                </button>
+              </div>
+            )}
+
             <div
               style={{
-                display: "flex",
+                display:
+                  authMode === "login" && authStep === "credentials"
+                    ? "flex"
+                    : "none",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "12px",
@@ -4218,8 +6024,30 @@ export default function Page() {
               </button>
             </div>
 
+            {authMessage && (
+              <div
+                style={{
+                  marginBottom: "14px",
+                  padding: "10px 12px",
+                  borderRadius: "12px",
+                  background:
+                    authMessage.includes("utworzone")
+                      ? "rgba(34,197,94,0.1)"
+                      : "rgba(239,68,68,0.1)",
+                  color:
+                    authMessage.includes("utworzone") ? "#15803d" : "#b91c1c",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                  lineHeight: 1.3,
+                }}
+              >
+                {authMessage}
+              </div>
+            )}
+
             <button
               type="submit"
+              disabled={isAuthSubmitting}
               style={{
                 width: "100%",
                 height: "46px",
@@ -4228,37 +6056,62 @@ export default function Page() {
                 background:
                   "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
                 color: "#ffffff",
-                fontSize: "16px",
+                fontSize: 0,
                 fontWeight: 800,
-                cursor: "pointer",
+                cursor: isAuthSubmitting ? "default" : "pointer",
+                opacity: isAuthSubmitting ? 0.72 : 1,
                 boxShadow: "0 14px 30px rgba(79,70,229,0.28)",
               }}
             >
+              <span style={{ fontSize: "16px" }}>
+                {isAuthSubmitting
+                  ? "Please wait..."
+                  : authStep === "verify"
+                  ? "Verify email"
+                  : authMode === "register"
+                  ? "Send verification code"
+                  : "Log in"}
+              </span>
               Zaloguj się
             </button>
 
             <div
               style={{
+                display: authStep === "credentials" ? "block" : "none",
                 marginTop: "16px",
                 textAlign: "center",
                 color: "#64748b",
-                fontSize: "13px",
+                fontSize: 0,
                 fontWeight: 700,
               }}
             >
+              <span style={{ fontSize: "13px" }}>
+                {authMode === "register" ? "Masz juz konto?" : "Nie masz konta?"}
+              </span>{" "}
               Nie masz konta?{" "}
               <button
                 type="button"
+                onClick={() => {
+                  setAuthMode((prev) =>
+                    prev === "register" ? "login" : "register"
+                  );
+                  setAuthPassword("");
+                  setAuthConfirmPassword("");
+                  setAuthMessage("");
+                }}
                 style={{
                   border: "none",
                   background: "transparent",
                   color: "#7c3aed",
-                  fontSize: "13px",
+                  fontSize: 0,
                   fontWeight: 900,
                   cursor: "pointer",
                   padding: 0,
                 }}
               >
+                <span style={{ fontSize: "13px" }}>
+                  {authMode === "register" ? "Zaloguj sie" : "Zarejestruj sie"}
+                </span>
                 Zarejestruj się
               </button>
             </div>
@@ -4285,6 +6138,7 @@ export default function Page() {
           aria-label="Ustawienia"
           onClick={() => {
             setShowSettingsMenu((prev) => !prev);
+            setShowBoardsMenu(false);
             setShowPenMenu(false);
             setShowTextMenu(false);
             setShowEraserMenu(false);
@@ -4308,6 +6162,1872 @@ export default function Page() {
         >
           <Settings size={18} />
         </button>
+
+        {currentAccountEmail && (
+          <div
+            ref={boardsMenuContainerRef}
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "64px",
+              transform: "translateY(-50%)",
+            }}
+          >
+            <button
+              aria-label="Boards"
+              onClick={() => {
+                setShowBoardsMenu((prev) => !prev);
+                setShowSettingsMenu(false);
+              }}
+              style={{
+                width: "34px",
+                height: "34px",
+                borderRadius: "10px",
+                border: showBoardsMenu
+                  ? "1.5px solid rgba(255,255,255,0.78)"
+                  : "1.5px solid rgba(255,255,255,0.34)",
+                background: showBoardsMenu
+                  ? "rgba(255,255,255,0.16)"
+                  : "rgba(255,255,255,0.08)",
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                cursor: "pointer",
+                padding: 0,
+                backdropFilter: "blur(8px)",
+              }}
+            >
+              <LayoutGrid size={16} />
+            </button>
+
+            {showBoardsMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "calc(100% + 10px)",
+                  left: "-38px",
+                  width: "min(1560px, calc(100vw - 24px))",
+                  height: "min(880px, calc(100vh - 64px))",
+                  borderRadius: "22px",
+                  background: "rgba(248,250,252,0.98)",
+                  border: "1px solid rgba(203,213,225,0.86)",
+                  boxShadow: "0 34px 90px rgba(15,23,42,0.18)",
+                  display: "grid",
+                  gridTemplateColumns: "300px minmax(0, 1fr)",
+                  overflow: "hidden",
+                  zIndex: 90,
+                  fontFamily: appSansFontFamily,
+                }}
+              >
+                <aside
+                  style={{
+                    background:
+                      "linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%)",
+                    borderRight: "1px solid rgba(203,213,225,0.74)",
+                    padding: "30px 22px 24px",
+                    display: "grid",
+                    gridTemplateRows: "auto auto 1fr auto",
+                    gap: "18px",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                    }}
+                  >
+                    <div>
+                      <div
+                        style={{
+                          color: "#0f172a",
+                          fontSize: "26px",
+                          fontWeight: 600,
+                          lineHeight: 1,
+                        }}
+                      >
+                        Boards
+                      </div>
+                    </div>
+                    <button
+                      aria-label="Close boards"
+                      onClick={() => setShowBoardsMenu(false)}
+                      style={{
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(203,213,225,0.8)",
+                        background: "rgba(255,255,255,0.82)",
+                        color: "#334155",
+                        display: "grid",
+                        placeItems: "center",
+                        cursor: "pointer",
+                        padding: 0,
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  </div>
+
+                    <button
+                      aria-label="Create board"
+                      onClick={createBoard}
+                      disabled={isBoardsLoading || liveBoardsCount >= 10}
+                      style={{
+                      minHeight: "46px",
+                      width: "100%",
+                      borderRadius: "12px",
+                      border: "none",
+                      background:
+                        "linear-gradient(135deg, #2563eb 0%, #4338ca 100%)",
+                      color: "#ffffff",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "center",
+                      gap: "10px",
+                        cursor:
+                        isBoardsLoading || liveBoardsCount >= 10 ? "default" : "pointer",
+                      opacity: liveBoardsCount >= 10 ? 0.55 : 1,
+                      boxShadow: "0 14px 28px rgba(37,99,235,0.22)",
+                      fontSize: "14px",
+                      fontWeight: 500,
+                    }}
+                    title={
+                      liveBoardsCount >= 10
+                        ? "You can create up to 10 boards for now."
+                        : "Create a new board"
+                    }
+                  >
+                    <Plus size={17} />
+                    New board
+                  </button>
+
+                  <div style={{ display: "grid", gap: "8px", alignContent: "start" }}>
+                    {[
+                      {
+                        label: "All boards",
+                        value: "all" as const,
+                        icon: <LayoutGrid size={15} />,
+                      },
+                      {
+                        label: "Recent",
+                        value: "recent" as const,
+                        icon: <Clock3 size={15} />,
+                      },
+                      {
+                        label: "My boards",
+                        value: "mine" as const,
+                        icon: <Monitor size={15} />,
+                      },
+                      {
+                        label: "Starred",
+                        value: "starred" as const,
+                        icon: <Star size={15} />,
+                      },
+                      {
+                        label: "Trash",
+                        value: "trash" as const,
+                        icon: <Trash2 size={15} />,
+                      },
+                      {
+                        label: "Calendar",
+                        value: "calendar" as const,
+                        icon: <CalendarDays size={15} />,
+                      },
+                      {
+                        label: "Your plan",
+                        value: "plan" as const,
+                        icon: <Star size={15} />,
+                      },
+                    ].map((item) => {
+                      const isActive = boardBrowserView === item.value;
+
+                      return (
+                      <button
+                        key={item.label}
+                        type="button"
+                        onClick={() => setBoardBrowserView(item.value)}
+                        style={{
+                          height: "44px",
+                          padding: "0 14px",
+                          borderRadius: "12px",
+                          border: isActive
+                            ? "1px solid rgba(37,99,235,0.18)"
+                            : "1px solid transparent",
+                          background: isActive
+                            ? "rgba(219,234,254,0.85)"
+                            : "transparent",
+                          color: isActive ? "#1d4ed8" : "#334155",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          fontSize: "14px",
+                          fontWeight: isActive ? 560 : 460,
+                          cursor: "pointer",
+                        }}
+                      >
+                        {item.icon}
+                        {item.label}
+                      </button>
+                      );
+                    })}
+                  </div>
+
+                  <div
+                    style={{
+                      marginTop: "auto",
+                      padding: "16px",
+                      borderRadius: "14px",
+                      background: "rgba(255,255,255,0.72)",
+                      border: "1px solid rgba(203,213,225,0.74)",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#0f172a",
+                        fontSize: "14px",
+                        fontWeight: 500,
+                      }}
+                    >
+                      {liveBoardsCount} / 10 boards used
+                    </div>
+                    <div
+                      style={{
+                        marginTop: "6px",
+                        color: "#64748b",
+                        fontSize: "12px",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      Click a card to open it. Click the active board card title to
+                      rename it.
+                    </div>
+                  </div>
+                </aside>
+
+                <section
+                  style={{
+                    padding: "34px 28px 28px",
+                    display: "grid",
+                    gridTemplateRows: "auto auto auto 1fr",
+                    gap: "16px",
+                    minWidth: 0,
+                    minHeight: 0,
+                    background:
+                      "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+                  }}
+                >
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                    }}
+                  >
+                    <div>
+                      <h2
+                        style={{
+                          margin: 0,
+                          color: "#0f172a",
+                          fontSize: "32px",
+                          fontWeight: 600,
+                          lineHeight: 1.05,
+                        }}
+                      >
+                        {boardBrowserHeading}
+                      </h2>
+                      <div
+                        style={{
+                          marginTop: "8px",
+                          color: "#5b6b80",
+                          fontSize: "14px",
+                          fontWeight: 400,
+                        }}
+                      >
+                        {boardBrowserDescription}
+                      </div>
+                    </div>
+
+                    <div
+                      style={{
+                        minWidth: "220px",
+                        padding: "12px 14px",
+                        borderRadius: "14px",
+                        border: "1px solid rgba(203,213,225,0.78)",
+                        background: "#ffffff",
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        boxShadow: "0 10px 24px rgba(15,23,42,0.05)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "40px",
+                          height: "40px",
+                          borderRadius: "12px",
+                          background:
+                            "linear-gradient(135deg, #22c55e 0%, #14b8a6 100%)",
+                          color: "#ffffff",
+                          display: "grid",
+                          placeItems: "center",
+                          flex: "0 0 auto",
+                          boxShadow: "0 10px 24px rgba(34,197,94,0.24)",
+                        }}
+                      >
+                        <UserRound size={18} />
+                      </div>
+                      <div
+                        style={{
+                          minWidth: 0,
+                          display: "grid",
+                          gap: "4px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: "#16a34a",
+                            fontSize: "11px",
+                            fontWeight: 600,
+                            letterSpacing: "0.04em",
+                            textTransform: "uppercase",
+                          }}
+                        >
+                          Logged in
+                        </div>
+                        <div
+                          style={{
+                            color: "#111827",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            textOverflow: "ellipsis",
+                            overflow: "hidden",
+                            whiteSpace: "nowrap",
+                          }}
+                        >
+                          {currentAccountEmail}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div
+                    style={{
+                      display: "flex",
+                      flexWrap: "wrap",
+                      gap: "12px",
+                    }}
+                  >
+                    {boardBrowserView !== "plan" && [ 
+                      { label: "Templates", icon: <LayoutGrid size={16} /> },
+                      { label: "Diagram", icon: <LayoutGrid size={16} /> },
+                      { label: "Import", icon: <Upload size={16} /> },
+                    ].map((action) => (
+                      <button
+                        key={action.label}
+                        type="button"
+                        style={{
+                          height: "42px",
+                          padding: "0 16px",
+                          borderRadius: "12px",
+                          border: "1px solid rgba(203,213,225,0.84)",
+                          background: "#ffffff",
+                          color: "#273449",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                          fontSize: "13px",
+                          fontWeight: 500,
+                          cursor: "default",
+                          boxShadow: "0 2px 0 rgba(15,23,42,0.02)",
+                        }}
+                      >
+                        {action.icon}
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+
+                  {boardBrowserView !== "plan" && (
+                    <div
+                      style={{
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "12px",
+                        alignItems: "center",
+                        opacity: boardBrowserView === "calendar" ? 0.7 : 1,
+                      }}
+                    >
+                      <label
+                        style={{
+                          flex: "1 1 280px",
+                          minWidth: "240px",
+                          height: "44px",
+                          padding: "0 15px",
+                          borderRadius: "12px",
+                          border: "1px solid rgba(203,213,225,0.84)",
+                          background: "#ffffff",
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                        }}
+                      >
+                        <Search size={16} color="#64748b" />
+                        <input
+                          value={boardSearchQuery}
+                          onChange={(e) => setBoardSearchQuery(e.currentTarget.value)}
+                          placeholder={
+                            boardBrowserView === "calendar"
+                              ? "Search schedules and meetings"
+                              : "Search boards"
+                          }
+                          style={{
+                            width: "100%",
+                            border: "none",
+                            outline: "none",
+                            background: "transparent",
+                            color: "#0f172a",
+                            fontSize: "13px",
+                            fontWeight: 520,
+                          }}
+                        />
+                      </label>
+
+                      {boardBrowserView === "calendar" ? (
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "8px",
+                          flexWrap: "wrap",
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => goToCalendarMonth(-12)}
+                          style={{
+                            height: "44px",
+                            padding: "0 14px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          <ChevronLeft size={16} />
+                          Year
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => goToCalendarMonth(-1)}
+                          style={{
+                            width: "44px",
+                            height: "44px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        <div
+                          style={{
+                            height: "44px",
+                            padding: "0 16px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "flex",
+                            alignItems: "center",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {calendarMonthLabel}
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => goToCalendarMonth(1)}
+                          style={{
+                            width: "44px",
+                            height: "44px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                          }}
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => goToCalendarMonth(12)}
+                          style={{
+                            height: "44px",
+                            padding: "0 14px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "8px",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Year
+                          <ChevronRight size={16} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollCalendarHorizontally("left")}
+                          style={{
+                            width: "44px",
+                            height: "44px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                          }}
+                          aria-label="Scroll calendar left"
+                        >
+                          <ChevronLeft size={18} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={jumpToCalendarToday}
+                          style={{
+                            height: "44px",
+                            padding: "0 16px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(96,165,250,0.7)",
+                            background: "#eef6ff",
+                            color: "#1d4ed8",
+                            display: "flex",
+                            alignItems: "center",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Today
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => scrollCalendarHorizontally("right")}
+                          style={{
+                            width: "44px",
+                            height: "44px",
+                            borderRadius: "12px",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
+                            color: "#0f172a",
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                          }}
+                          aria-label="Scroll calendar right"
+                        >
+                          <ChevronRight size={18} />
+                        </button>
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          height: "46px",
+                          padding: "0 16px",
+                          borderRadius: "15px",
+                          border: "1px solid rgba(203,213,225,0.95)",
+                          background: "#ffffff",
+                          color: "#475569",
+                          display: "flex",
+                          alignItems: "center",
+                          fontSize: "14px",
+                          fontWeight: 600,
+                        }}
+                      >
+                        Modified recently
+                      </div>
+                      )}
+                    </div>
+                  )}
+
+                  <div
+                    style={{
+                      minHeight: 0,
+                      overflowY: "auto",
+                      paddingRight: "6px",
+                      overscrollBehavior: "contain",
+                    }}
+                  >
+                    {boardBrowserView === "plan" ? (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "18px",
+                          alignContent: "start",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "1.3fr 1fr",
+                            gap: "18px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              minHeight: "220px",
+                              borderRadius: "20px",
+                              border: "1px solid rgba(59,130,246,0.16)",
+                              background:
+                                "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+                              color: "#ffffff",
+                              padding: "24px",
+                              display: "grid",
+                              alignContent: "space-between",
+                              boxShadow: "0 24px 60px rgba(59,130,246,0.2)",
+                            }}
+                          >
+                            <div
+                              style={{
+                                display: "flex",
+                                justifyContent: "space-between",
+                                alignItems: "start",
+                                gap: "16px",
+                              }}
+                            >
+                              <div>
+                                <div
+                                  style={{
+                                    fontSize: "13px",
+                                    color: "rgba(255,255,255,0.72)",
+                                    letterSpacing: "0.08em",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  Upgrade your workspace
+                                </div>
+                                <div
+                                  style={{
+                                    marginTop: "10px",
+                                    fontSize: "34px",
+                                    lineHeight: 1.05,
+                                    fontWeight: 600,
+                                    maxWidth: "520px",
+                                  }}
+                                >
+                                  Pick the plan that matches your pace.
+                                </div>
+                              </div>
+                              <div
+                                style={{
+                                  width: "48px",
+                                  height: "48px",
+                                  borderRadius: "14px",
+                                  background: "rgba(255,255,255,0.12)",
+                                  display: "grid",
+                                  placeItems: "center",
+                                  backdropFilter: "blur(10px)",
+                                }}
+                              >
+                                <Star size={20} />
+                              </div>
+                            </div>
+
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "12px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {[
+                                "Faster planning",
+                                "Smarter scheduling",
+                                "Better workspace flow",
+                              ].map((badge) => (
+                                <div
+                                  key={badge}
+                                  style={{
+                                    height: "34px",
+                                    padding: "0 14px",
+                                    borderRadius: "999px",
+                                    background: "rgba(255,255,255,0.12)",
+                                    border: "1px solid rgba(255,255,255,0.16)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    fontSize: "13px",
+                                    color: "rgba(255,255,255,0.88)",
+                                  }}
+                                >
+                                  {badge}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+
+                          <div
+                            style={{
+                              minHeight: "220px",
+                              borderRadius: "20px",
+                              border: "1px solid rgba(34,197,94,0.18)",
+                              background:
+                                "linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%)",
+                              padding: "22px",
+                              display: "grid",
+                              gap: "16px",
+                              alignContent: "start",
+                              boxShadow: "0 18px 40px rgba(34,197,94,0.08)",
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: "#64748b",
+                                fontSize: "12px",
+                                letterSpacing: "0.08em",
+                                textTransform: "uppercase",
+                              }}
+                            >
+                              Monthly billing
+                            </div>
+                            <div
+                              style={{
+                                color: "#0f172a",
+                                fontSize: "28px",
+                                fontWeight: 600,
+                                lineHeight: 1.1,
+                              }}
+                            >
+                              Clear pricing in PLN.
+                            </div>
+                            <div
+                              style={{
+                                color: "#64748b",
+                                fontSize: "14px",
+                                lineHeight: 1.6,
+                              }}
+                            >
+                              Start simple, move up when your boards, schedules, and team rhythm need more room.
+                            </div>
+                          </div>
+                        </div>
+
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                            gap: "18px",
+                          }}
+                        >
+                          {[
+                            {
+                              name: "Basic",
+                              price: "40",
+                              accent:
+                                "linear-gradient(180deg, rgba(124,58,237,0.08) 0%, rgba(255,255,255,0.98) 62%, rgba(59,130,246,0.06) 100%)",
+                              border: "rgba(124,58,237,0.22)",
+                              text: "#1f2937",
+                              buttonBackground: "#f5f3ff",
+                              buttonText: "#6d28d9",
+                              checkBackground: "rgba(124,58,237,0.1)",
+                              features: [
+                                "Calendar planning",
+                                "Essential boards",
+                                "Personal scheduling",
+                              ],
+                            },
+                            {
+                              name: "Pro",
+                              price: "60",
+                              accent:
+                                "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+                              border: "rgba(59,130,246,0.3)",
+                              text: "#ffffff",
+                              buttonBackground: "#ffffff",
+                              buttonText: "#166534",
+                              checkBackground: "rgba(255,255,255,0.18)",
+                              features: [
+                                "Priority workspace",
+                                "Advanced planning flow",
+                                "Sharper organization tools",
+                              ],
+                              featured: true,
+                            },
+                            {
+                              name: "Master",
+                              price: "90",
+                              accent:
+                                "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(255,255,255,0.98) 58%, rgba(59,130,246,0.08) 100%)",
+                              border: "rgba(34,197,94,0.22)",
+                              text: "#0f172a",
+                              buttonBackground: "#f0fdf4",
+                              buttonText: "#166534",
+                              checkBackground: "rgba(34,197,94,0.12)",
+                              features: [
+                                "Full premium experience",
+                                "Top-tier scheduling feel",
+                                "Maximum workspace control",
+                              ],
+                            },
+                          ].map((plan) => (
+                            <div
+                              key={plan.name}
+                              style={{
+                                minHeight: "360px",
+                                borderRadius: "20px",
+                                border: `1px solid ${plan.border}`,
+                                background: plan.accent,
+                                padding: "22px",
+                                display: "grid",
+                                gridTemplateRows: "auto auto 1fr auto",
+                                gap: "18px",
+                                boxShadow: plan.featured
+                                  ? "0 26px 60px rgba(59,130,246,0.22)"
+                                  : "0 16px 34px rgba(15,23,42,0.08)",
+                                transform: plan.featured ? "translateY(-6px)" : "none",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  display: "flex",
+                                  justifyContent: "space-between",
+                                  alignItems: "center",
+                                  gap: "12px",
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    color: plan.text,
+                                    fontSize: "22px",
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {plan.name}
+                                </div>
+                                {plan.featured && (
+                                  <div
+                                    style={{
+                                      height: "28px",
+                                      padding: "0 12px",
+                                      borderRadius: "999px",
+                                      background: "rgba(255,255,255,0.14)",
+                                      border: "1px solid rgba(255,255,255,0.18)",
+                                      color: "#ffffff",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      fontSize: "12px",
+                                    }}
+                                  >
+                                    Most popular
+                                  </div>
+                                )}
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "end",
+                                  gap: "6px",
+                                  color: plan.text,
+                                }}
+                              >
+                                <span
+                                  style={{
+                                    fontSize: "44px",
+                                    lineHeight: 0.95,
+                                    fontWeight: 600,
+                                  }}
+                                >
+                                  {plan.price}
+                                </span>
+                                <span
+                                  style={{
+                                    fontSize: "15px",
+                                    opacity: plan.featured ? 0.86 : 0.72,
+                                    paddingBottom: "7px",
+                                  }}
+                                >
+                                  PLN / month
+                                </span>
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gap: "12px",
+                                  alignContent: "start",
+                                }}
+                              >
+                                {plan.features.map((feature) => (
+                                  <div
+                                    key={feature}
+                                    style={{
+                                      display: "flex",
+                                      alignItems: "center",
+                                      gap: "10px",
+                                      color: plan.text,
+                                      fontSize: "14px",
+                                      opacity: plan.featured ? 0.95 : 0.82,
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        width: "22px",
+                                        height: "22px",
+                                        borderRadius: "999px",
+                                        background: plan.checkBackground,
+                                        display: "grid",
+                                        placeItems: "center",
+                                        flex: "0 0 auto",
+                                      }}
+                                    >
+                                      <Check size={13} />
+                                    </div>
+                                    {feature}
+                                  </div>
+                                ))}
+                              </div>
+
+                              <button
+                                type="button"
+                                style={{
+                                  height: "44px",
+                                  borderRadius: "12px",
+                                  border: plan.featured
+                                    ? "1px solid rgba(255,255,255,0.18)"
+                                    : "1px solid rgba(59,130,246,0.14)",
+                                  background: plan.buttonBackground,
+                                  color: plan.buttonText,
+                                  fontSize: "14px",
+                                  fontWeight: 500,
+                                  cursor: "pointer",
+                                }}
+                              >
+                                Choose {plan.name}
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    ) : boardBrowserView === "calendar" ? (
+                      <>
+                        <div
+                          ref={calendarScrollContainerRef}
+                          className="calendar-scroll-area"
+                          onScroll={syncCalendarScrollFromMain}
+                        style={{
+                          display: "grid",
+                          gap: "12px",
+                          overflowX: "auto",
+                          paddingBottom: "8px",
+                          scrollbarWidth: "auto",
+                          msOverflowStyle: "auto",
+                        }}
+                      >
+                        <div
+                          style={{
+                            display: "grid",
+                            gap: "12px",
+                            minWidth: "1420px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                              gap: "10px",
+                            }}
+                          >
+                            {calendarWeekdayLabels.map((label) => (
+                              <div
+                                key={label}
+                                style={{
+                                  padding: "0 6px",
+                                  color: "#475569",
+                                  fontSize: "11px",
+                                  fontWeight: 500,
+                                  letterSpacing: "0.04em",
+                                  textTransform: "uppercase",
+                                }}
+                              >
+                                {label}
+                              </div>
+                            ))}
+                          </div>
+
+                          <div
+                            style={{
+                              display: "grid",
+                              gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
+                              gap: "10px",
+                              alignContent: "start",
+                            }}
+                          >
+                          {calendarDays.map((day) => (
+                            <div
+                              key={day.key}
+                              style={{
+                                minHeight: "198px",
+                                borderRadius: "12px",
+                                border: "1px solid rgba(214,224,238,0.95)",
+                                background: day.isToday
+                                  ? "linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(255,255,255,1) 62%)"
+                                  : "#ffffff",
+                                boxShadow: day.isToday
+                                  ? "0 14px 28px rgba(59,130,246,0.1)"
+                                  : "0 10px 22px rgba(15,23,42,0.045)",
+                                padding: "11px",
+                                display: "grid",
+                                alignContent: "start",
+                                gap: "9px",
+                                overflow: "hidden",
+                              }}
+                            >
+                              <div
+                                style={{
+                                  height: "26px",
+                                  color: day.isToday ? "#2563eb" : "#111827",
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: "6px",
+                                  fontSize: "13px",
+                                  fontWeight: 500,
+                                  opacity: 1,
+                                }}
+                              >
+                                <span
+                                  style={
+                                    day.isToday
+                                      ? {
+                                          minWidth: "28px",
+                                          height: "28px",
+                                          padding: "0 9px",
+                                          borderRadius: "999px",
+                                          background:
+                                            "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                                          color: "#ffffff",
+                                          display: "inline-flex",
+                                          alignItems: "center",
+                                          justifyContent: "center",
+                                          boxShadow:
+                                            "0 10px 18px rgba(59,130,246,0.22)",
+                                        }
+                                      : undefined
+                                  }
+                                >
+                                  {day.dayNumber ?? ""}
+                                </span>
+                                <span
+                                  style={{
+                                    color: day.isToday ? "#2563eb" : "#64748b",
+                                    fontSize: "10px",
+                                    fontWeight: 500,
+                                    letterSpacing: "0.04em",
+                                    textTransform: "uppercase",
+                                  }}
+                                >
+                                  {calendarDayLabel.format(day.date)}
+                                </span>
+                              </div>
+
+                              <div
+                                style={{
+                                  display: "grid",
+                                  gap: "5px",
+                                  opacity: 1,
+                                }}
+                              >
+                                {day.entries.map((entry) => (
+                                  <div
+                                    key={entry.id}
+                                    data-calendar-entry-shell="true"
+                                    style={{
+                                      display: "grid",
+                                      gridTemplateColumns:
+                                        editingCalendarEntryId === entry.id
+                                          ? "minmax(0, 1fr)"
+                                          : selectedCalendarEntryId === entry.id
+                                          ? "minmax(0, 1fr) auto"
+                                          : "minmax(0, 1fr)",
+                                      gap: "6px",
+                                      alignItems: "start",
+                                      position: "relative",
+                                    }}
+                                  >
+                                    {editingCalendarEntryId === entry.id ? (
+                                      <div
+                                        style={{
+                                          display: "grid",
+                                          gap: "6px",
+                                          padding: "6px",
+                                          borderRadius: "10px",
+                                          border: "1px solid rgba(147,197,253,0.82)",
+                                          background: "#ffffff",
+                                          boxShadow:
+                                            "0 8px 20px rgba(37,99,235,0.08)",
+                                        }}
+                                      >
+                                        <div
+                                          style={{
+                                            display: "grid",
+                                            gridTemplateColumns: "1fr",
+                                            gap: "0",
+                                          }}
+                                        >
+                                          <label
+                                            style={{
+                                              display: "grid",
+                                              gap: "0",
+                                            }}
+                                          >
+                                            <div
+                                              style={{
+                                                position: "relative",
+                                              }}
+                                            >
+                                              <select
+                                              value={entry.startHour}
+                                              onChange={(e) =>
+                                                updateCalendarEntryHours(
+                                                  entry.id,
+                                                  "startHour",
+                                                  e.currentTarget.value
+                                                )
+                                              }
+                                              aria-label="Start time"
+                                              style={{
+                                                width: "100%",
+                                                height: "30px",
+                                                padding: "0 6px",
+                                                borderRadius: "8px",
+                                                border:
+                                                  "1px solid rgba(203,213,225,0.95)",
+                                                background: "#f8fafc",
+                                                color: "#0f172a",
+                                                fontSize: "12px",
+                                                fontWeight: 500,
+                                                outline: "none",
+                                                boxSizing: "border-box",
+                                              }}
+                                            >
+                                              {calendarHourOptions.map((option) => (
+                                                <option
+                                                  key={option.value}
+                                                  value={option.value}
+                                                >
+                                                  {option.shortLabel}
+                                                </option>
+                                              ))}
+                                            </select>
+                                          </div>
+                                        </label>
+                                        </div>
+                                        <div
+                                          style={{
+                                            display: "flex",
+                                            alignItems: "center",
+                                            justifyContent: "space-between",
+                                            gap: "5px",
+                                          }}
+                                        >
+                                          <div
+                                            style={{
+                                              display: "flex",
+                                              alignItems: "center",
+                                              gap: "5px",
+                                              flexWrap: "wrap",
+                                            }}
+                                          >
+                                            {calendarEntryColors.map((color) => {
+                                              const isSelected =
+                                                getCalendarEntryColor(entry) === color;
+
+                                              return (
+                                                <button
+                                                  key={color}
+                                                  type="button"
+                                                  onClick={() =>
+                                                    updateCalendarEntryColor(
+                                                      entry.id,
+                                                      color
+                                                    )
+                                                  }
+                                                  aria-label={`Use ${color} event color`}
+                                                  style={{
+                                                    width: "19px",
+                                                    height: "19px",
+                                                    borderRadius: "999px",
+                                                    border: isSelected
+                                                      ? "2px solid #0f172a"
+                                                      : "2px solid rgba(255,255,255,0.95)",
+                                                    background: color,
+                                                    boxShadow: isSelected
+                                                      ? "0 0 0 2px rgba(147,197,253,0.9)"
+                                                      : "0 1px 4px rgba(15,23,42,0.12)",
+                                                    cursor: "pointer",
+                                                    padding: 0,
+                                                  }}
+                                                />
+                                              );
+                                            })}
+                                            <label
+                                              style={{
+                                                position: "relative",
+                                                width: "22px",
+                                                height: "22px",
+                                                borderRadius: "999px",
+                                                border:
+                                                  "2px solid rgba(255,255,255,0.98)",
+                                                background: getCalendarEntryColor(entry),
+                                                boxShadow:
+                                                  calendarEntryColors.includes(
+                                                    getCalendarEntryColor(entry)
+                                                  )
+                                                    ? "0 1px 4px rgba(15,23,42,0.12)"
+                                                    : "0 0 0 2px rgba(147,197,253,0.9)",
+                                                cursor: "pointer",
+                                                overflow: "hidden",
+                                                display: "grid",
+                                                placeItems: "center",
+                                              }}
+                                            >
+                                              <span
+                                                aria-hidden="true"
+                                                style={{
+                                                  width: "8px",
+                                                  height: "8px",
+                                                  borderRadius: "999px",
+                                                  border: "1.5px solid rgba(255,255,255,0.96)",
+                                                  background: "rgba(15,23,42,0.18)",
+                                                  boxShadow:
+                                                    "0 1px 2px rgba(15,23,42,0.12)",
+                                                }}
+                                              />
+                                              <input
+                                                type="color"
+                                                value={getCalendarEntryColor(entry)}
+                                                onChange={(e) =>
+                                                  updateCalendarEntryColor(
+                                                    entry.id,
+                                                    e.currentTarget.value
+                                                  )
+                                                }
+                                                aria-label="Choose a custom event color"
+                                                style={{
+                                                  position: "absolute",
+                                                  inset: 0,
+                                                  width: "100%",
+                                                  height: "100%",
+                                                  opacity: 0,
+                                                  cursor: "pointer",
+                                                }}
+                                              />
+                                            </label>
+                                          </div>
+                                          <button
+                                            type="button"
+                                            onClick={() =>
+                                              lockCalendarEntry(entry.id)
+                                            }
+                                            aria-label="Confirm calendar entry"
+                                            style={{
+                                              width: "28px",
+                                              height: "28px",
+                                              flex: "0 0 auto",
+                                              borderRadius: "9px",
+                                              border:
+                                                "1px solid rgba(34,197,94,0.32)",
+                                              background: "#15803d",
+                                              color: "#ffffff",
+                                              display: "grid",
+                                              placeItems: "center",
+                                              cursor: "pointer",
+                                              boxShadow:
+                                                "0 8px 18px rgba(22,163,74,0.18)",
+                                              padding: 0,
+                                            }}
+                                          >
+                                            <Check size={15} strokeWidth={3} />
+                                          </button>
+                                        </div>
+                                        <textarea
+                                          autoFocus
+                                          value={entry.title}
+                                          onChange={(e) =>
+                                            updateCalendarEntry(
+                                              entry.id,
+                                              e.currentTarget.value
+                                            )
+                                          }
+                                          onKeyDown={(e) => {
+                                            if (e.key === "Escape") {
+                                              e.preventDefault();
+                                              lockCalendarEntry(entry.id);
+                                            }
+
+                                            if (e.key === "Enter" && !e.shiftKey) {
+                                              e.preventDefault();
+                                              lockCalendarEntry(entry.id);
+                                            }
+                                          }}
+                                          placeholder="Meeting, schedule, reminder..."
+                                          style={{
+                                            width: "100%",
+                                            minWidth: "120px",
+                                            minHeight: "44px",
+                                            padding: "8px",
+                                            borderRadius: "9px",
+                                            border: "1px solid rgba(203,213,225,0.95)",
+                                            background: "#f8fafc",
+                                            color: "#0f172a",
+                                            fontSize: "12px",
+                                            fontWeight: 400,
+                                            outline: "none",
+                                            resize: "both",
+                                            overflow: "auto",
+                                            boxSizing: "border-box",
+                                            maxWidth: "100%",
+                                            fontFamily: "inherit",
+                                            lineHeight: 1.4,
+                                          }}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          beginEditingCalendarEntry(entry.id)
+                                        }
+                                        onContextMenu={(e) => {
+                                          e.preventDefault();
+                                          selectCalendarEntry(entry.id);
+                                        }}
+                                        style={{
+                                          minWidth: 0,
+                                          minHeight: "28px",
+                                          height: "28px",
+                                          padding: "0 9px",
+                                          borderRadius: "7px",
+                                          border:
+                                            selectedCalendarEntryId === entry.id
+                                              ? "1px solid rgba(15,23,42,0.28)"
+                                              : "1px solid transparent",
+                                          background: getCalendarEntryColor(entry),
+                                          color: "#ffffff",
+                                          fontSize: "12px",
+                                          fontWeight: 500,
+                                          lineHeight: 1,
+                                          textAlign: "left",
+                                          cursor: "pointer",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          gap: "6px",
+                                          whiteSpace: "nowrap",
+                                          overflow: "hidden",
+                                          boxShadow:
+                                            selectedCalendarEntryId === entry.id
+                                              ? "0 0 0 2px rgba(37,99,235,0.18)"
+                                              : "0 4px 10px rgba(15,23,42,0.08)",
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            flex: "0 0 auto",
+                                            color: "rgba(255,255,255,0.92)",
+                                            fontSize: "10px",
+                                            fontWeight: 500,
+                                          }}
+                                        >
+                                          {getCalendarHourLabel(
+                                            entry.startHour,
+                                            "short"
+                                          )}
+                                        </span>
+                                        <span
+                                          style={{
+                                            minWidth: 0,
+                                            overflow: "hidden",
+                                            textOverflow: "ellipsis",
+                                          }}
+                                        >
+                                          {entry.title.trim().length
+                                            ? entry.title
+                                            : "New meeting"}
+                                        </span>
+                                      </button>
+                                    )}
+                                    {selectedCalendarEntryId === entry.id &&
+                                      editingCalendarEntryId !== entry.id && (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            removeCalendarEntry(entry.id);
+                                          }}
+                                          aria-label="Remove calendar entry"
+                                          style={{
+                                            position: "absolute",
+                                            top: "-8px",
+                                            right: "-8px",
+                                            width: "28px",
+                                            height: "28px",
+                                            borderRadius: "999px",
+                                            border: "1px solid rgba(248,113,113,0.32)",
+                                            background: "#ffffff",
+                                            color: "#dc2626",
+                                            display: "grid",
+                                            placeItems: "center",
+                                            cursor: "pointer",
+                                            padding: 0,
+                                            boxShadow: "0 10px 22px rgba(239,68,68,0.16)",
+                                          }}
+                                        >
+                                          <Trash2 size={14} />
+                                        </button>
+                                      )}
+                                  </div>
+                                ))}
+
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    createCalendarEntry(
+                                      getLocalCalendarDateKey(day.date)
+                                    )
+                                  }
+                                  style={{
+                                    height: "28px",
+                                    borderRadius: "7px",
+                                    border: "1px dashed rgba(96,165,250,0.86)",
+                                    background: "rgba(239,246,255,0.68)",
+                                    color: "#1d4ed8",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    justifyContent: "center",
+                                    gap: "4px",
+                                    fontSize: "12px",
+                                    fontWeight: 500,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  <Plus size={12} />
+                                  Add
+                                </button>
+                              </div>
+                            </div>
+                          ))}
+                          </div>
+                        </div>
+
+                        {calendarSchedules.length === 0 && (
+                          <div
+                            style={{
+                              minHeight: "260px",
+                              borderRadius: "24px",
+                              border: "1px dashed rgba(203,213,225,0.95)",
+                              background:
+                                "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+                              display: "grid",
+                              placeItems: "center",
+                              padding: "28px",
+                              textAlign: "center",
+                            }}
+                          >
+                            <div>
+                              <div
+                                style={{
+                                  color: "#0f172a",
+                                  fontSize: "22px",
+                                  fontWeight: 750,
+                                }}
+                              >
+                                No schedules on this calendar yet
+                              </div>
+                              <div
+                                style={{
+                                  marginTop: "8px",
+                                  color: "#64748b",
+                                  fontSize: "14px",
+                                  lineHeight: 1.5,
+                                }}
+                              >
+                                Add a meeting or schedule to any day and it will stay
+                                here with your board.
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                        </div>
+
+                        <div
+                          style={{
+                            position: "sticky",
+                            bottom: 0,
+                            zIndex: 2,
+                            paddingTop: "10px",
+                            background:
+                              "linear-gradient(180deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0.92) 38%, rgba(255,255,255,0.98) 100%)",
+                          }}
+                        >
+                          <div
+                            ref={calendarBottomScrollbarRef}
+                            className="calendar-bottom-scrollbar"
+                            onScroll={syncCalendarScrollFromBottom}
+                            style={{
+                              overflowX: "auto",
+                              overflowY: "hidden",
+                              paddingBottom: "2px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "1420px",
+                                height: "1px",
+                              }}
+                            />
+                          </div>
+                        </div>
+                      </>
+                    ) : (
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns:
+                          "repeat(auto-fill, minmax(220px, 1fr))",
+                        gap: "18px",
+                        alignContent: "start",
+                      }}
+                    >
+                      {visibleBoards.map((board, index) => {
+                        const isActive = board.id === activeBoardId;
+                        const isEditing = board.id === editingBoardId;
+                        const isInTrash = Boolean(board.deletedAt);
+
+                        return (
+                          <div
+                            key={board.id}
+                            style={{
+                              borderRadius: "20px",
+                              border: isActive
+                                ? "1px solid rgba(59,130,246,0.35)"
+                                : "1px solid rgba(226,232,240,0.95)",
+                              background: "#ffffff",
+                              boxShadow: isActive
+                                ? "0 16px 34px rgba(59,130,246,0.12)"
+                                : "0 10px 26px rgba(15,23,42,0.06)",
+                              overflow: "hidden",
+                              cursor: isBoardsLoading ? "default" : "pointer",
+                            }}
+                            onClick={() => {
+                              if (isEditing || isBoardsLoading || isInTrash) return;
+
+                              switchBoard(board.id).catch(() => null);
+                              setShowBoardsMenu(false);
+                            }}
+                          >
+                            <div
+                              style={{
+                                height: "132px",
+                                padding: "14px",
+                                background: isActive
+                                  ? "linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%)"
+                                  : "linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%)",
+                                borderBottom: "1px solid rgba(226,232,240,0.9)",
+                                position: "relative",
+                                overflow: "hidden",
+                              }}
+                            >
+                              {renderBoardPreviewContent(board)}
+                            </div>
+
+                            <div
+                              style={{
+                                padding: "16px 16px 15px",
+                                display: "grid",
+                                gap: "10px",
+                              }}
+                            >
+                              {isEditing ? (
+                                <input
+                                  ref={boardNameInputRef}
+                                  value={editingBoardName}
+                                  maxLength={40}
+                                  disabled={isBoardsLoading}
+                                  onClick={(e) => e.stopPropagation()}
+                                  onChange={(e) =>
+                                    setEditingBoardName(e.currentTarget.value)
+                                  }
+                                  onBlur={() => renameBoard(board.id)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") {
+                                      e.preventDefault();
+                                      renameBoard(board.id);
+                                    }
+
+                                    if (e.key === "Escape") {
+                                      setEditingBoardId("");
+                                      setEditingBoardName("");
+                                    }
+                                  }}
+                                  style={{
+                                    height: "40px",
+                                    width: "100%",
+                                    padding: "0 13px",
+                                    borderRadius: "12px",
+                                    border: "1px solid rgba(59,130,246,0.3)",
+                                    background: "#f8fbff",
+                                    color: "#0f172a",
+                                    fontSize: "15px",
+                                    fontWeight: 700,
+                                    fontFamily: appSansFontFamily,
+                                    outline: "none",
+                                  }}
+                                />
+                              ) : (
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    alignItems: "flex-start",
+                                    justifyContent: "space-between",
+                                    gap: "10px",
+                                  }}
+                                >
+                                  <div
+                                    style={{
+                                      minWidth: 0,
+                                      flex: "1 1 auto",
+                                      display: "grid",
+                                      gap: "6px",
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (isBoardsLoading || isInTrash) return;
+                                        startRenamingBoard(board);
+                                      }}
+                                      style={{
+                                        padding: 0,
+                                        border: "none",
+                                      background: "transparent",
+                                      color: "#0f172a",
+                                      fontSize: "19px",
+                                      fontWeight: 780,
+                                      fontFamily: appSansFontFamily,
+                                      lineHeight: 1.15,
+                                      textAlign: "left",
+                                      cursor:
+                                          isBoardsLoading || isInTrash
+                                            ? "default"
+                                            : "text",
+                                      }}
+                                    >
+                                      {board.name || `Board ${index + 1}`}
+                                    </button>
+                                    {isActive && !isInTrash && (
+                                      <div
+                                        style={{
+                                          width: "fit-content",
+                                          height: "24px",
+                                          padding: "0 10px",
+                                          borderRadius: "999px",
+                                          border: "1px solid rgba(59,130,246,0.16)",
+                                          background: "rgba(219,234,254,0.72)",
+                                          color: "#2563eb",
+                                          display: "flex",
+                                          alignItems: "center",
+                                          fontSize: "11px",
+                                          fontWeight: 600,
+                                          letterSpacing: "0.04em",
+                                          textTransform: "uppercase",
+                                        }}
+                                      >
+                                        Active board
+                                      </div>
+                                    )}
+                                  </div>
+                                  {!isInTrash && (
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        alignItems: "center",
+                                        gap: "8px",
+                                        flex: "0 0 auto",
+                                      }}
+                                    >
+                                      <button
+                                        type="button"
+                                        aria-label={`${
+                                          board.starred ? "Remove" : "Add"
+                                        } ${board.name} ${board.starred ? "from" : "to"} starred`}
+                                        disabled={isBoardsLoading}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          toggleBoardStarred(board).catch(() => null);
+                                        }}
+                                        style={{
+                                          width: "32px",
+                                          height: "32px",
+                                          borderRadius: "10px",
+                                          border: board.starred
+                                            ? "1px solid rgba(245,158,11,0.24)"
+                                            : "1px solid rgba(148,163,184,0.18)",
+                                          background: "#ffffff",
+                                          color: board.starred ? "#f59e0b" : "#64748b",
+                                          display: "grid",
+                                          placeItems: "center",
+                                          cursor: isBoardsLoading ? "default" : "pointer",
+                                          padding: 0,
+                                        }}
+                                      >
+                                        <Star
+                                          size={15}
+                                          fill={board.starred ? "#f59e0b" : "none"}
+                                        />
+                                      </button>
+                                      <button
+                                        type="button"
+                                        aria-label={`Move ${board.name} to trash`}
+                                        disabled={isBoardsLoading}
+                                        onClick={(e) => {
+                                          e.stopPropagation();
+                                          moveBoardToTrash(board).catch(() => null);
+                                        }}
+                                        style={{
+                                          width: "32px",
+                                          height: "32px",
+                                          borderRadius: "10px",
+                                          border: "1px solid rgba(239,68,68,0.16)",
+                                          background: "#ffffff",
+                                          color: "#dc2626",
+                                          display: "grid",
+                                          placeItems: "center",
+                                          cursor: isBoardsLoading ? "default" : "pointer",
+                                          padding: 0,
+                                        }}
+                                      >
+                                        <Trash2 size={15} />
+                                      </button>
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+
+                              <div
+                                style={{
+                                  display: "flex",
+                                  alignItems: "center",
+                                  justifyContent: "space-between",
+                                  gap: "10px",
+                                  color: "#64748b",
+                                  fontSize: "12px",
+                                  fontWeight: 600,
+                                }}
+                              >
+                                <span>{formatBoardDate(board.updatedAt)}</span>
+                                <span
+                                  style={{
+                                    color: isInTrash
+                                      ? "#b45309"
+                                      : board.starred
+                                      ? "#f59e0b"
+                                      : isActive
+                                      ? "#2563eb"
+                                      : "#94a3b8",
+                                  }}
+                                >
+                                  {isInTrash
+                                    ? `Deletes after ${formatBoardDate(
+                                        new Date(
+                                          new Date(
+                                            board.deletedAt ?? board.updatedAt
+                                          ).getTime() +
+                                            30 * 24 * 60 * 60 * 1000
+                                        ).toISOString()
+                                      )}`
+                                    : board.starred
+                                    ? "In starred"
+                                    : isActive
+                                    ? "Open now"
+                                    : ""}
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+                        );
+                      })}
+
+                      {visibleBoards.length === 0 && (
+                        <div
+                          style={{
+                            gridColumn: "1 / -1",
+                            minHeight: "260px",
+                            borderRadius: "24px",
+                            border: "1px dashed rgba(203,213,225,0.95)",
+                            background:
+                              "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+                            display: "grid",
+                            placeItems: "center",
+                            padding: "28px",
+                            textAlign: "center",
+                          }}
+                        >
+                          <div>
+                            <div
+                              style={{
+                                color: "#0f172a",
+                                fontSize: "22px",
+                                fontWeight: 750,
+                              }}
+                            >
+                              No boards match that search
+                            </div>
+                            <div
+                              style={{
+                                marginTop: "8px",
+                                color: "#64748b",
+                                fontSize: "14px",
+                                lineHeight: 1.5,
+                              }}
+                            >
+                              Try another name, or create a new board for a fresh
+                              project.
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+                    )}
+                  </div>
+                </section>
+              </div>
+            )}
+          </div>
+        )}
 
         {showSettingsMenu && (
           <div
@@ -4335,8 +8055,7 @@ export default function Page() {
                 border: `1px solid ${panelBorderColor}`,
                 background: popoverBackground,
                 color: panelTextColor,
-                fontFamily:
-                  'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+                fontFamily: appSansFontFamily,
                 WebkitFontSmoothing: "antialiased",
                 MozOsxFontSmoothing: "grayscale",
                 textRendering: "geometricPrecision",
@@ -4860,14 +8579,58 @@ export default function Page() {
                     >
                       Konto
                     </h2>
+                    {currentAccountEmail && (
+                      <div
+                        style={{
+                          display: "grid",
+                          gap: "12px",
+                          maxWidth: "360px",
+                        }}
+                      >
+                        <div
+                          style={{
+                            padding: "14px 16px",
+                            borderRadius: "12px",
+                            border: `1px solid ${panelBorderColor}`,
+                            background: controlBackground,
+                            color: panelTextColor,
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          Signed in as
+                          <div style={{ marginTop: "4px", color: "#7c3aed" }}>
+                            {currentAccountEmail}
+                          </div>
+                        </div>
+                        <button
+                          onClick={signOut}
+                          style={{
+                            width: "220px",
+                            height: "42px",
+                            borderRadius: "10px",
+                            border: `1px solid ${panelBorderColor}`,
+                            background: controlBackground,
+                            color: panelTextColor,
+                            fontSize: "14px",
+                            fontWeight: 650,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Log out
+                        </button>
+                      </div>
+                    )}
                     <button
                       onClick={() => {
                         setShowSettingsMenu(false);
-                        setShowLoginModal(true);
+                        openAuthModal("login");
                       }}
                       style={{
                         width: "220px",
                         height: "42px",
+                        display: currentAccountEmail ? "none" : "inline-block",
                         borderRadius: "10px",
                         border: "none",
                         background:
@@ -4887,9 +8650,86 @@ export default function Page() {
           </div>
         )}
 
+        {currentAccountEmail && (
+          <div
+            ref={profileMenuContainerRef}
+            style={{
+              position: "absolute",
+              top: "50%",
+              right: "16px",
+              transform: "translateY(-50%)",
+              display: "grid",
+              justifyItems: "end",
+              gap: "10px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => setShowProfileMenu((previous) => !previous)}
+              style={{
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+              }}
+              aria-label={`Logged in as ${currentAccountEmail}`}
+              title={currentAccountEmail}
+            >
+              <UserRound size={18} />
+            </button>
+            {showProfileMenu && (
+              <div
+                style={{
+                  minWidth: "166px",
+                  padding: "12px",
+                  borderRadius: "16px",
+                  border: "1px solid rgba(255,255,255,0.24)",
+                  background: "rgba(20,24,33,0.92)",
+                  boxShadow: "0 18px 36px rgba(15,23,42,0.28)",
+                  backdropFilter: "blur(16px)",
+                  display: "grid",
+                  gap: "10px",
+                }}
+              >
+                <div
+                  style={{
+                    color: "rgba(255,255,255,0.7)",
+                    fontSize: "11px",
+                    fontWeight: 500,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Account
+                </div>
+                <button
+                  type="button"
+                  onClick={signOut}
+                  style={{
+                    height: "38px",
+                    padding: "0 16px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(255,255,255,0.18)",
+                    background: "linear-gradient(90deg, #22c55e 0%, #34d399 100%)",
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    cursor: "pointer",
+                  }}
+                >
+                  Log out
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
         <button
           aria-label="Zaloguj się"
-          onClick={() => setShowLoginModal(true)}
+          onClick={() => openAuthModal("login")}
           style={{
             position: "absolute",
             top: "50%",
@@ -4901,11 +8741,10 @@ export default function Page() {
             border: "1.5px solid rgba(255,255,255,0.34)",
             background: "rgba(255,255,255,0.08)",
             color: "#ffffff",
-            display: "flex",
+            display: currentAccountEmail ? "none" : "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontFamily:
-              'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fontFamily: appSansFontFamily,
             fontSize: "14px",
             fontWeight: 500,
             letterSpacing: "0.01em",
@@ -4920,6 +8759,7 @@ export default function Page() {
 
         <button
           aria-label="Zarejestruj się"
+          onClick={() => openAuthModal("register")}
           onMouseEnter={() => setIsRegisterHovered(true)}
           onMouseLeave={() => setIsRegisterHovered(false)}
           style={{
@@ -4935,11 +8775,10 @@ export default function Page() {
               ? "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)"
               : "#ffffff",
             color: isRegisterHovered ? "#ffffff" : "#7c3aed",
-            display: "flex",
+            display: currentAccountEmail ? "none" : "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontFamily:
-              'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
+            fontFamily: appSansFontFamily,
             fontSize: "14px",
             fontWeight: 500,
             letterSpacing: "0.01em",

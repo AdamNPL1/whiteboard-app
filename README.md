@@ -18,6 +18,27 @@ Open [http://localhost:3000](http://localhost:3000) with your browser to see the
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
+## Account verification email with SMTP
+
+The custom board has a server-side registration flow with email verification codes. User accounts and sessions are stored locally in `.data/auth.json` during development, and `.data/` is ignored by git.
+
+Verification email is sent with plain SMTP through Nodemailer. No Resend, SendGrid, Mailgun, Brevo, or other email API provider is used.
+
+Create `.env.local` in the project root and add:
+
+```bash
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=465
+SMTP_SECURE=true
+SMTP_USER=your-email@gmail.com
+SMTP_PASS=your-app-password
+SMTP_FROM=
+```
+
+For Gmail, `SMTP_PASS` must be a Google app password, not your normal Google account password. `SMTP_USER` must be the same Gmail address that owns that app password. `SMTP_FROM` is optional and should usually match `SMTP_USER`. After changing `.env.local`, restart `npm run dev` so Next.js loads the new environment variables.
+
+Verification codes expire after 10 minutes, are stored only as bcrypt hashes, and can be resent at most once every 60 seconds.
+
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
 ## Learn More
