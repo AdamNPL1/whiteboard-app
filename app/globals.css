@@ -37,14 +37,14 @@ select {
 }
 
 textarea.custom-text-input {
-  caret-color: transparent;
-  -webkit-text-fill-color: transparent;
+  caret-color: currentColor;
+  -webkit-text-fill-color: currentColor;
 }
 
 textarea.custom-text-input::selection {
   background: rgba(79, 124, 255, 0.5);
-  color: transparent;
-  -webkit-text-fill-color: transparent;
+  color: currentColor;
+  -webkit-text-fill-color: currentColor;
 }
 
 .board-pen-cursor {

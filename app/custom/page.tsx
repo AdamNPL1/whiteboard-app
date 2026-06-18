@@ -1,6 +1,6 @@
 "use client";
 
-import { type ReactNode, useEffect, useEffectEvent, useRef, useState } from "react";
+import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   Pen,
   Eraser,
@@ -86,6 +86,8 @@ type TextElement = {
   textAlign: TextAlign;
   width: number;
   height: number;
+  measurementSpace?: "canvas" | "screen";
+  measurementZoom?: number;
   backgroundColor?: string;
 };
 type CanvasElement = Stroke | Shape | TextElement;
@@ -247,6 +249,8 @@ export default function Page() {
       preview: "Aa",
     },
   ];
+  const fallbackCanvasFontFamily =
+    '"Segoe UI", ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, sans-serif';
   const calendarHourOptions = Array.from({ length: 48 }, (_, index) => {
     const hour = Math.floor(index / 2);
     const minutes = index % 2 === 0 ? "00" : "30";
@@ -397,7 +401,7 @@ export default function Page() {
   const [showTextBoxOpacityMenu, setShowTextBoxOpacityMenu] = useState(false);
   const [textColorBase, setTextColorBase] = useState("#000000");
   const [textColorOpacity, setTextColorOpacity] = useState(1);
-  const [textSelection, setTextSelection] = useState<TextSelection>({
+  const [, setTextSelection] = useState<TextSelection>({
     start: 0,
     end: 0,
   });
@@ -455,6 +459,7 @@ export default function Page() {
   const activeCalendarScrollSyncRef = useRef<"main" | "bottom" | null>(null);
   const offsetRef = useRef<Point>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
+  const activeTextZoomRef = useRef(1);
   const panStart = useRef<{ screen: Point; offset: Point } | null>(null);
   const isPanningRef = useRef(false);
   const didPanRef = useRef(false);
@@ -475,6 +480,7 @@ export default function Page() {
     handle: TextResizeHandle;
   } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
+  const penCursorElementRef = useRef<HTMLDivElement | null>(null);
   const penCursorPointRef = useRef<Point | null>(null);
   const pendingPenCursorFrame = useRef<number | null>(null);
   const pendingPenCursorPoint = useRef<Point | null>(null);
@@ -553,7 +559,7 @@ export default function Page() {
       : Number.isFinite(fallback)
       ? fallback
       : 24;
-    return Math.min(100, Math.max(1, Math.round(nextFontSize)));
+    return Math.min(480, Math.max(1, Math.round(nextFontSize)));
   };
 
   const componentToHex = (component: number) =>
@@ -611,10 +617,28 @@ export default function Page() {
     setShowTextFormatMenu(false);
     setShowTextListMenu(false);
     setActiveText((prev) =>
-      prev ? { ...prev, fontFamily, fontWeight } : prev
+      prev
+        ? {
+            ...prev,
+            fontFamily,
+            fontWeight,
+            runs: compactTextRuns(
+              prev.runs.map((run) => ({
+                ...run,
+                fontFamily,
+                fontWeight,
+              }))
+            ),
+          }
+        : prev
     );
     window.setTimeout(() => textInputRef.current?.focus(), 0);
   };
+
+  const getCanvasFontFamily = (fontFamily: string) =>
+    fontFamily.includes("var(--font-geist-sans)")
+      ? fallbackCanvasFontFamily
+      : fontFamily;
 
   const applyTextFormat = (
     format: "bold" | "italic" | "underline"
@@ -625,22 +649,43 @@ export default function Page() {
       if (!prev) return prev;
 
       if (format === "bold") {
+        const nextFontWeight = prev.fontWeight >= 700 ? 400 : 700;
         return {
           ...prev,
-          fontWeight: prev.fontWeight >= 700 ? 400 : 700,
+          fontWeight: nextFontWeight,
+          runs: compactTextRuns(
+            prev.runs.map((run) => ({
+              ...run,
+              fontWeight: nextFontWeight,
+            }))
+          ),
         };
       }
 
       if (format === "italic") {
+        const nextFontStyle = prev.fontStyle === "italic" ? "normal" : "italic";
         return {
           ...prev,
-          fontStyle: prev.fontStyle === "italic" ? "normal" : "italic",
+          fontStyle: nextFontStyle,
+          runs: compactTextRuns(
+            prev.runs.map((run) => ({
+              ...run,
+              fontStyle: nextFontStyle,
+            }))
+          ),
         };
       }
 
+      const nextUnderline = !prev.underline;
       return {
         ...prev,
-        underline: !prev.underline,
+        underline: nextUnderline,
+        runs: compactTextRuns(
+          prev.runs.map((run) => ({
+            ...run,
+            underline: nextUnderline,
+          }))
+        ),
       };
     });
     window.setTimeout(() => textInputRef.current?.focus(), 0);
@@ -807,7 +852,20 @@ export default function Page() {
     setShowTextColorMenu(false);
     setShowTextFormatMenu(false);
     setShowTextAlignMenu(false);
-    setActiveText((prev) => (prev ? { ...prev, color: nextColor } : prev));
+    setActiveText((prev) =>
+      prev
+        ? {
+            ...prev,
+            color: nextColor,
+            runs: compactTextRuns(
+              prev.runs.map((run) => ({
+                ...run,
+                color: nextColor,
+              }))
+            ),
+          }
+        : prev
+    );
     window.setTimeout(() => textInputRef.current?.focus(), 0);
   };
 
@@ -1956,15 +2014,29 @@ export default function Page() {
     if (!Number.isFinite(fontSize)) return;
 
     const nextFontSize = clampTextFontSize(fontSize);
-    setActiveText((prev) =>
-      prev
-        ? {
-            ...prev,
-            fontSize: prev.value.length === 0 ? nextFontSize : prev.fontSize,
-            typingFontSize: nextFontSize,
-          }
-        : prev
-    );
+    setActiveText((prev) => {
+      if (!prev) return prev;
+
+      const nextRuns = compactTextRuns(
+        prev.runs.map((run) => ({
+          ...run,
+          fontSize: nextFontSize,
+        }))
+      );
+      const nextSize = getTextRunsEditorSize(nextRuns, nextFontSize);
+
+      return {
+        ...prev,
+        fontSize: nextFontSize,
+        typingFontSize: nextFontSize,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
   };
 
   const runsHaveSameStyle = (first: TextRun, second: TextRun) =>
@@ -2077,91 +2149,6 @@ export default function Page() {
     return compactTextRuns([...beforeRuns, ...insertedRuns, ...afterRuns]);
   };
 
-  const renderInlineTextCaret = (color: string, key: string) => (
-    <span
-      key={key}
-      aria-hidden="true"
-      style={{
-        display: "inline-block",
-        width: "1px",
-        height: `${textLineHeight}em`,
-        margin: 0,
-        padding: 0,
-        background: color,
-        verticalAlign: `${(1 - textLineHeight) / 2}em`,
-        pointerEvents: "none",
-      }}
-    />
-  );
-
-  const renderTextRuns = (
-    runs: readonly TextRun[],
-    caretIndex?: number,
-    caretColor = penColor
-  ) => {
-    const renderedRuns: ReactNode[] = [];
-    let position = 0;
-    let insertedCaret = false;
-
-    const getRunStyle = (run: TextRun) => ({
-      color: run.color,
-      fontFamily: run.fontFamily,
-      fontWeight: run.fontWeight,
-      fontSize: `${clampTextFontSize(run.fontSize)}px`,
-      fontStyle: run.fontStyle,
-      textDecoration: run.underline ? "underline" : "none",
-      ...textEditorTypography,
-    });
-
-    runs.forEach((run, index) => {
-      const runEnd = position + run.text.length;
-      const shouldPlaceCaret =
-        caretIndex !== undefined &&
-        !insertedCaret &&
-        caretIndex >= position &&
-        caretIndex <= runEnd;
-
-      if (shouldPlaceCaret) {
-        const caretOffset = caretIndex - position;
-        const beforeText = run.text.slice(0, caretOffset);
-        const afterText = run.text.slice(caretOffset);
-
-        if (beforeText) {
-          renderedRuns.push(
-            <span key={`${index}-before`} style={getRunStyle(run)}>
-              {beforeText}
-            </span>
-          );
-        }
-
-        renderedRuns.push(renderInlineTextCaret(caretColor, `${index}-caret`));
-        insertedCaret = true;
-
-        if (afterText) {
-          renderedRuns.push(
-            <span key={`${index}-after`} style={getRunStyle(run)}>
-              {afterText}
-            </span>
-          );
-        }
-      } else {
-        renderedRuns.push(
-          <span key={index} style={getRunStyle(run)}>
-            {run.text}
-          </span>
-        );
-      }
-
-      position = runEnd;
-    });
-
-    if (caretIndex !== undefined && !insertedCaret) {
-      renderedRuns.push(renderInlineTextCaret(caretColor, "end-caret"));
-    }
-
-    return renderedRuns;
-  };
-
   const keepTextInputAligned = (target: HTMLTextAreaElement | null) => {
     if (!target) return;
 
@@ -2192,7 +2179,7 @@ export default function Page() {
       currentLineHeight = Math.max(currentLineHeight, runLineHeight);
 
       if (measuringContext) {
-        measuringContext.font = `${run.fontStyle} ${run.fontWeight} ${runFontSize}px ${run.fontFamily}`;
+        measuringContext.font = `${run.fontStyle} ${run.fontWeight} ${runFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
       }
 
       for (const character of run.text) {
@@ -2214,7 +2201,7 @@ export default function Page() {
     totalHeight += currentLineHeight;
 
     return {
-      width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2),
+      width: Math.max(48, Math.ceil(longestLineWidth) + textPaddingX * 2 + 28),
       height: Math.max(30, Math.ceil(totalHeight) + textPaddingY * 2),
     };
   };
@@ -2246,25 +2233,34 @@ export default function Page() {
     ctx: CanvasRenderingContext2D,
     text: TextElement
   ) => {
-    const baseFontSize = clampTextFontSize(text.fontSize);
+    const baseFontSize = clampTextFontSize(
+      getTextLengthInCanvas(text, text.fontSize),
+      text.fontSize
+    );
+    const textWidth = getTextLengthInCanvas(text, text.width);
+    const textHeight = getTextLengthInCanvas(text, text.height);
 
     ctx.save();
     if (text.backgroundColor) {
       ctx.fillStyle = text.backgroundColor;
-      ctx.fillRect(text.point.x, text.point.y, text.width, text.height);
+      ctx.fillRect(text.point.x, text.point.y, textWidth, textHeight);
     }
 
     ctx.beginPath();
-    ctx.rect(text.point.x, text.point.y, text.width, text.height);
+    ctx.rect(text.point.x, text.point.y, textWidth, textHeight);
     ctx.clip();
-    ctx.font = `${text.fontStyle ?? "normal"} ${getTextFontWeight(text)} ${baseFontSize}px ${text.fontFamily}`;
+    ctx.font = `${text.fontStyle ?? "normal"} ${getTextFontWeight(text)} ${baseFontSize}px ${getCanvasFontFamily(text.fontFamily)}`;
     ctx.textBaseline = "top";
     ctx.setLineDash([]);
 
-    const lines: TextRun[][] = [[]];
+    const lines: Array<Array<TextRun & { canvasFontSize: number }>> = [[]];
 
     for (const run of getTextRuns(text)) {
       const parts = run.text.split("\n");
+      const canvasFontSize = clampTextFontSize(
+        getTextLengthInCanvas(text, run.fontSize),
+        baseFontSize
+      );
 
       parts.forEach((part, index) => {
         if (index > 0) {
@@ -2272,7 +2268,7 @@ export default function Page() {
         }
 
         if (part) {
-          lines[lines.length - 1].push({ ...run, text: part });
+          lines[lines.length - 1].push({ ...run, text: part, canvasFontSize });
         }
       });
     }
@@ -2280,23 +2276,23 @@ export default function Page() {
     const lineHeights = lines.map((line) =>
       Math.max(
         baseFontSize * textLineHeight,
-        ...line.map((run) => run.fontSize * textLineHeight)
+        ...line.map((run) => run.canvasFontSize * textLineHeight)
       )
     );
     const lineWidths = lines.map((line) =>
       line.reduce((width, run) => {
-        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.canvasFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
         return width + ctx.measureText(run.text).width;
       }, 0)
     );
     const textAlign = text.textAlign ?? (text.backgroundColor ? "center" : "left");
     const getAlignedLineX = (lineWidth: number) => {
       if (textAlign === "center") {
-        return text.point.x + Math.max(0, (text.width - lineWidth) / 2);
+        return text.point.x + Math.max(0, (textWidth - lineWidth) / 2);
       }
 
       if (textAlign === "right") {
-        return text.point.x + Math.max(textPaddingX, text.width - lineWidth - textPaddingX);
+        return text.point.x + Math.max(textPaddingX, textWidth - lineWidth - textPaddingX);
       }
 
       return text.point.x + textPaddingX;
@@ -2305,27 +2301,27 @@ export default function Page() {
     if (text.backgroundColor) {
       const totalLineHeight = lineHeights.reduce((sum, height) => sum + height, 0);
       let currentY =
-        text.point.y + Math.max(0, (text.height - totalLineHeight) / 2);
+        text.point.y + Math.max(0, (textHeight - totalLineHeight) / 2);
 
       lines.forEach((line, lineIndex) => {
         let currentX = getAlignedLineX(lineWidths[lineIndex]);
 
         line.forEach((run) => {
           const textWidth = (() => {
-            ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+            ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.canvasFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
             return ctx.measureText(run.text).width;
           })();
 
           ctx.fillStyle = run.color;
-          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.canvasFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
           ctx.fillText(run.text, currentX, currentY);
           if (run.underline) {
             ctx.save();
             ctx.strokeStyle = run.color;
-            ctx.lineWidth = Math.max(1, run.fontSize / 14);
+            ctx.lineWidth = Math.max(1, run.canvasFontSize / 14);
             ctx.beginPath();
-            ctx.moveTo(currentX, currentY + run.fontSize * 0.96);
-            ctx.lineTo(currentX + textWidth, currentY + run.fontSize * 0.96);
+            ctx.moveTo(currentX, currentY + run.canvasFontSize * 0.96);
+            ctx.lineTo(currentX + textWidth, currentY + run.canvasFontSize * 0.96);
             ctx.stroke();
             ctx.restore();
           }
@@ -2346,20 +2342,20 @@ export default function Page() {
 
       line.forEach((run) => {
         const textWidth = (() => {
-          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+          ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.canvasFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
           return ctx.measureText(run.text).width;
         })();
 
         ctx.fillStyle = run.color;
-        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.fontSize}px ${run.fontFamily}`;
+        ctx.font = `${run.fontStyle} ${run.fontWeight} ${run.canvasFontSize}px ${getCanvasFontFamily(run.fontFamily)}`;
         ctx.fillText(run.text, currentX, currentY);
         if (run.underline) {
           ctx.save();
           ctx.strokeStyle = run.color;
-          ctx.lineWidth = Math.max(1, run.fontSize / 14);
+          ctx.lineWidth = Math.max(1, run.canvasFontSize / 14);
           ctx.beginPath();
-          ctx.moveTo(currentX, currentY + run.fontSize * 0.96);
-          ctx.lineTo(currentX + textWidth, currentY + run.fontSize * 0.96);
+          ctx.moveTo(currentX, currentY + run.canvasFontSize * 0.96);
+          ctx.lineTo(currentX + textWidth, currentY + run.canvasFontSize * 0.96);
           ctx.stroke();
           ctx.restore();
         }
@@ -2376,6 +2372,42 @@ export default function Page() {
     x: (screenPoint.x - offsetRef.current.x) / zoomRef.current,
     y: (screenPoint.y - topBarHeight - offsetRef.current.y) / zoomRef.current,
   });
+
+  const screenLengthToCanvas = (value: number, zoomValue = zoomRef.current) =>
+    value / zoomValue;
+  const canvasLengthToScreen = (value: number, zoomValue = zoomRef.current) =>
+    value * zoomValue;
+
+  const getTextMeasurementZoom = (text: TextElement) =>
+    text.measurementZoom && text.measurementZoom > 0
+      ? text.measurementZoom
+      : 1;
+
+  const getTextLengthInCanvas = (text: TextElement, value: number) =>
+    text.measurementSpace === "screen"
+      ? screenLengthToCanvas(value, getTextMeasurementZoom(text))
+      : value;
+
+  const getTextLengthInScreen = (text: TextElement, value: number) =>
+    text.measurementSpace === "screen"
+      ? canvasLengthToScreen(
+          screenLengthToCanvas(value, getTextMeasurementZoom(text))
+        )
+      : canvasLengthToScreen(value);
+
+  const getScreenTextRuns = (text: TextElement) =>
+    getTextRuns(text).map((run) => ({
+      ...run,
+      fontSize:
+        text.measurementSpace === "screen"
+          ? clampTextFontSize(
+              canvasLengthToScreen(
+                screenLengthToCanvas(run.fontSize, getTextMeasurementZoom(text))
+              ),
+              run.fontSize
+            )
+          : clampTextFontSize(canvasLengthToScreen(run.fontSize), run.fontSize),
+    }));
 
   const keepTextBoxInViewport = (
     screenPoint: Point,
@@ -2409,8 +2441,8 @@ export default function Page() {
   const getTextBounds = (text: TextElement): Bounds => ({
     x: text.point.x,
     y: text.point.y,
-    width: text.width,
-    height: text.height,
+    width: getTextLengthInCanvas(text, text.width),
+    height: getTextLengthInCanvas(text, text.height),
   });
 
   const getStrokeDashPattern = (style: StrokeStyle | undefined, width: number) => {
@@ -3282,17 +3314,35 @@ export default function Page() {
 
   useEffect(() => {
     const positionTimer = window.setTimeout(() => {
-      setActiveText((prev) =>
-        prev
-          ? {
-              ...prev,
-              screenPoint: {
-                x: prev.point.x * zoom + offset.x,
-                y: prev.point.y * zoom + offset.y + topBarHeight,
-              },
-            }
-          : prev
-      );
+      setActiveText((prev) => {
+        if (!prev) {
+          activeTextZoomRef.current = zoom;
+          return prev;
+        }
+
+        const previousZoom = activeTextZoomRef.current || zoom;
+        const textScale = previousZoom === 0 ? 1 : zoom / previousZoom;
+        activeTextZoomRef.current = zoom;
+
+        return {
+          ...prev,
+          screenPoint: {
+            x: prev.point.x * zoom + offset.x,
+            y: prev.point.y * zoom + offset.y + topBarHeight,
+          },
+          width: prev.width * textScale,
+          height: prev.height * textScale,
+          fontSize: clampTextFontSize(prev.fontSize * textScale, prev.fontSize),
+          typingFontSize: clampTextFontSize(
+            prev.typingFontSize * textScale,
+            prev.typingFontSize
+          ),
+          runs: prev.runs.map((run) => ({
+            ...run,
+            fontSize: clampTextFontSize(run.fontSize * textScale, run.fontSize),
+          })),
+        };
+      });
     }, 0);
 
     return () => window.clearTimeout(positionTimer);
@@ -3467,26 +3517,29 @@ export default function Page() {
     e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
   ) => getCanvasCoordinatesFromClient(e.clientX, e.clientY);
 
+  const movePenCursorElement = (point: Point) => {
+    const cursorElement = penCursorElementRef.current;
+    if (!cursorElement) return;
+
+    cursorElement.style.left = `${point.x}px`;
+    cursorElement.style.top = `${point.y}px`;
+  };
+
+  const hidePenCursor = () => {
+    if (pendingPenCursorFrame.current !== null) {
+      window.cancelAnimationFrame(pendingPenCursorFrame.current);
+      pendingPenCursorFrame.current = null;
+    }
+
+    pendingPenCursorPoint.current = null;
+    penCursorPointRef.current = null;
+    setPenCursorPoint(null);
+  };
+
   const syncPenCursorPoint = (
     e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
   ) => {
     if (tool === "pen") {
-      if (isDrawingRef.current) {
-        pendingPenCursorPoint.current = null;
-
-        if (pendingPenCursorFrame.current !== null) {
-          window.cancelAnimationFrame(pendingPenCursorFrame.current);
-          pendingPenCursorFrame.current = null;
-        }
-
-        if (penCursorPointRef.current !== null) {
-          penCursorPointRef.current = null;
-          setPenCursorPoint(null);
-        }
-
-        return;
-      }
-
       pendingPenCursorPoint.current = { x: e.clientX, y: e.clientY };
 
       if (pendingPenCursorFrame.current !== null) {
@@ -3508,22 +3561,35 @@ export default function Page() {
         }
 
         penCursorPointRef.current = nextPoint;
-        setPenCursorPoint(nextPoint);
+
+        if (nextPoint) {
+          movePenCursorElement(nextPoint);
+        }
+
+        if (!previousPoint) {
+          setPenCursorPoint(nextPoint);
+        }
       });
       return;
     }
 
+    hidePenCursor();
+  };
+
+  const showPenCursorAtClientPoint = (clientX: number, clientY: number) => {
     if (pendingPenCursorFrame.current !== null) {
       window.cancelAnimationFrame(pendingPenCursorFrame.current);
       pendingPenCursorFrame.current = null;
     }
 
-    pendingPenCursorPoint.current = null;
-    penCursorPointRef.current = null;
-    setPenCursorPoint(null);
+    const nextPoint = { x: clientX, y: clientY };
+    pendingPenCursorPoint.current = nextPoint;
+    penCursorPointRef.current = nextPoint;
+    movePenCursorElement(nextPoint);
+    setPenCursorPoint(nextPoint);
   };
 
-  const appendStrokePoint = (point: Point) => {
+  const appendStrokePoint = (point: Point, forceExactPoint = false) => {
     const stroke = currentStroke.current;
     if (!stroke) return false;
 
@@ -3539,13 +3605,19 @@ export default function Page() {
         point.y - previousPoint.y
       );
 
+      if (forceExactPoint && stroke.tool === "pen") {
+        if (distance < 0.01) return false;
+        stroke.points.push(point);
+        return true;
+      }
+
       if (distance < minDistance) {
         return false;
       }
 
       if (stroke.tool === "pen") {
         const smoothing =
-          distance > 18 ? 0.9 : distance > 10 ? 0.82 : distance > 4 ? 0.72 : 0.6;
+          distance > 18 ? 0.94 : distance > 10 ? 0.88 : distance > 4 ? 0.78 : 0.64;
         const stabilizedPoint = {
           x: previousPoint.x + (point.x - previousPoint.x) * smoothing,
           y: previousPoint.y + (point.y - previousPoint.y) * smoothing,
@@ -3604,26 +3676,28 @@ export default function Page() {
   const commitActiveText = () => {
     if (!activeText) return;
 
-    const trimmedValue = activeText.value.trim();
-    if (trimmedValue || activeText.backgroundColor) {
-      const safeFontSize = clampTextFontSize(activeText.fontSize);
+    if (activeText.value.length > 0 || activeText.backgroundColor) {
+      const safeScreenFontSize = clampTextFontSize(activeText.fontSize);
+      const commitZoom = zoomRef.current || activeTextZoomRef.current || 1;
       const nextText: TextElement = {
         kind: "text",
         point: activeText.point,
-        value: trimmedValue,
+        value: activeText.value,
         color: activeText.color,
         runs: activeText.runs.map((run) => ({
           ...run,
-          fontSize: clampTextFontSize(run.fontSize, safeFontSize),
+          fontSize: clampTextFontSize(run.fontSize, safeScreenFontSize),
         })),
         fontFamily: activeText.fontFamily,
         fontWeight: activeText.fontWeight,
-        fontSize: safeFontSize,
+        fontSize: safeScreenFontSize,
         fontStyle: activeText.fontStyle,
         underline: activeText.underline,
         textAlign: activeText.textAlign,
-        width: activeText.width,
-        height: activeText.height,
+        width: Math.max(1, activeText.width),
+        height: Math.max(1, activeText.height),
+        measurementSpace: "screen",
+        measurementZoom: commitZoom,
         backgroundColor: activeText.backgroundColor,
       };
 
@@ -3687,7 +3761,10 @@ export default function Page() {
     const textElement = elements[textIndex];
     if (textElement.kind !== "text") return false;
 
-    const textElementFontSize = clampTextFontSize(textElement.fontSize);
+    const textElementFontSize = clampTextFontSize(
+      getTextLengthInScreen(textElement, textElement.fontSize),
+      textElement.fontSize
+    );
     setTextFontFamily(textElement.fontFamily);
     setTextFontWeight(getTextFontWeight(textElement));
     syncTextColorControls(textElement.color);
@@ -3695,6 +3772,7 @@ export default function Page() {
       start: textElement.value.length,
       end: textElement.value.length,
     });
+    activeTextZoomRef.current = zoomRef.current;
     setActiveText({
       point: textElement.point,
       screenPoint: {
@@ -3706,9 +3784,9 @@ export default function Page() {
       },
       value: textElement.value,
       color: textElement.color,
-      runs: getTextRuns(textElement),
-      width: textElement.width,
-      height: textElement.height,
+      runs: getScreenTextRuns(textElement),
+      width: Math.max(2, getTextLengthInScreen(textElement, textElement.width)),
+      height: Math.max(24, getTextLengthInScreen(textElement, textElement.height)),
       fontSize: textElementFontSize,
       fontFamily: textElement.fontFamily,
       fontWeight: getTextFontWeight(textElement),
@@ -3750,7 +3828,6 @@ export default function Page() {
 
         if (activeText) {
           commitActiveText();
-          return;
         }
 
         if (openTextAtPoint(point)) {
@@ -3829,6 +3906,7 @@ export default function Page() {
 
     syncTextColorControls(penColor);
     setTextSelection({ start: 0, end: 0 });
+    activeTextZoomRef.current = zoomRef.current;
     setActiveText({
       point: { x, y },
       screenPoint: { x: e.clientX, y: e.clientY },
@@ -3999,7 +4077,7 @@ export default function Page() {
     if (e) {
       syncPenCursorPoint(e);
       if (currentStroke.current && currentStroke.current.tool === "pen") {
-        appendStrokePoint(getCanvasCoordinates(e));
+        appendStrokePoint(getCanvasCoordinates(e), true);
       }
       if (e.currentTarget.hasPointerCapture(e.pointerId)) {
         e.currentTarget.releasePointerCapture(e.pointerId);
@@ -4019,6 +4097,10 @@ export default function Page() {
       setPanningCursorPoint(null);
       didPanRef.current = false;
       panStart.current = null;
+
+      if (e && tool === "pen") {
+        showPenCursorAtClientPoint(e.clientX, e.clientY);
+      }
 
       if (shouldOpenMenu) {
         setSelectionMenu({ x: e.clientX, y: e.clientY });
@@ -4108,6 +4190,10 @@ export default function Page() {
     setShapeStart(null);
     setSnapshot(null);
     shapeEnd.current = null;
+
+    if (e && tool === "pen") {
+      showPenCursorAtClientPoint(e.clientX, e.clientY);
+    }
   };
 
   const canvasCursor: string =
@@ -4195,10 +4281,6 @@ export default function Page() {
   const activeTextSize = activeText
     ? clampTextFontSize(activeText.typingFontSize)
     : 24;
-  const activeTextCaretIndex =
-    activeText && textSelection.start === textSelection.end
-      ? Math.min(textSelection.start, activeText.value.length)
-      : undefined;
   const activeTextDisplayRuns = activeText
     ? activeText.runs.length
       ? activeText.runs.map((run) => ({ ...run }))
@@ -4250,7 +4332,7 @@ export default function Page() {
         onPointerCancel={(e) => stopDrawing(e)}
         onPointerLeave={(e) => {
           if (!e.currentTarget.hasPointerCapture(e.pointerId)) {
-            setPenCursorPoint(null);
+            hidePenCursor();
             stopDrawing(e);
           }
         }}
@@ -4273,6 +4355,7 @@ export default function Page() {
 
       {penCursorPoint && tool === "pen" && !isPanning && (
         <div
+          ref={penCursorElementRef}
           aria-hidden="true"
           className="board-pen-cursor"
           style={{
@@ -5179,49 +5262,49 @@ export default function Page() {
             ([
               {
                 handle: "nw" as const,
-                x: activeText.screenPoint.x - 8,
-                y: activeText.screenPoint.y - 8,
+                x: activeText.screenPoint.x - 16,
+                y: activeText.screenPoint.y - 16,
                 cursor: "nwse-resize",
               },
               {
                 handle: "n" as const,
                 x: activeText.screenPoint.x + activeText.width / 2 - 8,
-                y: activeText.screenPoint.y - 8,
+                y: activeText.screenPoint.y - 16,
                 cursor: "ns-resize",
               },
               {
                 handle: "ne" as const,
-                x: activeText.screenPoint.x + activeText.width - 8,
-                y: activeText.screenPoint.y - 8,
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y - 16,
                 cursor: "nesw-resize",
               },
               {
                 handle: "e" as const,
-                x: activeText.screenPoint.x + activeText.width - 8,
+                x: activeText.screenPoint.x + activeText.width,
                 y: activeText.screenPoint.y + activeText.height / 2 - 8,
                 cursor: "ew-resize",
               },
               {
                 handle: "se" as const,
-                x: activeText.screenPoint.x + activeText.width - 8,
-                y: activeText.screenPoint.y + activeText.height - 8,
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y + activeText.height,
                 cursor: "nwse-resize",
               },
               {
                 handle: "s" as const,
                 x: activeText.screenPoint.x + activeText.width / 2 - 8,
-                y: activeText.screenPoint.y + activeText.height - 8,
+                y: activeText.screenPoint.y + activeText.height,
                 cursor: "ns-resize",
               },
               {
                 handle: "sw" as const,
-                x: activeText.screenPoint.x - 8,
-                y: activeText.screenPoint.y + activeText.height - 8,
+                x: activeText.screenPoint.x - 16,
+                y: activeText.screenPoint.y + activeText.height,
                 cursor: "nesw-resize",
               },
               {
                 handle: "w" as const,
-                x: activeText.screenPoint.x - 8,
+                x: activeText.screenPoint.x - 16,
                 y: activeText.screenPoint.y + activeText.height / 2 - 8,
                 cursor: "ew-resize",
               },
@@ -5283,43 +5366,6 @@ export default function Page() {
                 />
               </div>
             ))}
-          <div
-            aria-hidden="true"
-            style={{
-              position: "fixed",
-              top: `${activeText.screenPoint.y}px`,
-              left: `${activeText.screenPoint.x}px`,
-              width: `${activeText.width}px`,
-              height: `${activeText.height}px`,
-              padding:
-                activeText.value.length > 0 || activeText.backgroundColor
-                  ? `${textPaddingY}px ${textPaddingX}px`
-                  : 0,
-              fontSize: `${activeTextLayoutSize}px`,
-              fontFamily: activeText.fontFamily,
-              fontWeight: activeText.fontWeight,
-              fontStyle: activeText.fontStyle,
-              lineHeight: textLineHeight,
-              whiteSpace: "pre",
-              overflow: "hidden",
-              background: activeText.backgroundColor ?? "transparent",
-              display: activeText.backgroundColor ? "grid" : "block",
-              placeItems: activeText.backgroundColor ? "center" : undefined,
-              textAlign: activeText.textAlign,
-              boxSizing: "border-box",
-              pointerEvents: "none",
-              zIndex: 59,
-              ...textEditorTypography,
-            }}
-          >
-            <div>
-              {renderTextRuns(
-                activeTextDisplayRuns,
-                activeTextCaretIndex,
-                activeText.backgroundColor ? activeText.color : penColor
-              )}
-            </div>
-          </div>
           <textarea
             ref={textInputRef}
             className="custom-text-input"
@@ -5394,19 +5440,11 @@ export default function Page() {
             onClick={(e) => e.stopPropagation()}
             onMouseDown={(e) => {
               e.stopPropagation();
-              if (e.button === 0 && startDraggingActiveText(e.clientX, e.clientY)) {
-                e.preventDefault();
-                return;
-              }
-
               syncTextSelection(e.currentTarget);
             }}
             onPointerDown={(e) => {
               e.stopPropagation();
-              if (e.button === 0 && startDraggingActiveText(e.clientX, e.clientY)) {
-                e.preventDefault();
-                e.currentTarget.setPointerCapture(e.pointerId);
-              }
+              syncTextSelection(e.currentTarget);
             }}
             onContextMenu={handleTextContextMenu}
             onKeyDown={(e) => {
@@ -5450,8 +5488,8 @@ export default function Page() {
               outline: "none",
               background: "transparent",
               boxShadow: "none",
-              color: "transparent",
-              caretColor: "transparent",
+              color: activeText.color,
+              caretColor: activeText.color,
               fontSize: `${activeTextLayoutSize}px`,
               fontFamily: activeText.fontFamily,
               fontWeight: activeText.fontWeight,
@@ -5463,10 +5501,7 @@ export default function Page() {
               overflow: "hidden",
               boxSizing: "border-box",
               zIndex: 60,
-              cursor:
-                activeText.value.length > 0 || activeText.backgroundColor
-                  ? "move"
-                  : "text",
+              cursor: "text",
               ...textEditorTypography,
             }}
           />
@@ -6120,8 +6155,8 @@ export default function Page() {
       )}
 
       <div
-        onPointerEnter={() => setPenCursorPoint(null)}
-        onPointerMove={() => setPenCursorPoint(null)}
+        onPointerEnter={hidePenCursor}
+        onPointerMove={hidePenCursor}
         style={{
           position: "fixed",
           top: 0,
@@ -8813,8 +8848,8 @@ export default function Page() {
       </div>
 
       <div
-        onPointerEnter={() => setPenCursorPoint(null)}
-        onPointerMove={() => setPenCursorPoint(null)}
+        onPointerEnter={hidePenCursor}
+        onPointerMove={hidePenCursor}
         style={{
           position: "fixed",
           top: "50%",
@@ -8950,6 +8985,7 @@ export default function Page() {
               setShowEraserMenu(false);
               setShowShapesMenu(false);
               setTextSelection({ start: 0, end: 0 });
+              activeTextZoomRef.current = zoomRef.current;
               setActiveText((prev) =>
                 prev && prev.backgroundColor
                   ? prev
