@@ -47,6 +47,48 @@ textarea.custom-text-input::selection {
   -webkit-text-fill-color: currentColor;
 }
 
+.custom-textbox-shell,
+.custom-textbox-shell > div,
+.custom-textbox-editor,
+.custom-textbox-editor > div,
+.custom-textbox-editor .ProseMirror {
+  height: 100%;
+  width: 100%;
+}
+
+.custom-textbox-editor__content,
+.custom-textbox-editor .ProseMirror {
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  color: inherit;
+  caret-color: currentColor;
+  overflow: visible;
+  box-sizing: border-box;
+  letter-spacing: 0;
+  word-spacing: 0;
+  text-transform: none;
+  font-variant-ligatures: none;
+  font-kerning: none;
+  tab-size: 4;
+}
+
+.custom-textbox-editor__content p,
+.custom-textbox-editor .ProseMirror p {
+  margin: 0;
+  min-height: 1em;
+  white-space: inherit;
+}
+
+.custom-textbox-editor__content ul,
+.custom-textbox-editor__content ol,
+.custom-textbox-editor .ProseMirror ul,
+.custom-textbox-editor .ProseMirror ol {
+  margin: 0;
+  padding-left: 1.4em;
+}
+
 .board-pen-cursor {
   filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.22));
   transition: transform 80ms ease;
