@@ -39,6 +39,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import KonvaTextPrototype from "./KonvaTextPrototype";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
@@ -350,7 +351,7 @@ export default function Page() {
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [tool, setTool] = useState<"cursor" | StrokeTool | ShapeTool>("pen");
+  const [tool, setTool] = useState<"cursor" | "text" | StrokeTool | ShapeTool>("pen");
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
   const [, setShowTextMenu] = useState(false);
@@ -411,6 +412,7 @@ export default function Page() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenu | null>(null);
+  const [textToolSession, setTextToolSession] = useState(0);
   const shapeEnd = useRef<Point | null>(null);
   const boardNameInputRef = useRef<HTMLInputElement | null>(null);
   const boardsMenuContainerRef = useRef<HTMLDivElement | null>(null);
@@ -1312,20 +1314,6 @@ export default function Page() {
     return matchingBoards;
   })();
 
-  const calendarSchedules = isCalendarBrowserVisible
-    ? [...normalizeCalendarEntries(calendarEntries)]
-        .filter((entry) =>
-          entry.title.toLowerCase().includes(boardSearchQuery.trim().toLowerCase())
-        )
-        .sort(
-          (first, second) =>
-            first.date.localeCompare(second.date) ||
-            first.startHour.localeCompare(second.startHour) ||
-            first.endHour.localeCompare(second.endHour) ||
-            first.title.localeCompare(second.title)
-        )
-    : [];
-
   const calendarMonthDate = new Date(
     calendarCursor.getFullYear(),
     calendarCursor.getMonth(),
@@ -1354,6 +1342,51 @@ export default function Page() {
 
   const todayDate = new Date();
   const todayDateKey = getLocalCalendarDateKey(todayDate);
+  const calendarSearchQuery = boardSearchQuery.trim().toLowerCase();
+  const hasActiveCalendarSearch =
+    isCalendarBrowserVisible && calendarSearchQuery.length > 0;
+
+  const calendarSchedules = isCalendarBrowserVisible
+    ? [...normalizeCalendarEntries(calendarEntries)]
+        .filter((entry) => {
+          if (!calendarSearchQuery) return true;
+
+          const entryDate = new Date(`${entry.date}T00:00:00`);
+          const startOption = calendarHourOptions.find(
+            (option) => option.value === entry.startHour
+          );
+          const endOption = calendarHourOptions.find(
+            (option) => option.value === entry.endHour
+          );
+          const searchableText = [
+            entry.title,
+            entry.date,
+            entryDate.toLocaleDateString("en-US", {
+              month: "long",
+              day: "numeric",
+              year: "numeric",
+            }),
+            entryDate.toLocaleDateString("en-US", {
+              weekday: "long",
+            }),
+            startOption?.label ?? entry.startHour,
+            startOption?.shortLabel ?? entry.startHour,
+            endOption?.label ?? entry.endHour,
+            endOption?.shortLabel ?? entry.endHour,
+          ]
+            .join(" ")
+            .toLowerCase();
+
+          return searchableText.includes(calendarSearchQuery);
+        })
+        .sort(
+          (first, second) =>
+            first.date.localeCompare(second.date) ||
+            first.startHour.localeCompare(second.startHour) ||
+            first.endHour.localeCompare(second.endHour) ||
+            first.title.localeCompare(second.title)
+        )
+    : [];
 
   const calendarDays = (() => {
     if (!isCalendarBrowserVisible) {
@@ -1373,6 +1406,33 @@ export default function Page() {
     const firstWeekday = (firstDayOfMonth.getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
+
+    if (hasActiveCalendarSearch) {
+      const groupedDays = new Map<string, CalendarEntry[]>();
+
+      calendarSchedules.forEach((entry) => {
+        const entriesForDay = groupedDays.get(entry.date);
+        if (entriesForDay) {
+          entriesForDay.push(entry);
+          return;
+        }
+
+        groupedDays.set(entry.date, [entry]);
+      });
+
+      return Array.from(groupedDays.entries()).map(([dateKey, entries]) => {
+        const date = new Date(`${dateKey}T00:00:00`);
+
+        return {
+          key: dateKey,
+          date,
+          dayNumber: date.getDate(),
+          isCurrentMonth: true,
+          isToday: dateKey === todayDateKey,
+          entries,
+        };
+      });
+    }
 
     return Array.from({ length: totalCells }, (_, index) => {
       const relativeDayNumber = index - firstWeekday + 1;
@@ -2437,23 +2497,30 @@ export default function Page() {
       return;
     }
 
-    const tension = 0.18;
+    for (let index = 1; index < points.length - 1; index += 1) {
+      const currentPoint = points[index];
+      const nextPoint = points[index + 1];
+      const midpoint = {
+        x: (currentPoint.x + nextPoint.x) / 2,
+        y: (currentPoint.y + nextPoint.y) / 2,
+      };
 
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[i - 1] ?? points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[i + 2] ?? p2;
-
-      ctx.bezierCurveTo(
-        p1.x + (p2.x - p0.x) * tension,
-        p1.y + (p2.y - p0.y) * tension,
-        p2.x - (p3.x - p1.x) * tension,
-        p2.y - (p3.y - p1.y) * tension,
-        p2.x,
-        p2.y
+      ctx.quadraticCurveTo(
+        currentPoint.x,
+        currentPoint.y,
+        midpoint.x,
+        midpoint.y
       );
     }
+
+    const penultimatePoint = points[points.length - 2];
+    const lastPoint = points[points.length - 1];
+    ctx.quadraticCurveTo(
+      penultimatePoint.x,
+      penultimatePoint.y,
+      lastPoint.x,
+      lastPoint.y
+    );
 
     ctx.stroke();
   };
@@ -2710,6 +2777,29 @@ export default function Page() {
     const erasedSegments: Stroke[] = [];
     let currentSegment: Point[] = [];
     const hitRadius = eraser.width / 2 + stroke.width / 2;
+    const sampledPoints = stroke.points.reduce<Point[]>((nextPoints, point, index) => {
+      if (index === 0) {
+        nextPoints.push(point);
+        return nextPoints;
+      }
+
+      const previousPoint = stroke.points[index - 1];
+      const segmentDistance = Math.hypot(
+        point.x - previousPoint.x,
+        point.y - previousPoint.y
+      );
+      const steps = Math.max(1, Math.ceil(segmentDistance / 2));
+
+      for (let step = 1; step <= steps; step += 1) {
+        const t = step / steps;
+        nextPoints.push({
+          x: previousPoint.x + (point.x - previousPoint.x) * t,
+          y: previousPoint.y + (point.y - previousPoint.y) * t,
+        });
+      }
+
+      return nextPoints;
+    }, []);
 
     const finishSegment = () => {
       if (!currentSegment.length) return;
@@ -2721,9 +2811,9 @@ export default function Page() {
       currentSegment = [];
     };
 
-    for (let index = 0; index < stroke.points.length; index += 1) {
-      const point = stroke.points[index];
-      const previousPoint = stroke.points[index - 1];
+    for (let index = 0; index < sampledPoints.length; index += 1) {
+      const point = sampledPoints[index];
+      const previousPoint = sampledPoints[index - 1];
       const pointWasErased = isPointHitByEraser(point, eraser, hitRadius);
       const segmentWasErased =
         previousPoint &&
@@ -2746,14 +2836,256 @@ export default function Page() {
     return erasedSegments;
   };
 
-  const eraseElements = (targetElements: CanvasElement[], eraser: Stroke) =>
-    targetElements.flatMap((element) => {
+  const isRectangleHitByEraser = (
+    start: Point,
+    end: Point,
+    strokeWidth: number,
+    eraser: Stroke
+  ) => {
+    const left = Math.min(start.x, end.x);
+    const right = Math.max(start.x, end.x);
+    const top = Math.min(start.y, end.y);
+    const bottom = Math.max(start.y, end.y);
+    const hitRadius = eraser.width / 2 + strokeWidth / 2;
+
+    return (
+      isSegmentHitByEraser({ x: left, y: top }, { x: right, y: top }, eraser, hitRadius) ||
+      isSegmentHitByEraser(
+        { x: right, y: top },
+        { x: right, y: bottom },
+        eraser,
+        hitRadius
+      ) ||
+      isSegmentHitByEraser(
+        { x: right, y: bottom },
+        { x: left, y: bottom },
+        eraser,
+        hitRadius
+      ) ||
+      isSegmentHitByEraser(
+        { x: left, y: bottom },
+        { x: left, y: top },
+        eraser,
+        hitRadius
+      )
+    );
+  };
+
+  const isCircleHitByEraser = (
+    start: Point,
+    end: Point,
+    strokeWidth: number,
+    eraser: Stroke
+  ) => {
+    const radius = Math.hypot(end.x - start.x, end.y - start.y);
+    const hitRadius = eraser.width / 2 + strokeWidth / 2;
+    const segments = Math.max(24, Math.ceil((Math.PI * 2 * radius) / 12));
+
+    for (let index = 0; index < segments; index += 1) {
+      const startAngle = (index / segments) * Math.PI * 2;
+      const endAngle = ((index + 1) / segments) * Math.PI * 2;
+      const segmentStart = {
+        x: start.x + Math.cos(startAngle) * radius,
+        y: start.y + Math.sin(startAngle) * radius,
+      };
+      const segmentEnd = {
+        x: start.x + Math.cos(endAngle) * radius,
+        y: start.y + Math.sin(endAngle) * radius,
+      };
+
+      if (isSegmentHitByEraser(segmentStart, segmentEnd, eraser, hitRadius)) {
+        return true;
+      }
+    }
+
+    return false;
+  };
+
+  const isArrowHitByEraser = (
+    start: Point,
+    end: Point,
+    strokeWidth: number,
+    eraser: Stroke
+  ) => {
+    const hitRadius = eraser.width / 2 + strokeWidth / 2;
+    const angle = Math.atan2(end.y - start.y, end.x - start.x);
+    const headLength = Math.max(18, strokeWidth * 4);
+    const leftHead = {
+      x: end.x - headLength * Math.cos(angle - Math.PI / 6),
+      y: end.y - headLength * Math.sin(angle - Math.PI / 6),
+    };
+    const rightHead = {
+      x: end.x - headLength * Math.cos(angle + Math.PI / 6),
+      y: end.y - headLength * Math.sin(angle + Math.PI / 6),
+    };
+
+    return (
+      isSegmentHitByEraser(start, end, eraser, hitRadius) ||
+      isSegmentHitByEraser(end, leftHead, eraser, hitRadius) ||
+      isSegmentHitByEraser(end, rightHead, eraser, hitRadius)
+    );
+  };
+
+  const isShapeHitByEraser = (shape: Shape, eraser: Stroke) => {
+    if (shape.tool === "square") {
+      return isRectangleHitByEraser(shape.start, shape.end, shape.width, eraser);
+    }
+
+    if (shape.tool === "circle") {
+      return isCircleHitByEraser(shape.start, shape.end, shape.width, eraser);
+    }
+
+    if (shape.tool === "arrow") {
+      return isArrowHitByEraser(shape.start, shape.end, shape.width, eraser);
+    }
+
+    return isSegmentHitByEraser(
+      shape.start,
+      shape.end,
+      eraser,
+      eraser.width / 2 + shape.width / 2
+    );
+  };
+
+  const createStrokeFromPoints = (
+    shape: Shape,
+    points: Point[]
+  ): Stroke => ({
+    kind: "stroke",
+    tool: "pen",
+    points,
+    width: shape.width,
+    color: shape.color,
+    style: shape.style,
+  });
+
+  const approximateLinePoints = (
+    start: Point,
+    end: Point,
+    spacing = 6
+  ) => {
+    const distance = Math.hypot(end.x - start.x, end.y - start.y);
+    const steps = Math.max(1, Math.ceil(distance / spacing));
+
+    return Array.from({ length: steps + 1 }, (_, index) => {
+      const t = index / steps;
+      return {
+        x: start.x + (end.x - start.x) * t,
+        y: start.y + (end.y - start.y) * t,
+      };
+    });
+  };
+
+  const approximateRectangleStroke = (shape: Shape): Stroke => {
+    const left = Math.min(shape.start.x, shape.end.x);
+    const right = Math.max(shape.start.x, shape.end.x);
+    const top = Math.min(shape.start.y, shape.end.y);
+    const bottom = Math.max(shape.start.y, shape.end.y);
+
+    const topEdge = approximateLinePoints(
+      { x: left, y: top },
+      { x: right, y: top }
+    );
+    const rightEdge = approximateLinePoints(
+      { x: right, y: top },
+      { x: right, y: bottom }
+    ).slice(1);
+    const bottomEdge = approximateLinePoints(
+      { x: right, y: bottom },
+      { x: left, y: bottom }
+    ).slice(1);
+    const leftEdge = approximateLinePoints(
+      { x: left, y: bottom },
+      { x: left, y: top }
+    ).slice(1);
+
+    return createStrokeFromPoints(shape, [
+      ...topEdge,
+      ...rightEdge,
+      ...bottomEdge,
+      ...leftEdge,
+    ]);
+  };
+
+  const approximateCircleStroke = (shape: Shape): Stroke => {
+    const radius = Math.hypot(
+      shape.end.x - shape.start.x,
+      shape.end.y - shape.start.y
+    );
+    const segmentCount = Math.max(48, Math.ceil((Math.PI * 2 * radius) / 10));
+    const points = Array.from({ length: segmentCount + 1 }, (_, index) => {
+      const angle = (index / segmentCount) * Math.PI * 2;
+      return {
+        x: shape.start.x + Math.cos(angle) * radius,
+        y: shape.start.y + Math.sin(angle) * radius,
+      };
+    });
+
+    return createStrokeFromPoints(shape, points);
+  };
+
+  const approximateArrowStrokes = (shape: Shape): Stroke[] => {
+    const angle = Math.atan2(
+      shape.end.y - shape.start.y,
+      shape.end.x - shape.start.x
+    );
+    const headLength = Math.max(18, shape.width * 4);
+    const leftHead = {
+      x: shape.end.x - headLength * Math.cos(angle - Math.PI / 6),
+      y: shape.end.y - headLength * Math.sin(angle - Math.PI / 6),
+    };
+    const rightHead = {
+      x: shape.end.x - headLength * Math.cos(angle + Math.PI / 6),
+      y: shape.end.y - headLength * Math.sin(angle + Math.PI / 6),
+    };
+
+    return [
+      createStrokeFromPoints(
+        shape,
+        approximateLinePoints(shape.start, shape.end)
+      ),
+      createStrokeFromPoints(shape, approximateLinePoints(shape.end, leftHead)),
+      createStrokeFromPoints(shape, approximateLinePoints(shape.end, rightHead)),
+    ];
+  };
+
+  const eraseShapeElement = (shape: Shape, eraser: Stroke): CanvasElement[] => {
+    const outlineStrokes =
+      shape.tool === "square"
+        ? [approximateRectangleStroke(shape)]
+        : shape.tool === "circle"
+        ? [approximateCircleStroke(shape)]
+        : shape.tool === "arrow"
+        ? approximateArrowStrokes(shape)
+        : [createStrokeFromPoints(shape, approximateLinePoints(shape.start, shape.end))];
+
+    return outlineStrokes.flatMap<CanvasElement>((stroke) =>
+      erasePenStroke(stroke, eraser)
+    );
+  };
+
+  const eraseElements = (
+    targetElements: CanvasElement[],
+    eraser: Stroke
+  ): CanvasElement[] => {
+    const shapeIndexToErase = targetElements.findLastIndex(
+      (element) => element.kind === "shape" && isShapeHitByEraser(element, eraser)
+    );
+
+    return targetElements.flatMap<CanvasElement>((element, index) => {
+      if (element.kind === "shape") {
+        return index === shapeIndexToErase
+          ? eraseShapeElement(element, eraser)
+          : [element];
+      }
+
       if (element.kind !== "stroke" || element.tool !== "pen") {
         return [element];
       }
 
       return erasePenStroke(element, eraser);
     });
+  };
 
   const getSelectedPenElementIndexes = (selection: SelectionBox) => {
     const selectedIndexes = new Set<number>();
@@ -3377,26 +3709,31 @@ export default function Page() {
       }
 
       if (stroke.tool === "pen") {
-        const smoothing =
-          distance > 18 ? 0.94 : distance > 10 ? 0.88 : distance > 4 ? 0.78 : 0.64;
+        const blend =
+          distance > 24 ? 0.52 : distance > 14 ? 0.4 : distance > 6 ? 0.28 : 0.18;
         const stabilizedPoint = {
-          x: previousPoint.x + (point.x - previousPoint.x) * smoothing,
-          y: previousPoint.y + (point.y - previousPoint.y) * smoothing,
+          x: previousPoint.x + (point.x - previousPoint.x) * blend,
+          y: previousPoint.y + (point.y - previousPoint.y) * blend,
         };
         const stabilizedDistance = Math.hypot(
           stabilizedPoint.x - previousPoint.x,
           stabilizedPoint.y - previousPoint.y
         );
         const interpolationSteps = Math.min(
-          4,
-          Math.max(1, Math.floor(stabilizedDistance / 3.5))
+          8,
+          Math.max(2, Math.ceil(stabilizedDistance / 2.2))
         );
 
         for (let step = 1; step <= interpolationSteps; step += 1) {
           const t = step / interpolationSteps;
+          const easedT = 1 - (1 - t) * (1 - t);
           stroke.points.push({
-            x: previousPoint.x + (stabilizedPoint.x - previousPoint.x) * t,
-            y: previousPoint.y + (stabilizedPoint.y - previousPoint.y) * t,
+            x:
+              previousPoint.x +
+              (stabilizedPoint.x - previousPoint.x) * easedT,
+            y:
+              previousPoint.y +
+              (stabilizedPoint.y - previousPoint.y) * easedT,
           });
         }
 
@@ -3530,6 +3867,9 @@ export default function Page() {
 
     if (tool === "pen" || tool === "eraser") {
       e.preventDefault();
+      if (tool === "pen") {
+        setShowPenMenu(false);
+      }
       currentStroke.current = {
         kind: "stroke",
         points: [{ x, y }],
@@ -3780,9 +4120,20 @@ export default function Page() {
   };
 
   const canvasCursor: string =
-    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? "crosshair" : "default" : tool === "eraser" ? "cell" : "crosshair";
+    isPanning || tool === "pen"
+      ? "none"
+      : tool === "cursor"
+      ? isSelecting
+        ? "crosshair"
+        : "default"
+      : tool === "text"
+      ? "text"
+      : tool === "eraser"
+      ? "cell"
+      : "crosshair";
 
   const isCursorActive = tool === "cursor";
+  const isTextActive = tool === "text";
   const isPenActive = tool === "pen";
   const isDarkCanvas = canvasBackground === darkCanvasColor;
   const isGreyCanvas = canvasBackground === greyCanvasColor;
@@ -3942,6 +4293,18 @@ export default function Page() {
           </svg>
         </div>
       )}
+
+      <KonvaTextPrototype
+        key={`konva-text-prototype-${textToolSession}`}
+        topOffset={topBarHeight}
+        active={tool === "text"}
+        interactive={tool === "text"}
+        toolbarBackground={toolbarBackground}
+        panelBorderColor={panelBorderColor}
+        panelTextColor={panelTextColor}
+        panelDividerColor={panelDividerColor}
+        selectedControlBackground={selectedControlBackground}
+      />
 
       {selectionMenu && (
         <div
@@ -5015,8 +5378,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 14px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5036,8 +5399,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5051,8 +5414,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 16px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5069,8 +5432,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5086,8 +5449,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 14px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5107,8 +5470,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5125,8 +5488,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 16px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(96,165,250,0.7)",
-                            background: "#eef6ff",
+                            border: "none",
+                            background: "transparent",
                             color: "#1d4ed8",
                             display: "flex",
                             alignItems: "center",
@@ -5144,8 +5507,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5594,14 +5957,14 @@ export default function Page() {
                               key={day.key}
                               style={{
                                 minHeight: "198px",
-                                borderRadius: "12px",
-                                border: "1px solid rgba(214,224,238,0.95)",
+                                borderRadius: "16px",
+                                border: "none",
                                 background: day.isToday
-                                  ? "linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(255,255,255,1) 62%)"
-                                  : "#ffffff",
+                                  ? "linear-gradient(180deg, rgba(59,130,246,0.09) 0%, rgba(255,255,255,0.92) 58%, rgba(248,250,252,0.9) 100%)"
+                                  : "linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.82) 100%)",
                                 boxShadow: day.isToday
-                                  ? "0 14px 28px rgba(59,130,246,0.1)"
-                                  : "0 10px 22px rgba(15,23,42,0.045)",
+                                  ? "0 16px 34px rgba(59,130,246,0.08)"
+                                  : "0 10px 26px rgba(15,23,42,0.035)",
                                 padding: "11px",
                                 display: "grid",
                                 alignContent: "start",
@@ -5653,7 +6016,13 @@ export default function Page() {
                                     textTransform: "uppercase",
                                   }}
                                 >
-                                  {calendarDayLabel.format(day.date)}
+                                  {hasActiveCalendarSearch
+                                    ? day.date.toLocaleDateString("en-US", {
+                                        month: "short",
+                                        day: "numeric",
+                                        weekday: "short",
+                                      })
+                                    : calendarDayLabel.format(day.date)}
                                 </span>
                               </div>
 
@@ -5965,10 +6334,12 @@ export default function Page() {
                                             fontWeight: 500,
                                           }}
                                         >
-                                          {getCalendarHourLabel(
-                                            entry.startHour,
-                                            "short"
-                                          )}
+                                          {hasActiveCalendarSearch
+                                            ? getCalendarHourRangeLabel(entry)
+                                            : getCalendarHourLabel(
+                                                entry.startHour,
+                                                "short"
+                                              )}
                                         </span>
                                         <span
                                           style={{
@@ -6024,10 +6395,10 @@ export default function Page() {
                                   }
                                   style={{
                                     height: "28px",
-                                    borderRadius: "7px",
-                                    border: "1px dashed rgba(96,165,250,0.86)",
-                                    background: "rgba(239,246,255,0.68)",
-                                    color: "#1d4ed8",
+                                    borderRadius: "999px",
+                                    border: "none",
+                                    background: "rgba(96,165,250,0.12)",
+                                    color: "rgba(29,78,216,0.88)",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
@@ -6035,6 +6406,7 @@ export default function Page() {
                                     fontSize: "12px",
                                     fontWeight: 500,
                                     cursor: "pointer",
+                                    boxShadow: "inset 0 0 0 1px rgba(96,165,250,0.18)",
                                   }}
                                 >
                                   <Plus size={12} />
@@ -6068,7 +6440,9 @@ export default function Page() {
                                   fontWeight: 750,
                                 }}
                               >
-                                No schedules on this calendar yet
+                                {hasActiveCalendarSearch
+                                  ? "No matching schedules found"
+                                  : "No schedules on this calendar yet"}
                               </div>
                               <div
                                 style={{
@@ -6078,8 +6452,9 @@ export default function Page() {
                                   lineHeight: 1.5,
                                 }}
                               >
-                                Add a meeting or schedule to any day and it will stay
-                                here with your board.
+                                {hasActiveCalendarSearch
+                                  ? "Try a different meeting name, day, or time to find the schedule you want."
+                                  : "Add a meeting or schedule to any day and it will stay here with your board."}
                               </div>
                             </div>
                           </div>
@@ -6297,10 +6672,8 @@ export default function Page() {
                                           width: "32px",
                                           height: "32px",
                                           borderRadius: "10px",
-                                          border: board.starred
-                                            ? "1px solid rgba(245,158,11,0.24)"
-                                            : "1px solid rgba(148,163,184,0.18)",
-                                          background: "#ffffff",
+                                          border: "none",
+                                          background: "transparent",
                                           color: board.starred ? "#f59e0b" : "#64748b",
                                           display: "grid",
                                           placeItems: "center",
@@ -6325,8 +6698,8 @@ export default function Page() {
                                           width: "32px",
                                           height: "32px",
                                           borderRadius: "10px",
-                                          border: "1px solid rgba(239,68,68,0.16)",
-                                          background: "#ffffff",
+                                          border: "none",
+                                          background: "transparent",
                                           color: "#dc2626",
                                           display: "grid",
                                           placeItems: "center",
@@ -7297,6 +7670,32 @@ export default function Page() {
           }}
         >
           <MousePointer2 size={17} />
+        </button>
+
+        <button
+          onClick={() => {
+            setTextToolSession((current) => current + 1);
+            setTool("text");
+            setShowPenMenu(false);
+            setShowTextMenu(false);
+            setShowEraserMenu(false);
+            setShowShapesMenu(false);
+          }}
+          style={{
+            width: "38px",
+            height: "38px",
+            borderRadius: "8px",
+            border: "none",
+            background: isTextActive ? "#7c3aed" : inactiveToolBackground,
+            color: isTextActive ? "white" : panelTextColor,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Type size={17} />
         </button>
 
         <div style={{ position: "relative" }}>
