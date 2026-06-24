@@ -1,10 +1,7 @@
-import { promises as fs } from "fs";
-import path from "path";
 import { randomBytes } from "crypto";
+import type { SupabaseClient } from "@supabase/supabase-js";
+import type { AppProfilePlan } from "@/lib/profile-store";
 
-const dataDirectory = path.join(process.cwd(), ".data");
-const boardStorePath = path.join(dataDirectory, "boards.json");
-const maxBoardsPerUser = 10;
 const trashRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const isValidCalendarEntryColor = (
   color: string | undefined
@@ -48,8 +45,26 @@ type UserBoardCollection = {
   boards: StoredBoard[];
 };
 
-type BoardStoreData = {
-  users: UserBoardCollection[];
+type BoardRow = {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: string;
+  updated_at: string;
+  deleted_at: string | null;
+  starred: boolean | null;
+  document: Partial<BoardDocument> | null;
+};
+
+type UserBoardStateRow = {
+  user_id: string;
+  active_board_id: string | null;
+};
+
+export const getBoardLimitForPlan = (plan: AppProfilePlan) => {
+  if (plan === "master") return 25;
+  if (plan === "pro") return 12;
+  return 5;
 };
 
 const defaultBoardDocument = (): BoardDocument => ({
@@ -62,38 +77,6 @@ const defaultBoardDocument = (): BoardDocument => ({
 });
 
 const createBoardName = (index: number) => `Board ${index}`;
-
-const createStoredBoard = (index: number): StoredBoard => {
-  const now = new Date().toISOString();
-  const document = defaultBoardDocument();
-
-  return {
-    id: randomBytes(16).toString("hex"),
-    name: createBoardName(index),
-    createdAt: now,
-    updatedAt: now,
-    starred: false,
-    previewDocument: document,
-    document,
-  };
-};
-
-const emptyBoardStore = (): BoardStoreData => ({
-  users: [],
-});
-
-const ensureBoardStore = async () => {
-  await fs.mkdir(dataDirectory, { recursive: true });
-
-  try {
-    await fs.access(boardStorePath);
-  } catch {
-    await fs.writeFile(
-      boardStorePath,
-      JSON.stringify(emptyBoardStore(), null, 2)
-    );
-  }
-};
 
 const normalizeBoardDocument = (
   document?: Partial<BoardDocument> | null
@@ -151,16 +134,16 @@ const normalizeBoardDocument = (
               typeof calendarEntry.startHour === "string"
                 ? calendarEntry.startHour
                 : typeof calendarEntry.hour === "string"
-                ? calendarEntry.hour
-                : "12:00",
+                  ? calendarEntry.hour
+                  : "12:00",
             endHour:
               typeof calendarEntry.endHour === "string"
                 ? calendarEntry.endHour
                 : typeof calendarEntry.startHour === "string"
-                ? calendarEntry.startHour
-                : typeof calendarEntry.hour === "string"
-                ? calendarEntry.hour
-                : "13:00",
+                  ? calendarEntry.startHour
+                  : typeof calendarEntry.hour === "string"
+                    ? calendarEntry.hour
+                    : "13:00",
             title: calendarEntry.title.slice(0, 160),
             color:
               isValidCalendarEntryColor(calendarEntry.color)
@@ -171,70 +154,28 @@ const normalizeBoardDocument = (
     : [],
 });
 
-const readBoardStore = async (): Promise<BoardStoreData> => {
-  await ensureBoardStore();
+const isWithinTrashRetention = (deletedAt?: string) => {
+  if (!deletedAt) return true;
 
-  try {
-    const rawData = await fs.readFile(boardStorePath, "utf8");
-    const parsedData = JSON.parse(rawData) as Partial<BoardStoreData>;
-
-    return {
-      users: Array.isArray(parsedData.users)
-        ? parsedData.users
-            .filter(
-              (entry): entry is UserBoardCollection =>
-                Boolean(entry?.userId && Array.isArray(entry?.boards))
-            )
-            .map((entry) => {
-              const boards = entry.boards
-                .filter((board) => Boolean(board?.id))
-                .map((board, index) => ({
-                  document: normalizeBoardDocument(board.document),
-                  id: board.id,
-                  name:
-                    typeof board.name === "string" && board.name.trim().length > 0
-                      ? board.name
-                      : createBoardName(index + 1),
-                  createdAt: board.createdAt ?? new Date().toISOString(),
-                  updatedAt:
-                    board.updatedAt ?? board.createdAt ?? new Date().toISOString(),
-                  deletedAt:
-                    typeof board.deletedAt === "string" ? board.deletedAt : undefined,
-                  starred: Boolean(board.starred),
-                  previewDocument: normalizeBoardDocument(board.document),
-                }))
-                .filter((board) => {
-                  if (!board.deletedAt) return true;
-
-                  return (
-                    new Date(board.deletedAt).getTime() + trashRetentionMs > Date.now()
-                  );
-                });
-
-              const availableBoards = boards.filter((board) => !board.deletedAt);
-              const fallbackBoard = availableBoards[0];
-              const hasActiveBoard = availableBoards.some(
-                (board) => board.id === entry.activeBoardId
-              );
-
-              return {
-                userId: entry.userId,
-                activeBoardId: hasActiveBoard
-                  ? entry.activeBoardId
-                  : fallbackBoard?.id ?? "",
-                boards,
-              };
-            })
-        : [],
-    };
-  } catch {
-    return emptyBoardStore();
-  }
+  return new Date(deletedAt).getTime() + trashRetentionMs > Date.now();
 };
 
-const writeBoardStore = async (data: BoardStoreData) => {
-  await fs.mkdir(dataDirectory, { recursive: true });
-  await fs.writeFile(boardStorePath, JSON.stringify(data, null, 2));
+const mapBoardRowToStoredBoard = (board: BoardRow, index: number): StoredBoard => {
+  const document = normalizeBoardDocument(board.document);
+
+  return {
+    id: board.id,
+    name:
+      typeof board.name === "string" && board.name.trim().length > 0
+        ? board.name
+        : createBoardName(index + 1),
+    createdAt: board.created_at ?? new Date().toISOString(),
+    updatedAt: board.updated_at ?? board.created_at ?? new Date().toISOString(),
+    deletedAt: typeof board.deleted_at === "string" ? board.deleted_at : undefined,
+    starred: Boolean(board.starred),
+    previewDocument: document,
+    document,
+  };
 };
 
 const summarizeBoard = (board: StoredBoard): BoardSummary => ({
@@ -247,35 +188,10 @@ const summarizeBoard = (board: StoredBoard): BoardSummary => ({
   previewDocument: board.document,
 });
 
-const ensureUserBoardCollection = (data: BoardStoreData, userId: string) => {
-  let entry = data.users.find((item) => item.userId === userId);
-
-  if (!entry) {
-    const firstBoard = createStoredBoard(1);
-    entry = {
-      userId,
-      activeBoardId: firstBoard.id,
-      boards: [firstBoard],
-    };
-    data.users.push(entry);
-  }
-
-  if (entry.boards.length === 0) {
-    const firstBoard = createStoredBoard(1);
-    entry.boards = [firstBoard];
-    entry.activeBoardId = firstBoard.id;
-  }
-
-  const availableBoards = entry.boards.filter((board) => !board.deletedAt);
-
-  if (!availableBoards.some((board) => board.id === entry.activeBoardId)) {
-    entry.activeBoardId = availableBoards[0]?.id ?? "";
-  }
-
-  return entry;
-};
-
-const serializeUserBoards = (entry: UserBoardCollection) => {
+const serializeUserBoards = (
+  entry: UserBoardCollection,
+  maxBoards: number
+) => {
   const activeBoard = entry.boards.find(
     (board) => board.id === entry.activeBoardId && !board.deletedAt
   );
@@ -290,67 +206,242 @@ const serializeUserBoards = (entry: UserBoardCollection) => {
           document: activeBoard.document,
         }
       : null,
-    maxBoards: maxBoardsPerUser,
+    maxBoards,
   };
 };
 
-export const getUserBoards = async (userId: string) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  await writeBoardStore(data);
-  return serializeUserBoards(entry);
-};
+const loadUserBoardRows = async (supabase: SupabaseClient, userId: string) => {
+  const { data, error } = await supabase
+    .from("boards")
+    .select("id,user_id,name,created_at,updated_at,deleted_at,starred,document")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: true });
 
-export const createBoardForUser = async (userId: string) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  const availableBoardCount = entry.boards.filter((board) => !board.deletedAt).length;
-
-  if (availableBoardCount >= maxBoardsPerUser) {
-    throw new Error("BOARD_LIMIT_REACHED");
+  if (error) {
+    throw new Error(`SUPABASE_BOARDS_READ_FAILED:${error.message}`);
   }
 
-  const board = createStoredBoard(availableBoardCount + 1);
-  entry.boards.push(board);
-  entry.activeBoardId = board.id;
-  await writeBoardStore(data);
-
-  return serializeUserBoards(entry);
+  return (data ?? []) as BoardRow[];
 };
 
-export const selectBoardForUser = async (userId: string, boardId: string) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
+const loadUserBoardState = async (supabase: SupabaseClient, userId: string) => {
+  const { data, error } = await supabase
+    .from("user_board_state")
+    .select("user_id,active_board_id")
+    .eq("user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_STATE_READ_FAILED:${error.message}`);
+  }
+
+  return (data ?? null) as UserBoardStateRow | null;
+};
+
+const persistActiveBoardId = async (
+  supabase: SupabaseClient,
+  userId: string,
+  activeBoardId: string
+) => {
+  const { error } = await supabase.from("user_board_state").upsert(
+    {
+      user_id: userId,
+      active_board_id: activeBoardId || null,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" }
+  );
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_STATE_WRITE_FAILED:${error.message}`);
+  }
+};
+
+const createBoardRecord = async (
+  supabase: SupabaseClient,
+  userId: string,
+  index: number
+) => {
+  const now = new Date().toISOString();
+  const document = defaultBoardDocument();
+  const row = {
+    id: randomBytes(16).toString("hex"),
+    user_id: userId,
+    name: createBoardName(index),
+    created_at: now,
+    updated_at: now,
+    deleted_at: null,
+    starred: false,
+    document,
+  };
+
+  const { data, error } = await supabase
+    .from("boards")
+    .insert(row)
+    .select("id,user_id,name,created_at,updated_at,deleted_at,starred,document")
+    .single();
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_CREATE_FAILED:${error.message}`);
+  }
+
+  return mapBoardRowToStoredBoard(data as BoardRow, Math.max(index - 1, 0));
+};
+
+const loadUserBoardCollection = async (
+  supabase: SupabaseClient,
+  userId: string
+): Promise<UserBoardCollection> => {
+  const [boardRows, boardState] = await Promise.all([
+    loadUserBoardRows(supabase, userId),
+    loadUserBoardState(supabase, userId),
+  ]);
+
+  let boards = boardRows
+    .map((board, index) => mapBoardRowToStoredBoard(board, index))
+    .filter((board) => isWithinTrashRetention(board.deletedAt));
+
+  if (boards.length === 0) {
+    const firstBoard = await createBoardRecord(supabase, userId, 1);
+    boards = [firstBoard];
+    await persistActiveBoardId(supabase, userId, firstBoard.id);
+
+    return {
+      userId,
+      activeBoardId: firstBoard.id,
+      boards,
+    };
+  }
+
+  const availableBoards = boards.filter((board) => !board.deletedAt);
+  const fallbackBoard = availableBoards[0];
+  const requestedActiveBoardId = boardState?.active_board_id ?? "";
+  const activeBoardId = availableBoards.some(
+    (board) => board.id === requestedActiveBoardId
+  )
+    ? requestedActiveBoardId
+    : fallbackBoard?.id ?? "";
+
+  if (activeBoardId !== requestedActiveBoardId) {
+    await persistActiveBoardId(supabase, userId, activeBoardId);
+  }
+
+  return {
+    userId,
+    activeBoardId,
+    boards,
+  };
+};
+
+const getLiveBoardOrThrow = (entry: UserBoardCollection, boardId: string) => {
   const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
 
   if (!board) {
     throw new Error("BOARD_NOT_FOUND");
   }
 
-  entry.activeBoardId = board.id;
-  board.updatedAt = new Date().toISOString();
-  await writeBoardStore(data);
+  return board;
+};
 
-  return serializeUserBoards(entry);
+const updateBoardRow = async (
+  supabase: SupabaseClient,
+  userId: string,
+  boardId: string,
+  updates: Partial<{
+    name: string;
+    updated_at: string;
+    deleted_at: string | null;
+    starred: boolean;
+    document: BoardDocument;
+  }>
+) => {
+  const { error } = await supabase
+    .from("boards")
+    .update(updates)
+    .eq("user_id", userId)
+    .eq("id", boardId);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
+  }
+};
+
+export const getUserBoards = async (
+  supabase: SupabaseClient,
+  userId: string,
+  plan: AppProfilePlan
+) => {
+  const entry = await loadUserBoardCollection(supabase, userId);
+  return serializeUserBoards(entry, getBoardLimitForPlan(plan));
+};
+
+export const createBoardForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  plan: AppProfilePlan
+) => {
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const availableBoardCount = entry.boards.filter((board) => !board.deletedAt).length;
+  const maxBoardsForPlan = getBoardLimitForPlan(plan);
+
+  if (availableBoardCount >= maxBoardsForPlan) {
+    throw new Error("BOARD_LIMIT_REACHED");
+  }
+
+  const board = await createBoardRecord(supabase, userId, availableBoardCount + 1);
+  await persistActiveBoardId(supabase, userId, board.id);
+
+  return serializeUserBoards({
+    ...entry,
+    activeBoardId: board.id,
+    boards: [...entry.boards, board],
+  }, maxBoardsForPlan);
+};
+
+export const selectBoardForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  plan: AppProfilePlan,
+  boardId: string
+) => {
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const board = getLiveBoardOrThrow(entry, boardId);
+  const updatedAt = new Date().toISOString();
+
+  await Promise.all([
+    updateBoardRow(supabase, userId, board.id, { updated_at: updatedAt }),
+    persistActiveBoardId(supabase, userId, board.id),
+  ]);
+
+  return serializeUserBoards({
+    ...entry,
+    activeBoardId: board.id,
+    boards: entry.boards.map((item) =>
+      item.id === board.id
+        ? {
+            ...item,
+            updatedAt,
+          }
+        : item
+    ),
+  }, getBoardLimitForPlan(plan));
 };
 
 export const saveBoardForUser = async (
+  supabase: SupabaseClient,
   userId: string,
   boardId: string,
   document: Partial<BoardDocument>
 ) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const board = getLiveBoardOrThrow(entry, boardId);
+  const normalizedDocument = normalizeBoardDocument(document);
+  const updatedAt = new Date().toISOString();
 
-  if (!board) {
-    throw new Error("BOARD_NOT_FOUND");
-  }
-
-  board.document = normalizeBoardDocument(document);
-  board.previewDocument = board.document;
-  board.updatedAt = new Date().toISOString();
-  await writeBoardStore(data);
+  await updateBoardRow(supabase, userId, board.id, {
+    document: normalizedDocument,
+    updated_at: updatedAt,
+  });
 
   return {
     ok: true,
@@ -358,81 +449,110 @@ export const saveBoardForUser = async (
       id: board.id,
       name: board.name,
       createdAt: board.createdAt,
-      updatedAt: board.updatedAt,
+      updatedAt,
       deletedAt: board.deletedAt,
       starred: board.starred,
-      document: board.document,
+      document: normalizedDocument,
     },
   };
 };
 
 export const renameBoardForUser = async (
+  supabase: SupabaseClient,
   userId: string,
   boardId: string,
   name: string
 ) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
-
-  if (!board) {
-    throw new Error("BOARD_NOT_FOUND");
-  }
-
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const board = getLiveBoardOrThrow(entry, boardId);
   const normalizedName = name.trim().slice(0, 40);
 
   if (!normalizedName) {
     throw new Error("BOARD_NAME_REQUIRED");
   }
 
-  board.name = normalizedName;
-  board.updatedAt = new Date().toISOString();
-  await writeBoardStore(data);
+  const updatedAt = new Date().toISOString();
+  await updateBoardRow(supabase, userId, board.id, {
+    name: normalizedName,
+    updated_at: updatedAt,
+  });
 
-  return serializeUserBoards(entry);
+  return serializeUserBoards({
+    ...entry,
+    boards: entry.boards.map((item) =>
+      item.id === board.id
+        ? {
+            ...item,
+            name: normalizedName,
+            updatedAt,
+          }
+        : item
+    ),
+  });
 };
 
 export const setBoardStarredForUser = async (
+  supabase: SupabaseClient,
   userId: string,
   boardId: string,
   starred: boolean
 ) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const board = getLiveBoardOrThrow(entry, boardId);
+  const updatedAt = new Date().toISOString();
 
-  if (!board) {
-    throw new Error("BOARD_NOT_FOUND");
-  }
+  await updateBoardRow(supabase, userId, board.id, {
+    starred,
+    updated_at: updatedAt,
+  });
 
-  board.starred = starred;
-  board.updatedAt = new Date().toISOString();
-  await writeBoardStore(data);
-
-  return serializeUserBoards(entry);
+  return serializeUserBoards({
+    ...entry,
+    boards: entry.boards.map((item) =>
+      item.id === board.id
+        ? {
+            ...item,
+            starred,
+            updatedAt,
+          }
+        : item
+    ),
+  });
 };
 
-export const moveBoardToTrashForUser = async (userId: string, boardId: string) => {
-  const data = await readBoardStore();
-  const entry = ensureUserBoardCollection(data, userId);
-  const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
+export const moveBoardToTrashForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  boardId: string
+) => {
+  const entry = await loadUserBoardCollection(supabase, userId);
+  const board = getLiveBoardOrThrow(entry, boardId);
+  const deletedAt = new Date().toISOString();
+  const nextBoards = entry.boards.map((item) =>
+    item.id === board.id
+      ? {
+          ...item,
+          deletedAt,
+          updatedAt: deletedAt,
+        }
+      : item
+  );
+  const nextActiveBoard =
+    entry.activeBoardId === boardId
+      ? nextBoards.find((item) => item.id !== boardId && !item.deletedAt)?.id ?? ""
+      : entry.activeBoardId;
 
-  if (!board) {
-    throw new Error("BOARD_NOT_FOUND");
-  }
+  await Promise.all([
+    updateBoardRow(supabase, userId, board.id, {
+      deleted_at: deletedAt,
+      updated_at: deletedAt,
+    }),
+    persistActiveBoardId(supabase, userId, nextActiveBoard),
+  ]);
 
-  board.deletedAt = new Date().toISOString();
-  board.updatedAt = board.deletedAt;
-
-  if (entry.activeBoardId === boardId) {
-    const nextBoard = entry.boards.find(
-      (item) => item.id !== boardId && !item.deletedAt
-    );
-    entry.activeBoardId = nextBoard?.id ?? "";
-  }
-
-  await writeBoardStore(data);
-  return serializeUserBoards(entry);
+  return serializeUserBoards({
+    ...entry,
+    activeBoardId: nextActiveBoard,
+    boards: nextBoards,
+  });
 };
-
-export const boardsLimit = maxBoardsPerUser;

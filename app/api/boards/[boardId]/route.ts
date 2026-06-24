@@ -1,24 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
-import { authSessionCookieName, getUserFromSessionToken } from "@/lib/auth-store";
 import {
   moveBoardToTrashForUser,
   renameBoardForUser,
   saveBoardForUser,
   setBoardStarredForUser,
 } from "@/lib/board-store";
+import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
+import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
-
-const getAuthenticatedUser = async (request: NextRequest) => {
-  const token = request.cookies.get(authSessionCookieName)?.value;
-  return getUserFromSessionToken(token);
-};
 
 export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ boardId: string }> }
 ) {
-  const user = await getAuthenticatedUser(request);
+  const user = await getSupabaseUserFromRequest(request);
+  const supabase = createSupabaseServerAuthClient({
+    getAll: () => request.cookies.getAll(),
+  });
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -45,7 +44,7 @@ export async function PUT(
 
   try {
     return NextResponse.json(
-      await saveBoardForUser(user.id, boardId, {
+      await saveBoardForUser(supabase, user.id, boardId, {
         elements: body?.elements,
         canvasBackground: body?.canvasBackground,
         customCanvasBackground: body?.customCanvasBackground,
@@ -70,7 +69,10 @@ export async function PATCH(
   request: NextRequest,
   context: { params: Promise<{ boardId: string }> }
 ) {
-  const user = await getAuthenticatedUser(request);
+  const user = await getSupabaseUserFromRequest(request);
+  const supabase = createSupabaseServerAuthClient({
+    getAll: () => request.cookies.getAll(),
+  });
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -87,12 +89,12 @@ export async function PATCH(
   try {
     if (typeof body?.starred === "boolean") {
       return NextResponse.json(
-        await setBoardStarredForUser(user.id, boardId, body.starred)
+        await setBoardStarredForUser(supabase, user.id, boardId, body.starred)
       );
     }
 
     return NextResponse.json(
-      await renameBoardForUser(user.id, boardId, body?.name ?? "")
+      await renameBoardForUser(supabase, user.id, boardId, body?.name ?? "")
     );
   } catch (error) {
     if (error instanceof Error && error.message === "BOARD_NOT_FOUND") {
@@ -117,7 +119,10 @@ export async function DELETE(
   request: NextRequest,
   context: { params: Promise<{ boardId: string }> }
 ) {
-  const user = await getAuthenticatedUser(request);
+  const user = await getSupabaseUserFromRequest(request);
+  const supabase = createSupabaseServerAuthClient({
+    getAll: () => request.cookies.getAll(),
+  });
 
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
@@ -126,7 +131,9 @@ export async function DELETE(
   const { boardId } = await context.params;
 
   try {
-    return NextResponse.json(await moveBoardToTrashForUser(user.id, boardId));
+    return NextResponse.json(
+      await moveBoardToTrashForUser(supabase, user.id, boardId)
+    );
   } catch (error) {
     if (error instanceof Error && error.message === "BOARD_NOT_FOUND") {
       return NextResponse.json({ error: "Board not found." }, { status: 404 });

@@ -1,25 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeEmail } from "@/lib/auth-utils";
-import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
-import { mapSupabaseUserToAppUser } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
+
+const isValidEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email);
 
 export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         email?: string;
-        password?: string;
       }
     | null;
   const email = normalizeEmail(body?.email ?? "");
-  const password = body?.password ?? "";
 
-  if (!email || !password) {
+  if (!isValidEmail(email)) {
     return NextResponse.json(
-      { error: "Enter your email and password." },
+      { error: "Enter a valid email address." },
       { status: 400 }
     );
   }
@@ -37,39 +35,22 @@ export async function POST(request: NextRequest) {
       });
     },
   });
-  const {
-    data: { user },
-    error,
-  } = await supabase.auth.signInWithPassword({
-    email,
-    password,
+
+  const redirectTo = `${request.nextUrl.origin}/auth/callback?next=/reset-password`;
+  const { error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo,
   });
 
-  if (error || !user) {
-    if (
-      error?.message?.toLowerCase().includes("email not confirmed") ||
-      error?.message?.toLowerCase().includes("email not verified")
-    ) {
-      return NextResponse.json(
-        {
-          error: "Please verify your email before logging in.",
-          needsVerification: true,
-        },
-        { status: 403 }
-      );
-    }
-
+  if (error) {
     return NextResponse.json(
-      { error: "Email or password is incorrect." },
-      { status: 401 }
+      { error: "Could not send the reset email." },
+      { status: 500 }
     );
   }
 
-  const profile = await ensureProfileForSupabaseUser(supabase, user);
-  const appUser = profile ?? mapSupabaseUserToAppUser(user);
   const response = NextResponse.json({
     ok: true,
-    user: appUser,
+    message: "If an account exists for this email, check your email.",
   });
 
   responseCookies.forEach(({ name, value, options }) => {

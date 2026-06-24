@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
@@ -39,7 +39,6 @@ import {
   UserRound,
   X,
 } from "lucide-react";
-import KonvaTextPrototype from "./KonvaTextPrototype";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
@@ -77,7 +76,6 @@ type TextElement = {
   kind: "text";
   point: Point;
   value: string;
-  html?: string;
   color: string;
   runs: TextRun[];
   fontFamily: string;
@@ -93,6 +91,24 @@ type TextElement = {
   backgroundColor?: string;
 };
 type CanvasElement = Stroke | Shape | TextElement;
+type ActiveText = {
+  point: Point;
+  screenPoint: Point;
+  value: string;
+  color: string;
+  runs: TextRun[];
+  width: number;
+  height: number;
+  fontSize: number;
+  fontFamily: string;
+  fontWeight: number;
+  fontStyle: "normal" | "italic";
+  underline: boolean;
+  typingFontSize: number;
+  textAlign: TextAlign;
+  backgroundColor?: string;
+  editingIndex?: number;
+};
 type SelectionBox = {
   start: Point;
   end: Point;
@@ -107,20 +123,27 @@ type SelectionMenu = {
   x: number;
   y: number;
 };
-type TextDisplaySegment =
-  | { kind: "text"; text: string; run: TextRun }
-  | { kind: "caret"; run: TextRun | null };
+type TextSelection = {
+  start: number;
+  end: number;
+};
 type SettingsSection = "background" | "tools" | "account";
 type GridMode = "none" | "small" | "standard" | "large";
+type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
 type AuthMode = "login" | "register";
-type AuthStep = "credentials" | "verify";
 type PublicAccount = {
   id: string;
   name: string;
   email: string;
   emailVerified: boolean;
   createdAt: string;
+  updatedAt?: string;
+  plan: "basic" | "pro" | "master";
+  subscriptionStatus: "inactive" | "trialing" | "active" | "past_due" | "canceled";
+  stripeCustomerId?: string | null;
+  stripeSubscriptionId?: string | null;
+  onboardingStatus: "new" | "started" | "completed";
 };
 type BoardSummary = {
   id: string;
@@ -351,10 +374,13 @@ export default function Page() {
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
-  const [tool, setTool] = useState<"cursor" | "text" | StrokeTool | ShapeTool>("pen");
+  const [tool, setTool] = useState<
+    "cursor" | "text" | "textbox" | StrokeTool | ShapeTool
+  >("pen");
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
   const [, setShowTextMenu] = useState(false);
+  const textBoxOpacity = 0.75;
   const [showEraserMenu, setShowEraserMenu] = useState(false);
   const [shapeStart, setShapeStart] = useState<Point | null>(null);
   const [snapshot, setSnapshot] = useState<ImageData | null>(null);
@@ -364,25 +390,56 @@ export default function Page() {
   const [penColor, setPenColor] = useState("#000000");
   const [eraserWidth, setEraserWidth] = useState(24);
   const [strokeStyle, setStrokeStyle] = useState<StrokeStyle>("solid");
+  const [textFontFamily, setTextFontFamily] = useState(textFonts[0].family);
+  const [textFontWeight, setTextFontWeight] = useState(textFonts[0].weight);
   const [canvasBackground, setCanvasBackground] = useState(lightCanvasColor);
   const [customCanvasBackground, setCustomCanvasBackground] =
     useState("#131619");
   const [gridMode, setGridMode] = useState<GridMode>("none");
   const [gridOpacity, setGridOpacity] = useState(24);
+  const [activeText, setActiveText] = useState<ActiveText | null>(null);
+  const [showTextStyleMenu, setShowTextStyleMenu] = useState(false);
+  const [showTextFormatMenu, setShowTextFormatMenu] = useState(false);
+  const [showTextColorMenu, setShowTextColorMenu] = useState(false);
+  const [showTextAlignMenu, setShowTextAlignMenu] = useState(false);
+  const [showTextListMenu, setShowTextListMenu] = useState(false);
+  const [showTextBoxOpacityMenu, setShowTextBoxOpacityMenu] = useState(false);
+  const [textColorBase, setTextColorBase] = useState("#000000");
+  const [textColorOpacity, setTextColorOpacity] = useState(1);
+  const [, setTextSelection] = useState<TextSelection>({
+    start: 0,
+    end: 0,
+  });
   const [isPanning, setIsPanning] = useState(false);
   const [penCursorPoint, setPenCursorPoint] = useState<Point | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
-  const [authStep, setAuthStep] = useState<AuthStep>("credentials");
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
-  const [authCode, setAuthCode] = useState("");
   const [authMessage, setAuthMessage] = useState("");
+  const [canResendConfirmation, setCanResendConfirmation] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [currentAccountName, setCurrentAccountName] = useState("");
   const [currentAccountEmail, setCurrentAccountEmail] = useState("");
   const [currentAccountId, setCurrentAccountId] = useState("");
+  const [currentAccountPlan, setCurrentAccountPlan] = useState<
+    "basic" | "pro" | "master"
+  >(
+    "basic"
+  );
+  const [currentSubscriptionStatus, setCurrentSubscriptionStatus] = useState<
+    "inactive" | "trialing" | "active" | "past_due" | "canceled"
+  >("inactive");
+  const [currentMaxBoards, setCurrentMaxBoards] = useState(5);
+  const [billingMessage, setBillingMessage] = useState("");
+  const [billingMessageTone, setBillingMessageTone] = useState<
+    "error" | "success"
+  >("success");
+  const [pendingBillingPlan, setPendingBillingPlan] = useState<
+    "basic" | "pro" | "master" | ""
+  >("");
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] =
@@ -412,8 +469,9 @@ export default function Page() {
   const [isSelecting, setIsSelecting] = useState(false);
   const [selectionBox, setSelectionBox] = useState<SelectionBox | null>(null);
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenu | null>(null);
-  const [textToolSession, setTextToolSession] = useState(0);
+  const [textSizeMenu, setTextSizeMenu] = useState<SelectionMenu | null>(null);
   const shapeEnd = useRef<Point | null>(null);
+  const textInputRef = useRef<HTMLTextAreaElement | null>(null);
   const boardNameInputRef = useRef<HTMLInputElement | null>(null);
   const boardsMenuContainerRef = useRef<HTMLDivElement | null>(null);
   const profileMenuContainerRef = useRef<HTMLDivElement | null>(null);
@@ -422,11 +480,26 @@ export default function Page() {
   const activeCalendarScrollSyncRef = useRef<"main" | "bottom" | null>(null);
   const offsetRef = useRef<Point>({ x: 0, y: 0 });
   const zoomRef = useRef(1);
+  const activeTextZoomRef = useRef(1);
   const panStart = useRef<{ screen: Point; offset: Point } | null>(null);
   const isPanningRef = useRef(false);
   const didPanRef = useRef(false);
   const selectionStart = useRef<Point | null>(null);
   const isSelectingRef = useRef(false);
+  const isDraggingTextRef = useRef(false);
+  const isResizingTextRef = useRef(false);
+  const textDragStart = useRef<{ screen: Point; textScreen: Point } | null>(
+    null
+  );
+  const textResizeStart = useRef<{
+    screen: Point;
+    screenPoint: Point;
+    width: number;
+    height: number;
+    fontSize: number;
+    runs: TextRun[];
+    handle: TextResizeHandle;
+  } | null>(null);
   const copiedElements = useRef<CanvasElement[]>([]);
   const penCursorElementRef = useRef<HTMLDivElement | null>(null);
   const penCursorPointRef = useRef<Point | null>(null);
@@ -442,9 +515,29 @@ export default function Page() {
   const pendingRedrawFrame = useRef<number | null>(null);
   const autosaveBoardTimeoutRef = useRef<number | null>(null);
   const suppressBoardAutosaveUntilRef = useRef(0);
+  const keepTextBoxInViewportRef = useRef(
+    (screenPoint: Point, width: number, height: number) => ({
+      screenPoint,
+      point: screenPoint,
+      width,
+      height,
+    })
+  );
+  const activeTextScreenX = activeText?.screenPoint.x;
+  const activeTextScreenY = activeText?.screenPoint.y;
   const textPaddingX = 4;
   const textPaddingY = 2;
   const textLineHeight = 1.25;
+  const textBoxSize = 200;
+  const textBoxTextColor = "#ffffff";
+  const textEditorTypography = {
+    letterSpacing: "0",
+    wordSpacing: "0",
+    textTransform: "none",
+    fontVariantLigatures: "none",
+    fontKerning: "none",
+    tabSize: 4,
+  } as const;
 
   const getTextRuns = (
     text: Pick<TextElement, "value" | "color" | "fontFamily" | "fontSize"> & {
@@ -532,250 +625,35 @@ export default function Page() {
     return `rgba(${red}, ${green}, ${blue}, ${normalizedOpacity.toFixed(2)})`;
   };
 
-  const escapeHtml = (value: string) =>
-    value
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#39;");
-
-  const getDefaultTextRunStyle = (text: {
-    color: string;
-    fontFamily: string;
-    fontWeight: number;
-    fontSize: number;
-    fontStyle: "normal" | "italic";
-    underline: boolean;
-  }) => ({
-    color: text.color,
-    fontFamily: text.fontFamily,
-    fontWeight: text.fontWeight,
-    fontSize: clampTextFontSize(text.fontSize),
-    fontStyle: text.fontStyle,
-    underline: text.underline,
-  });
-
-  const appendTextRun = (runs: TextRun[], text: string, style: Omit<TextRun, "text">) => {
-    if (!text) return runs;
-
-    const previousRun = runs[runs.length - 1];
-    if (
-      previousRun &&
-      previousRun.color === style.color &&
-      previousRun.fontFamily === style.fontFamily &&
-      previousRun.fontWeight === style.fontWeight &&
-      previousRun.fontSize === style.fontSize &&
-      previousRun.fontStyle === style.fontStyle &&
-      previousRun.underline === style.underline
-    ) {
-      previousRun.text += text;
-      return runs;
-    }
-
-    runs.push({ text, ...style });
-    return runs;
+  const syncTextColorControls = (color: string) => {
+    const parsedColor = parseCssColor(color);
+    setTextColorBase(parsedColor.hex);
+    setTextColorOpacity(parsedColor.opacity);
   };
 
-  const serializeRunsToEditorHtml = (text: {
-    value: string;
-    runs: TextRun[];
-    color: string;
-    fontFamily: string;
-    fontWeight: number;
-    fontSize: number;
-    fontStyle: "normal" | "italic";
-    underline: boolean;
-  }) => {
-    const runs = getTextRuns(text);
-    const segments: Array<Array<{ text: string; run: TextRun }>> = [[]];
-
-    for (const run of runs) {
-      const parts = run.text.split("\n");
-      parts.forEach((part, index) => {
-        if (index > 0) {
-          segments.push([]);
-        }
-
-        if (part) {
-          segments[segments.length - 1].push({ text: part, run });
-        }
-      });
-    }
-
-    return segments
-      .map((line) => {
-        if (line.length === 0) {
-          return "<p><br /></p>";
-        }
-
-        const content = line
-          .map(({ text: part, run }) => {
-            const styles = [
-              `color: ${run.color}`,
-              `font-family: ${run.fontFamily}`,
-              `font-size: ${clampTextFontSize(run.fontSize)}px`,
-            ];
-            if (run.fontStyle === "italic") {
-              styles.push("font-style: italic");
-            }
-            if (run.underline) {
-              styles.push("text-decoration: underline");
-            }
-
-            let html = `<span style="${styles.join("; ")}">${escapeHtml(part)}</span>`;
-            if (run.fontWeight >= 700) {
-              html = `<strong>${html}</strong>`;
-            }
-            if (run.fontStyle === "italic") {
-              html = `<em>${html}</em>`;
-            }
-            if (run.underline) {
-              html = `<u>${html}</u>`;
-            }
-
-            return html;
-          })
-          .join("");
-
-        return `<p>${content}</p>`;
-      })
-      .join("");
-  };
-
-  const parseEditorFontSize = (value: unknown, fallback: number) => {
-    if (typeof value !== "string") return clampTextFontSize(fallback);
-
-    const parsedValue = Number.parseFloat(value);
-    return clampTextFontSize(
-      Number.isFinite(parsedValue) ? parsedValue : fallback,
-      fallback
-    );
-  };
-
-  const parseEditorContent = (
-    html: string,
-    fallbackStyle: Omit<TextRun, "text">
-  ) => {
-    const parser = new DOMParser();
-    const document = parser.parseFromString(html, "text/html");
-    const runs: TextRun[] = [];
-    let value = "";
-
-    const walkInlineChildren = (
-      node: Node,
-      style: Omit<TextRun, "text">
-    ): void => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const textValue = node.textContent ?? "";
-        if (!textValue) return;
-        value += textValue;
-        appendTextRun(runs, textValue, style);
-        return;
-      }
-
-      if (!(node instanceof HTMLElement)) {
-        return;
-      }
-
-      const tagName = node.tagName.toLowerCase();
-      if (tagName === "br") {
-        value += "\n";
-        appendTextRun(runs, "\n", style);
-        return;
-      }
-
-      const nextStyle: Omit<TextRun, "text"> = {
-        ...style,
-        color: node.style.color || style.color,
-        fontFamily: node.style.fontFamily || style.fontFamily,
-        fontSize: parseEditorFontSize(node.style.fontSize, style.fontSize),
-        fontWeight:
-          tagName === "strong" || tagName === "b"
-            ? 700
-            : node.style.fontWeight
-            ? Number.parseInt(node.style.fontWeight, 10) || style.fontWeight
-            : style.fontWeight,
-        fontStyle:
-          tagName === "em" || tagName === "i" || node.style.fontStyle === "italic"
-            ? "italic"
-            : style.fontStyle,
-        underline:
-          tagName === "u" ||
-          node.style.textDecoration.includes("underline") ||
-          style.underline,
-      };
-
-      Array.from(node.childNodes).forEach((childNode) =>
-        walkInlineChildren(childNode, nextStyle)
-      );
-    };
-
-    const appendBlockBreak = () => {
-      if (!value || value.endsWith("\n")) return;
-      value += "\n";
-      appendTextRun(runs, "\n", fallbackStyle);
-    };
-
-    const walkBlockNode = (node: Node): void => {
-      if (!(node instanceof HTMLElement)) {
-        return;
-      }
-
-      const tagName = node.tagName.toLowerCase();
-      if (tagName === "ul" || tagName === "ol") {
-        const items = Array.from(node.children).filter(
-          (child): child is HTMLElement => child.tagName.toLowerCase() === "li"
-        );
-
-        items.forEach((item, index) => {
-          if (value && !value.endsWith("\n")) {
-            appendBlockBreak();
+  const applyTextFont = (fontFamily: string, fontWeight: number) => {
+    setTextFontFamily(fontFamily);
+    setTextFontWeight(fontWeight);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) =>
+      prev
+        ? {
+            ...prev,
+            fontFamily,
+            fontWeight,
+            runs: compactTextRuns(
+              prev.runs.map((run) => ({
+                ...run,
+                fontFamily,
+                fontWeight,
+              }))
+            ),
           }
-
-          const prefix = tagName === "ul" ? "• " : `${index + 1}. `;
-          value += prefix;
-          appendTextRun(runs, prefix, fallbackStyle);
-          Array.from(item.childNodes).forEach((childNode) =>
-            walkInlineChildren(childNode, fallbackStyle)
-          );
-
-          if (index < items.length - 1) {
-            appendBlockBreak();
-          }
-        });
-        return;
-      }
-
-      Array.from(node.childNodes).forEach((childNode) =>
-        walkInlineChildren(childNode, fallbackStyle)
-      );
-    };
-
-    const blockNodes = Array.from(document.body.childNodes).filter(
-      (node) =>
-        node.nodeType === Node.ELEMENT_NODE ||
-        (node.nodeType === Node.TEXT_NODE && (node.textContent ?? "").trim().length > 0)
+        : prev
     );
-
-    blockNodes.forEach((node, index) => {
-      if (node.nodeType === Node.TEXT_NODE) {
-        const textValue = node.textContent ?? "";
-        value += textValue;
-        appendTextRun(runs, textValue, fallbackStyle);
-      } else {
-        walkBlockNode(node);
-      }
-
-      if (index < blockNodes.length - 1) {
-        appendBlockBreak();
-      }
-    });
-
-    return {
-      value,
-      runs: compactTextRuns(runs),
-    };
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
   };
 
   const getCanvasFontFamily = (fontFamily: string) =>
@@ -783,18 +661,251 @@ export default function Page() {
       ? fallbackCanvasFontFamily
       : fontFamily;
 
-  const applyTextFormat = (_format: "bold" | "italic" | "underline") => {};
+  const applyTextFormat = (
+    format: "bold" | "italic" | "underline"
+  ) => {
+    setShowTextFormatMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) => {
+      if (!prev) return prev;
 
-  const applyTextAlign = (_textAlign: TextAlign) => {};
+      if (format === "bold") {
+        const nextFontWeight = prev.fontWeight >= 700 ? 400 : 700;
+        return {
+          ...prev,
+          fontWeight: nextFontWeight,
+          runs: compactTextRuns(
+            prev.runs.map((run) => ({
+              ...run,
+              fontWeight: nextFontWeight,
+            }))
+          ),
+        };
+      }
+
+      if (format === "italic") {
+        const nextFontStyle = prev.fontStyle === "italic" ? "normal" : "italic";
+        return {
+          ...prev,
+          fontStyle: nextFontStyle,
+          runs: compactTextRuns(
+            prev.runs.map((run) => ({
+              ...run,
+              fontStyle: nextFontStyle,
+            }))
+          ),
+        };
+      }
+
+      const nextUnderline = !prev.underline;
+      return {
+        ...prev,
+        underline: nextUnderline,
+        runs: compactTextRuns(
+          prev.runs.map((run) => ({
+            ...run,
+            underline: nextUnderline,
+          }))
+        ),
+      };
+    });
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextAlign = (textAlign: TextAlign) => {
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setActiveText((prev) => (prev ? { ...prev, textAlign } : prev));
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const getListPrefixMatch = (line: string) =>
+    line.match(/^(\s*)(?:(•)\s+|(\d+)\.\s+)(.*)$/);
+
+  const applyTextList = (listStyle: "bullet" | "numbered") => {
+    const target = textInputRef.current;
+    setShowTextListMenu(false);
+
+    setActiveText((prev) => {
+      if (!prev || !target) return prev;
+
+      const selectionStart = target.selectionStart ?? prev.value.length;
+      const selectionEnd = target.selectionEnd ?? selectionStart;
+      const lineStart = prev.value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+      const nextBreak = prev.value.indexOf("\n", selectionEnd);
+      const lineEnd = nextBreak === -1 ? prev.value.length : nextBreak;
+      const selectedText = prev.value.slice(lineStart, lineEnd);
+      const lines = selectedText.split("\n");
+      const shouldRemove =
+        lines.length > 0 &&
+        lines.every((line) => {
+          const match = getListPrefixMatch(line);
+          return Boolean(listStyle === "bullet" ? match?.[2] : match?.[3]);
+        });
+      const nextLines = lines.map((line, index) => {
+        const match = getListPrefixMatch(line);
+        const indent = match?.[1] ?? "";
+        const content = match ? match[4] : line.trimStart();
+
+        if (shouldRemove) {
+          return `${indent}${content}`;
+        }
+
+        return listStyle === "bullet"
+          ? `${indent}• ${content}`
+          : `${indent}${index + 1}. ${content}`;
+      });
+      const nextValue = `${prev.value.slice(0, lineStart)}${nextLines.join(
+        "\n"
+      )}${prev.value.slice(lineEnd)}`;
+      const nextRuns = updateTextRuns(
+        prev.value,
+        nextValue,
+        prev.runs,
+        prev.color,
+        prev.fontFamily,
+        prev.fontWeight,
+        clampTextFontSize(prev.typingFontSize),
+        prev.fontStyle,
+        prev.underline
+      );
+      const nextSize = getTextRunsEditorSize(
+        nextRuns,
+        clampTextFontSize(prev.fontSize)
+      );
+
+      window.setTimeout(() => {
+        textInputRef.current?.focus();
+        textInputRef.current?.setSelectionRange(lineStart, lineStart);
+        syncTextSelection(textInputRef.current);
+      }, 0);
+
+      return {
+        ...prev,
+        value: nextValue,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
+  };
+
+  const continueTextList = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== "Enter" || e.shiftKey || e.altKey || e.ctrlKey || e.metaKey) {
+      return false;
+    }
+
+    if (!activeText) return false;
+
+    const target = e.currentTarget;
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+    if (selectionStart !== selectionEnd) return false;
+
+    const lineStart = activeText.value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1;
+    const currentLine = activeText.value.slice(lineStart, selectionStart);
+    const match = getListPrefixMatch(currentLine);
+    if (!match) return false;
+
+    e.preventDefault();
+    const content = match[4];
+    const replacement =
+      content.length === 0
+        ? "\n"
+        : match[2]
+        ? `\n${match[1]}• `
+        : `\n${match[1]}${Number(match[3]) + 1}. `;
+    const removeEmptyPrefixLength = content.length === 0 ? currentLine.length : 0;
+    const nextValue = `${activeText.value.slice(
+      0,
+      selectionStart - removeEmptyPrefixLength
+    )}${replacement}${activeText.value.slice(selectionEnd)}`;
+    const nextCursor =
+      selectionStart - removeEmptyPrefixLength + replacement.length;
+
+    setActiveText((prev) => {
+      if (!prev) return prev;
+
+      const nextRuns = updateTextRuns(
+        prev.value,
+        nextValue,
+        prev.runs,
+        prev.color,
+        prev.fontFamily,
+        prev.fontWeight,
+        clampTextFontSize(prev.typingFontSize),
+        prev.fontStyle,
+        prev.underline
+      );
+      const nextSize = getTextRunsEditorSize(
+        nextRuns,
+        clampTextFontSize(prev.fontSize)
+      );
+
+      return {
+        ...prev,
+        value: nextValue,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
+
+    window.setTimeout(() => {
+      textInputRef.current?.setSelectionRange(nextCursor, nextCursor);
+      syncTextSelection(textInputRef.current);
+    }, 0);
+    return true;
+  };
+
+  const applyTextColor = (baseColor: string, opacity = textColorOpacity) => {
+    const nextColor = getTextColorWithOpacity(baseColor, opacity);
+
+    setPenColor(nextColor);
+    setTextColorBase(baseColor);
+    setTextColorOpacity(opacity);
+    setShowTextColorMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextAlignMenu(false);
+    setActiveText((prev) =>
+      prev
+        ? {
+            ...prev,
+            color: nextColor,
+            runs: compactTextRuns(
+              prev.runs.map((run) => ({
+                ...run,
+                color: nextColor,
+              }))
+            ),
+          }
+        : prev
+    );
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextColorOpacity = (opacity: number) => {
+    applyTextColor(textColorBase, opacity);
+  };
+
+  const getTextBoxBackgroundWithOpacity = (opacity: number) => {
+    const normalizedOpacity = Math.min(1, Math.max(0.1, opacity));
+    return `rgba(47, 47, 47, ${normalizedOpacity.toFixed(2)})`;
+  };
 
   const openAuthModal = (mode: AuthMode) => {
     setAuthMode(mode);
-    setAuthStep("credentials");
     setAuthName("");
     setAuthPassword("");
     setAuthConfirmPassword("");
-    setAuthCode("");
     setAuthMessage("");
+    setCanResendConfirmation(false);
     setShowLoginModal(true);
   };
 
@@ -803,10 +914,15 @@ export default function Page() {
       error?: string;
       message?: string;
       user?: PublicAccount;
+      needsVerification?: boolean;
     };
 
     if (!response.ok) {
-      throw new Error(data.error ?? "Something went wrong.");
+      const error = new Error(data.error ?? "Something went wrong.") as Error & {
+        needsVerification?: boolean;
+      };
+      error.needsVerification = data.needsVerification;
+      throw error;
     }
 
     return data;
@@ -827,26 +943,9 @@ export default function Page() {
 
     setIsAuthSubmitting(true);
     setAuthMessage("");
+    setCanResendConfirmation(false);
 
     try {
-      if (authStep === "verify") {
-        const data = await readAuthResponse(
-          await fetch("/api/auth/verify", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ email, code: authCode }),
-          })
-        );
-
-        setCurrentAccountId(data.user?.id ?? "");
-        setCurrentAccountEmail(data.user?.email ?? email);
-        setAuthPassword("");
-        setAuthConfirmPassword("");
-        setAuthCode("");
-        setShowLoginModal(false);
-        return;
-      }
-
       if (!password) {
         setAuthMessage("Enter your password.");
         return;
@@ -861,11 +960,22 @@ export default function Page() {
           })
         );
 
-        setAuthStep("verify");
         setAuthPassword("");
         setAuthConfirmPassword("");
-        setAuthCode("");
-        setAuthMessage(data.message ?? "Verification code sent.");
+        if (data.user?.id) {
+          setCurrentAccountId(data.user.id);
+          setCurrentAccountName(data.user.name ?? name);
+          setCurrentAccountEmail(data.user.email ?? email);
+          setCurrentAccountPlan(data.user.plan ?? "basic");
+          setCurrentSubscriptionStatus(data.user.subscriptionStatus ?? "inactive");
+          setAuthMessage("");
+          setShowLoginModal(false);
+          return;
+        }
+
+        setAuthMode("login");
+        setAuthMessage(data.message ?? "Check your email to confirm your account.");
+        setCanResendConfirmation(true);
         return;
       }
 
@@ -878,24 +988,34 @@ export default function Page() {
       );
 
       setCurrentAccountId(data.user?.id ?? "");
+      setCurrentAccountName(data.user?.name ?? "");
       setCurrentAccountEmail(data.user?.email ?? email);
+      setCurrentAccountPlan(data.user?.plan ?? "basic");
+      setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
       setAuthPassword("");
       setAuthMessage("");
       setShowLoginModal(false);
     } catch (error) {
       const message =
         error instanceof Error ? error.message : "Something went wrong.";
-      setAuthMessage(message);
-
-      if (message.toLowerCase().includes("verify")) {
-        setAuthStep("verify");
+      if (
+        error instanceof Error &&
+        "needsVerification" in error &&
+        Boolean(
+          (error as Error & {
+            needsVerification?: boolean;
+          }).needsVerification
+        )
+      ) {
+        setCanResendConfirmation(true);
       }
+      setAuthMessage(message);
     } finally {
       setIsAuthSubmitting(false);
     }
   };
 
-  const resendVerificationCode = async () => {
+  const resendConfirmationEmail = async () => {
     if (!authEmail.trim() || isAuthSubmitting) return;
 
     setIsAuthSubmitting(true);
@@ -910,10 +1030,13 @@ export default function Page() {
         })
       );
 
-      setAuthMessage(data.message ?? "A new verification code was sent.");
+      setAuthMessage(data.message ?? "A new confirmation email was sent.");
+      setCanResendConfirmation(true);
     } catch (error) {
       setAuthMessage(
-        error instanceof Error ? error.message : "Could not resend the code."
+        error instanceof Error
+          ? error.message
+          : "Could not resend the confirmation email."
       );
     } finally {
       setIsAuthSubmitting(false);
@@ -929,7 +1052,11 @@ export default function Page() {
 
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     setCurrentAccountId("");
+    setCurrentAccountName("");
     setCurrentAccountEmail("");
+    setCurrentAccountPlan("basic");
+    setCurrentSubscriptionStatus("inactive");
+    setCurrentMaxBoards(5);
     setBoards([]);
     setActiveBoardId("");
     applyBoardDocument({
@@ -948,13 +1075,16 @@ export default function Page() {
       .catch(() => ({ user: null }))) as { user: PublicAccount | null };
 
     setCurrentAccountId(data.user?.id ?? "");
+    setCurrentAccountName(data.user?.name ?? "");
     setCurrentAccountEmail(data.user?.email ?? "");
+    setCurrentAccountPlan(data.user?.plan ?? "basic");
+    setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
   };
 
   const closeAuthModal = () => {
     setShowLoginModal(false);
     setAuthMessage("");
-    setAuthCode("");
+    setCanResendConfirmation(false);
   };
 
   const applyBoardDocument = (document: BoardDocument) => {
@@ -964,6 +1094,7 @@ export default function Page() {
     setShapeStart(null);
     setSnapshot(null);
     shapeEnd.current = null;
+    setActiveText(null);
     setSelectionBox(null);
     setSelectionMenu(null);
     setElements(Array.isArray(document.elements) ? document.elements : []);
@@ -1045,6 +1176,42 @@ export default function Page() {
     }
   };
 
+  const requestPasswordReset = async () => {
+    const email = authEmail.trim().toLowerCase();
+
+    if (!email || isAuthSubmitting) {
+      if (!email) {
+        setAuthMessage("Enter your email address first.");
+      }
+      return;
+    }
+
+    setIsAuthSubmitting(true);
+    setAuthMessage("");
+
+    try {
+      const data = await readAuthResponse(
+        await fetch("/api/auth/forgot-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email }),
+        })
+      );
+
+      setAuthMessage(
+        data.message ?? "If an account exists for this email, check your email."
+      );
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not send the reset email."
+      );
+    } finally {
+      setIsAuthSubmitting(false);
+    }
+  };
+
   const loadBoards = async () => {
     if (!currentAccountId) return;
 
@@ -1054,6 +1221,7 @@ export default function Page() {
       const data = await readBoardResponse(await fetch("/api/boards"));
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? "");
+      setCurrentMaxBoards(data.maxBoards ?? 5);
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1091,6 +1259,7 @@ export default function Page() {
 
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? boardId);
+      setCurrentMaxBoards(data.maxBoards ?? currentMaxBoards);
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1110,7 +1279,8 @@ export default function Page() {
   };
 
   const createBoard = async () => {
-    if (!currentAccountId || liveBoardsCount >= 10 || isBoardsLoading) return;
+    if (!currentAccountId || liveBoardsCount >= currentMaxBoards || isBoardsLoading)
+      return;
 
     setIsBoardsLoading(true);
 
@@ -1129,6 +1299,7 @@ export default function Page() {
       setBoardSearchQuery("");
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? "");
+      setCurrentMaxBoards(data.maxBoards ?? currentMaxBoards);
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1210,6 +1381,8 @@ export default function Page() {
     if (!boardId) return;
 
     if (!nextName) {
+      setEditingBoardId("");
+      setEditingBoardName("");
       setAuthMessage("Enter a board name.");
       return;
     }
@@ -1264,6 +1437,24 @@ export default function Page() {
   };
 
   const liveBoardsCount = boards.filter((board) => !board.deletedAt).length;
+  const hasActivePaidSubscription =
+    currentSubscriptionStatus === "trialing" ||
+    currentSubscriptionStatus === "active" ||
+    currentSubscriptionStatus === "past_due";
+  const currentPlanLabel = hasActivePaidSubscription
+    ? currentAccountPlan === "master"
+      ? "Master"
+      : currentAccountPlan === "pro"
+      ? "Pro"
+      : "Basic"
+    : "No active plan";
+  const currentPlanRank = hasActivePaidSubscription
+    ? currentAccountPlan === "master"
+      ? 3
+      : currentAccountPlan === "pro"
+      ? 2
+      : 1
+    : 0;
   const isBoardsBrowserVisible = showBoardsMenu;
   const isCalendarBrowserVisible =
     isBoardsBrowserVisible && boardBrowserView === "calendar";
@@ -1314,6 +1505,63 @@ export default function Page() {
     return matchingBoards;
   })();
 
+  const startPlanCheckout = async (targetPlan: "basic" | "pro" | "master") => {
+    if (!currentAccountId || pendingBillingPlan) {
+      return;
+    }
+
+    setPendingBillingPlan(targetPlan);
+    setBillingMessage("");
+
+    try {
+      const response = await fetch("/api/billing/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ targetPlan }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        ok?: boolean;
+        error?: string;
+        message?: string;
+        checkoutUrl?: string;
+      };
+
+      if (!response.ok) {
+        setBillingMessageTone("error");
+        setBillingMessage(
+          data.error ?? "Could not start the billing flow for this plan."
+        );
+        return;
+      }
+
+      if (data.checkoutUrl) {
+        window.location.assign(data.checkoutUrl);
+        return;
+      }
+
+      setBillingMessageTone("success");
+      setBillingMessage(
+        data.message ?? "Billing flow is ready for the next Stripe step."
+      );
+    } finally {
+      setPendingBillingPlan("");
+    }
+  };
+
+  const calendarSchedules = isCalendarBrowserVisible
+    ? [...normalizeCalendarEntries(calendarEntries)]
+        .filter((entry) =>
+          entry.title.toLowerCase().includes(boardSearchQuery.trim().toLowerCase())
+        )
+        .sort(
+          (first, second) =>
+            first.date.localeCompare(second.date) ||
+            first.startHour.localeCompare(second.startHour) ||
+            first.endHour.localeCompare(second.endHour) ||
+            first.title.localeCompare(second.title)
+        )
+    : [];
+
   const calendarMonthDate = new Date(
     calendarCursor.getFullYear(),
     calendarCursor.getMonth(),
@@ -1342,51 +1590,6 @@ export default function Page() {
 
   const todayDate = new Date();
   const todayDateKey = getLocalCalendarDateKey(todayDate);
-  const calendarSearchQuery = boardSearchQuery.trim().toLowerCase();
-  const hasActiveCalendarSearch =
-    isCalendarBrowserVisible && calendarSearchQuery.length > 0;
-
-  const calendarSchedules = isCalendarBrowserVisible
-    ? [...normalizeCalendarEntries(calendarEntries)]
-        .filter((entry) => {
-          if (!calendarSearchQuery) return true;
-
-          const entryDate = new Date(`${entry.date}T00:00:00`);
-          const startOption = calendarHourOptions.find(
-            (option) => option.value === entry.startHour
-          );
-          const endOption = calendarHourOptions.find(
-            (option) => option.value === entry.endHour
-          );
-          const searchableText = [
-            entry.title,
-            entry.date,
-            entryDate.toLocaleDateString("en-US", {
-              month: "long",
-              day: "numeric",
-              year: "numeric",
-            }),
-            entryDate.toLocaleDateString("en-US", {
-              weekday: "long",
-            }),
-            startOption?.label ?? entry.startHour,
-            startOption?.shortLabel ?? entry.startHour,
-            endOption?.label ?? entry.endHour,
-            endOption?.shortLabel ?? entry.endHour,
-          ]
-            .join(" ")
-            .toLowerCase();
-
-          return searchableText.includes(calendarSearchQuery);
-        })
-        .sort(
-          (first, second) =>
-            first.date.localeCompare(second.date) ||
-            first.startHour.localeCompare(second.startHour) ||
-            first.endHour.localeCompare(second.endHour) ||
-            first.title.localeCompare(second.title)
-        )
-    : [];
 
   const calendarDays = (() => {
     if (!isCalendarBrowserVisible) {
@@ -1406,33 +1609,6 @@ export default function Page() {
     const firstWeekday = (firstDayOfMonth.getDay() + 6) % 7;
     const daysInMonth = new Date(year, month + 1, 0).getDate();
     const totalCells = Math.ceil((firstWeekday + daysInMonth) / 7) * 7;
-
-    if (hasActiveCalendarSearch) {
-      const groupedDays = new Map<string, CalendarEntry[]>();
-
-      calendarSchedules.forEach((entry) => {
-        const entriesForDay = groupedDays.get(entry.date);
-        if (entriesForDay) {
-          entriesForDay.push(entry);
-          return;
-        }
-
-        groupedDays.set(entry.date, [entry]);
-      });
-
-      return Array.from(groupedDays.entries()).map(([dateKey, entries]) => {
-        const date = new Date(`${dateKey}T00:00:00`);
-
-        return {
-          key: dateKey,
-          date,
-          dayNumber: date.getDate(),
-          isCurrentMonth: true,
-          isToday: dateKey === todayDateKey,
-          entries,
-        };
-      });
-    }
 
     return Array.from({ length: totalCells }, (_, index) => {
       const relativeDayNumber = index - firstWeekday + 1;
@@ -1778,7 +1954,7 @@ export default function Page() {
       previewBounds.minY * scale;
 
     const getStrokeDashArray = (style?: StrokeStyle) =>
-      style === "dashed" ? "0 8" : style === "dotted" ? "10 8" : undefined;
+      style === "dashed" ? "10 8" : style === "dotted" ? "2 6" : undefined;
 
     const renderShapePreview = (element: Shape, index: number) => {
       const x = Math.min(element.start.x, element.end.x);
@@ -1964,6 +2140,47 @@ export default function Page() {
     persistBoard(boardId).catch(() => null);
   });
 
+  const applyTextBoxOpacity = (opacity: number) => {
+    setActiveText((prev) =>
+      prev?.backgroundColor
+        ? {
+            ...prev,
+            backgroundColor: getTextBoxBackgroundWithOpacity(opacity),
+          }
+        : prev
+    );
+    window.setTimeout(() => textInputRef.current?.focus(), 0);
+  };
+
+  const applyTextSize = (fontSize: number) => {
+    if (!Number.isFinite(fontSize)) return;
+
+    const nextFontSize = clampTextFontSize(fontSize);
+    setActiveText((prev) => {
+      if (!prev) return prev;
+
+      const nextRuns = compactTextRuns(
+        prev.runs.map((run) => ({
+          ...run,
+          fontSize: nextFontSize,
+        }))
+      );
+      const nextSize = getTextRunsEditorSize(nextRuns, nextFontSize);
+
+      return {
+        ...prev,
+        fontSize: nextFontSize,
+        typingFontSize: nextFontSize,
+        runs: nextRuns,
+        ...keepTextBoxInViewport(
+          prev.screenPoint,
+          Math.max(prev.width, nextSize.width),
+          Math.max(prev.height, nextSize.height)
+        ),
+      };
+    });
+  };
+
   const runsHaveSameStyle = (first: TextRun, second: TextRun) =>
     first.color === second.color &&
     first.fontFamily === second.fontFamily &&
@@ -1988,22 +2205,6 @@ export default function Page() {
       nextRuns.push(run);
       return nextRuns;
     }, []);
-
-  const areTextRunsEqual = (first: readonly TextRun[], second: readonly TextRun[]) =>
-    first.length === second.length &&
-    first.every((run, index) => {
-      const other = second[index];
-      return (
-        other !== undefined &&
-        run.text === other.text &&
-        run.color === other.color &&
-        run.fontFamily === other.fontFamily &&
-        run.fontWeight === other.fontWeight &&
-        run.fontSize === other.fontSize &&
-        run.fontStyle === other.fontStyle &&
-        run.underline === other.underline
-      );
-    });
 
   const sliceTextRuns = (runs: TextRun[], start: number, end: number) => {
     const nextRuns: TextRun[] = [];
@@ -2097,6 +2298,15 @@ export default function Page() {
     target.scrollTop = 0;
   };
 
+  const syncTextSelection = (target: HTMLTextAreaElement | null) => {
+    if (!target) return;
+
+    setTextSelection({
+      start: target.selectionStart ?? target.value.length,
+      end: target.selectionEnd ?? target.selectionStart ?? target.value.length,
+    });
+  };
+
   const getTextRunsEditorSize = (runs: TextRun[], fontSize: number) => {
     const measuringCanvas = document.createElement("canvas");
     const measuringContext = measuringCanvas.getContext("2d");
@@ -2159,65 +2369,6 @@ export default function Page() {
     }
 
     return totalHeight + currentLineHeight;
-  };
-
-  const getTextDisplaySegments = (
-    runs: readonly TextRun[],
-    caretIndex: number | null
-  ): TextDisplaySegment[] => {
-    if (caretIndex === null) {
-      return runs.map((run) => ({ kind: "text", text: run.text, run }));
-    }
-
-    const safeCaretIndex = Math.max(0, caretIndex);
-    const nextSegments: TextDisplaySegment[] = [];
-    let traversed = 0;
-    let caretInserted = false;
-    let previousRun: TextRun | null = null;
-
-    for (const run of runs) {
-      if (caretInserted) {
-        nextSegments.push({ kind: "text", text: run.text, run });
-        previousRun = run;
-        continue;
-      }
-
-      const runLength = run.text.length;
-      const caretOffset = safeCaretIndex - traversed;
-
-      if (caretOffset <= 0) {
-        nextSegments.push({ kind: "caret", run: previousRun ?? run });
-        nextSegments.push({ kind: "text", text: run.text, run });
-        caretInserted = true;
-      } else if (caretOffset < runLength) {
-        nextSegments.push({
-          kind: "text",
-          text: run.text.slice(0, caretOffset),
-          run,
-        });
-        nextSegments.push({ kind: "caret", run });
-        nextSegments.push({
-          kind: "text",
-          text: run.text.slice(caretOffset),
-          run,
-        });
-        caretInserted = true;
-      } else {
-        nextSegments.push({ kind: "text", text: run.text, run });
-      }
-
-      traversed += runLength;
-      previousRun = run;
-    }
-
-    if (!caretInserted) {
-      nextSegments.push({
-        kind: "caret",
-        run: previousRun ?? runs[runs.length - 1] ?? null,
-      });
-    }
-
-    return nextSegments;
   };
 
   const drawTextElement = (
@@ -2359,6 +2510,11 @@ export default function Page() {
     ctx.restore();
   };
 
+  const getTextCanvasPoint = (screenPoint: Point) => ({
+    x: (screenPoint.x - offsetRef.current.x) / zoomRef.current,
+    y: (screenPoint.y - topBarHeight - offsetRef.current.y) / zoomRef.current,
+  });
+
   const screenLengthToCanvas = (value: number, zoomValue = zoomRef.current) =>
     value / zoomValue;
   const canvasLengthToScreen = (value: number, zoomValue = zoomRef.current) =>
@@ -2374,6 +2530,56 @@ export default function Page() {
       ? screenLengthToCanvas(value, getTextMeasurementZoom(text))
       : value;
 
+  const getTextLengthInScreen = (text: TextElement, value: number) =>
+    text.measurementSpace === "screen"
+      ? canvasLengthToScreen(
+          screenLengthToCanvas(value, getTextMeasurementZoom(text))
+        )
+      : canvasLengthToScreen(value);
+
+  const getScreenTextRuns = (text: TextElement) =>
+    getTextRuns(text).map((run) => ({
+      ...run,
+      fontSize:
+        text.measurementSpace === "screen"
+          ? clampTextFontSize(
+              canvasLengthToScreen(
+                screenLengthToCanvas(run.fontSize, getTextMeasurementZoom(text))
+              ),
+              run.fontSize
+            )
+          : clampTextFontSize(canvasLengthToScreen(run.fontSize), run.fontSize),
+    }));
+
+  const keepTextBoxInViewport = (
+    screenPoint: Point,
+    width: number,
+    height: number
+  ) => {
+    const margin = 8;
+    const maxWidth = Math.max(48, window.innerWidth - margin * 2);
+    const maxHeight = Math.max(30, window.innerHeight - topBarHeight - margin * 2);
+    const nextWidth = Math.min(width, maxWidth);
+    const nextHeight = Math.min(height, maxHeight);
+    const minY = topBarHeight + margin;
+    const maxX = Math.max(margin, window.innerWidth - nextWidth - margin);
+    const maxY = Math.max(minY, window.innerHeight - nextHeight - margin);
+    const nextScreenPoint = {
+      x: Math.min(Math.max(screenPoint.x, margin), maxX),
+      y: Math.min(Math.max(screenPoint.y, minY), maxY),
+    };
+
+    return {
+      screenPoint: nextScreenPoint,
+      point: getTextCanvasPoint(nextScreenPoint),
+      width: nextWidth,
+      height: nextHeight,
+    };
+  };
+  useEffect(() => {
+    keepTextBoxInViewportRef.current = keepTextBoxInViewport;
+  });
+
   const getTextBounds = (text: TextElement): Bounds => ({
     x: text.point.x,
     y: text.point.y,
@@ -2383,86 +2589,18 @@ export default function Page() {
 
   const getStrokeDashPattern = (style: StrokeStyle | undefined, width: number) => {
     if (style === "dashed") {
-      return [0, Math.max(width * 2.8, width + 8)];
+      return [Math.max(8, width * 1.5), Math.max(6, width * 1.1)];
     }
 
     if (style === "dotted") {
-      return [Math.max(8, width * 1.5), Math.max(6, width * 1.1)];
+      return [0, Math.max(10, width * 2.2)];
     }
 
     return [];
   };
 
-  const getStrokeLineCap = (
-    style: StrokeStyle | undefined
-  ): CanvasLineCap => (style === "dotted" ? "butt" : "round");
-
-  const configureStrokeRendering = (
-    ctx: CanvasRenderingContext2D,
-    style: StrokeStyle | undefined,
-    width: number
-  ) => {
-    ctx.lineCap = getStrokeLineCap(style);
-    ctx.lineJoin = style === "dotted" ? "miter" : "round";
-    ctx.miterLimit = 2;
-    ctx.setLineDash(getStrokeDashPattern(style, width));
-  };
-
-  const configureCanvasQuality = (ctx: CanvasRenderingContext2D) => {
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-  };
-
-  const drawDotAtPoint = (
-    ctx: CanvasRenderingContext2D,
-    point: Point,
-    radius: number
-  ) => {
-    ctx.beginPath();
-    ctx.arc(point.x, point.y, radius, 0, Math.PI * 2);
-    ctx.fill();
-  };
-
-  const drawDotsAlongPolyline = (
-    ctx: CanvasRenderingContext2D,
-    points: Point[],
-    width: number
-  ) => {
-    if (!points.length) return;
-
-    const radius = width / 2;
-    const spacing = Math.max(width * 1.65, width + 8);
-    let nextDotDistance = 0;
-
-    drawDotAtPoint(ctx, points[0], radius);
-
-    for (let index = 1; index < points.length; index += 1) {
-      const start = points[index - 1];
-      const end = points[index];
-      const dx = end.x - start.x;
-      const dy = end.y - start.y;
-      const distance = Math.hypot(dx, dy);
-
-      if (distance < 0.001) continue;
-
-      const directionX = dx / distance;
-      const directionY = dy / distance;
-
-      while (nextDotDistance <= distance) {
-        drawDotAtPoint(
-          ctx,
-          {
-            x: start.x + directionX * nextDotDistance,
-            y: start.y + directionY * nextDotDistance,
-          },
-          radius
-        );
-        nextDotDistance += spacing;
-      }
-
-      nextDotDistance -= distance;
-    }
-  };
+  const getStrokeLineCap = (style: StrokeStyle | undefined) =>
+    style === "dashed" ? "butt" : "round";
 
   const drawStrokePath = (
     ctx: CanvasRenderingContext2D,
@@ -2472,13 +2610,10 @@ export default function Page() {
   ) => {
     if (!points.length) return;
 
-    if (style === "dashed") {
-      drawDotsAlongPolyline(ctx, points, width);
-      return;
-    }
-
-    configureStrokeRendering(ctx, style, width);
+    ctx.lineCap = getStrokeLineCap(style);
+    ctx.lineJoin = "round";
     ctx.lineWidth = width;
+    ctx.setLineDash(getStrokeDashPattern(style, width));
 
     if (points.length === 1) {
       const point = points[0];
@@ -2497,30 +2632,23 @@ export default function Page() {
       return;
     }
 
-    for (let index = 1; index < points.length - 1; index += 1) {
-      const currentPoint = points[index];
-      const nextPoint = points[index + 1];
-      const midpoint = {
-        x: (currentPoint.x + nextPoint.x) / 2,
-        y: (currentPoint.y + nextPoint.y) / 2,
-      };
+    const tension = 0.18;
 
-      ctx.quadraticCurveTo(
-        currentPoint.x,
-        currentPoint.y,
-        midpoint.x,
-        midpoint.y
+    for (let i = 0; i < points.length - 1; i++) {
+      const p0 = points[i - 1] ?? points[i];
+      const p1 = points[i];
+      const p2 = points[i + 1];
+      const p3 = points[i + 2] ?? p2;
+
+      ctx.bezierCurveTo(
+        p1.x + (p2.x - p0.x) * tension,
+        p1.y + (p2.y - p0.y) * tension,
+        p2.x - (p3.x - p1.x) * tension,
+        p2.y - (p3.y - p1.y) * tension,
+        p2.x,
+        p2.y
       );
     }
-
-    const penultimatePoint = points[points.length - 2];
-    const lastPoint = points[points.length - 1];
-    ctx.quadraticCurveTo(
-      penultimatePoint.x,
-      penultimatePoint.y,
-      lastPoint.x,
-      lastPoint.y
-    );
 
     ctx.stroke();
   };
@@ -2543,7 +2671,6 @@ export default function Page() {
     const dpr = window.devicePixelRatio || 1;
 
     ctx.save();
-    configureCanvasQuality(ctx);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.translate(offsetRef.current.x, offsetRef.current.y);
     ctx.scale(zoomRef.current, zoomRef.current);
@@ -2570,17 +2697,14 @@ export default function Page() {
     const height = currentY - startY;
 
     ctx.beginPath();
-    configureStrokeRendering(ctx, style, width);
+    ctx.lineCap = getStrokeLineCap(style);
+    ctx.lineJoin = "round";
+    ctx.setLineDash(getStrokeDashPattern(style, width));
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
 
     if (shape === "square") {
-      ctx.moveTo(startX, startY);
-      ctx.lineTo(startX + shapeWidth, startY);
-      ctx.lineTo(startX + shapeWidth, startY + height);
-      ctx.lineTo(startX, startY + height);
-      ctx.closePath();
-      ctx.stroke();
+      ctx.strokeRect(startX, startY, shapeWidth, height);
       return;
     }
 
@@ -2777,29 +2901,6 @@ export default function Page() {
     const erasedSegments: Stroke[] = [];
     let currentSegment: Point[] = [];
     const hitRadius = eraser.width / 2 + stroke.width / 2;
-    const sampledPoints = stroke.points.reduce<Point[]>((nextPoints, point, index) => {
-      if (index === 0) {
-        nextPoints.push(point);
-        return nextPoints;
-      }
-
-      const previousPoint = stroke.points[index - 1];
-      const segmentDistance = Math.hypot(
-        point.x - previousPoint.x,
-        point.y - previousPoint.y
-      );
-      const steps = Math.max(1, Math.ceil(segmentDistance / 2));
-
-      for (let step = 1; step <= steps; step += 1) {
-        const t = step / steps;
-        nextPoints.push({
-          x: previousPoint.x + (point.x - previousPoint.x) * t,
-          y: previousPoint.y + (point.y - previousPoint.y) * t,
-        });
-      }
-
-      return nextPoints;
-    }, []);
 
     const finishSegment = () => {
       if (!currentSegment.length) return;
@@ -2811,9 +2912,9 @@ export default function Page() {
       currentSegment = [];
     };
 
-    for (let index = 0; index < sampledPoints.length; index += 1) {
-      const point = sampledPoints[index];
-      const previousPoint = sampledPoints[index - 1];
+    for (let index = 0; index < stroke.points.length; index += 1) {
+      const point = stroke.points[index];
+      const previousPoint = stroke.points[index - 1];
       const pointWasErased = isPointHitByEraser(point, eraser, hitRadius);
       const segmentWasErased =
         previousPoint &&
@@ -2836,256 +2937,14 @@ export default function Page() {
     return erasedSegments;
   };
 
-  const isRectangleHitByEraser = (
-    start: Point,
-    end: Point,
-    strokeWidth: number,
-    eraser: Stroke
-  ) => {
-    const left = Math.min(start.x, end.x);
-    const right = Math.max(start.x, end.x);
-    const top = Math.min(start.y, end.y);
-    const bottom = Math.max(start.y, end.y);
-    const hitRadius = eraser.width / 2 + strokeWidth / 2;
-
-    return (
-      isSegmentHitByEraser({ x: left, y: top }, { x: right, y: top }, eraser, hitRadius) ||
-      isSegmentHitByEraser(
-        { x: right, y: top },
-        { x: right, y: bottom },
-        eraser,
-        hitRadius
-      ) ||
-      isSegmentHitByEraser(
-        { x: right, y: bottom },
-        { x: left, y: bottom },
-        eraser,
-        hitRadius
-      ) ||
-      isSegmentHitByEraser(
-        { x: left, y: bottom },
-        { x: left, y: top },
-        eraser,
-        hitRadius
-      )
-    );
-  };
-
-  const isCircleHitByEraser = (
-    start: Point,
-    end: Point,
-    strokeWidth: number,
-    eraser: Stroke
-  ) => {
-    const radius = Math.hypot(end.x - start.x, end.y - start.y);
-    const hitRadius = eraser.width / 2 + strokeWidth / 2;
-    const segments = Math.max(24, Math.ceil((Math.PI * 2 * radius) / 12));
-
-    for (let index = 0; index < segments; index += 1) {
-      const startAngle = (index / segments) * Math.PI * 2;
-      const endAngle = ((index + 1) / segments) * Math.PI * 2;
-      const segmentStart = {
-        x: start.x + Math.cos(startAngle) * radius,
-        y: start.y + Math.sin(startAngle) * radius,
-      };
-      const segmentEnd = {
-        x: start.x + Math.cos(endAngle) * radius,
-        y: start.y + Math.sin(endAngle) * radius,
-      };
-
-      if (isSegmentHitByEraser(segmentStart, segmentEnd, eraser, hitRadius)) {
-        return true;
-      }
-    }
-
-    return false;
-  };
-
-  const isArrowHitByEraser = (
-    start: Point,
-    end: Point,
-    strokeWidth: number,
-    eraser: Stroke
-  ) => {
-    const hitRadius = eraser.width / 2 + strokeWidth / 2;
-    const angle = Math.atan2(end.y - start.y, end.x - start.x);
-    const headLength = Math.max(18, strokeWidth * 4);
-    const leftHead = {
-      x: end.x - headLength * Math.cos(angle - Math.PI / 6),
-      y: end.y - headLength * Math.sin(angle - Math.PI / 6),
-    };
-    const rightHead = {
-      x: end.x - headLength * Math.cos(angle + Math.PI / 6),
-      y: end.y - headLength * Math.sin(angle + Math.PI / 6),
-    };
-
-    return (
-      isSegmentHitByEraser(start, end, eraser, hitRadius) ||
-      isSegmentHitByEraser(end, leftHead, eraser, hitRadius) ||
-      isSegmentHitByEraser(end, rightHead, eraser, hitRadius)
-    );
-  };
-
-  const isShapeHitByEraser = (shape: Shape, eraser: Stroke) => {
-    if (shape.tool === "square") {
-      return isRectangleHitByEraser(shape.start, shape.end, shape.width, eraser);
-    }
-
-    if (shape.tool === "circle") {
-      return isCircleHitByEraser(shape.start, shape.end, shape.width, eraser);
-    }
-
-    if (shape.tool === "arrow") {
-      return isArrowHitByEraser(shape.start, shape.end, shape.width, eraser);
-    }
-
-    return isSegmentHitByEraser(
-      shape.start,
-      shape.end,
-      eraser,
-      eraser.width / 2 + shape.width / 2
-    );
-  };
-
-  const createStrokeFromPoints = (
-    shape: Shape,
-    points: Point[]
-  ): Stroke => ({
-    kind: "stroke",
-    tool: "pen",
-    points,
-    width: shape.width,
-    color: shape.color,
-    style: shape.style,
-  });
-
-  const approximateLinePoints = (
-    start: Point,
-    end: Point,
-    spacing = 6
-  ) => {
-    const distance = Math.hypot(end.x - start.x, end.y - start.y);
-    const steps = Math.max(1, Math.ceil(distance / spacing));
-
-    return Array.from({ length: steps + 1 }, (_, index) => {
-      const t = index / steps;
-      return {
-        x: start.x + (end.x - start.x) * t,
-        y: start.y + (end.y - start.y) * t,
-      };
-    });
-  };
-
-  const approximateRectangleStroke = (shape: Shape): Stroke => {
-    const left = Math.min(shape.start.x, shape.end.x);
-    const right = Math.max(shape.start.x, shape.end.x);
-    const top = Math.min(shape.start.y, shape.end.y);
-    const bottom = Math.max(shape.start.y, shape.end.y);
-
-    const topEdge = approximateLinePoints(
-      { x: left, y: top },
-      { x: right, y: top }
-    );
-    const rightEdge = approximateLinePoints(
-      { x: right, y: top },
-      { x: right, y: bottom }
-    ).slice(1);
-    const bottomEdge = approximateLinePoints(
-      { x: right, y: bottom },
-      { x: left, y: bottom }
-    ).slice(1);
-    const leftEdge = approximateLinePoints(
-      { x: left, y: bottom },
-      { x: left, y: top }
-    ).slice(1);
-
-    return createStrokeFromPoints(shape, [
-      ...topEdge,
-      ...rightEdge,
-      ...bottomEdge,
-      ...leftEdge,
-    ]);
-  };
-
-  const approximateCircleStroke = (shape: Shape): Stroke => {
-    const radius = Math.hypot(
-      shape.end.x - shape.start.x,
-      shape.end.y - shape.start.y
-    );
-    const segmentCount = Math.max(48, Math.ceil((Math.PI * 2 * radius) / 10));
-    const points = Array.from({ length: segmentCount + 1 }, (_, index) => {
-      const angle = (index / segmentCount) * Math.PI * 2;
-      return {
-        x: shape.start.x + Math.cos(angle) * radius,
-        y: shape.start.y + Math.sin(angle) * radius,
-      };
-    });
-
-    return createStrokeFromPoints(shape, points);
-  };
-
-  const approximateArrowStrokes = (shape: Shape): Stroke[] => {
-    const angle = Math.atan2(
-      shape.end.y - shape.start.y,
-      shape.end.x - shape.start.x
-    );
-    const headLength = Math.max(18, shape.width * 4);
-    const leftHead = {
-      x: shape.end.x - headLength * Math.cos(angle - Math.PI / 6),
-      y: shape.end.y - headLength * Math.sin(angle - Math.PI / 6),
-    };
-    const rightHead = {
-      x: shape.end.x - headLength * Math.cos(angle + Math.PI / 6),
-      y: shape.end.y - headLength * Math.sin(angle + Math.PI / 6),
-    };
-
-    return [
-      createStrokeFromPoints(
-        shape,
-        approximateLinePoints(shape.start, shape.end)
-      ),
-      createStrokeFromPoints(shape, approximateLinePoints(shape.end, leftHead)),
-      createStrokeFromPoints(shape, approximateLinePoints(shape.end, rightHead)),
-    ];
-  };
-
-  const eraseShapeElement = (shape: Shape, eraser: Stroke): CanvasElement[] => {
-    const outlineStrokes =
-      shape.tool === "square"
-        ? [approximateRectangleStroke(shape)]
-        : shape.tool === "circle"
-        ? [approximateCircleStroke(shape)]
-        : shape.tool === "arrow"
-        ? approximateArrowStrokes(shape)
-        : [createStrokeFromPoints(shape, approximateLinePoints(shape.start, shape.end))];
-
-    return outlineStrokes.flatMap<CanvasElement>((stroke) =>
-      erasePenStroke(stroke, eraser)
-    );
-  };
-
-  const eraseElements = (
-    targetElements: CanvasElement[],
-    eraser: Stroke
-  ): CanvasElement[] => {
-    const shapeIndexToErase = targetElements.findLastIndex(
-      (element) => element.kind === "shape" && isShapeHitByEraser(element, eraser)
-    );
-
-    return targetElements.flatMap<CanvasElement>((element, index) => {
-      if (element.kind === "shape") {
-        return index === shapeIndexToErase
-          ? eraseShapeElement(element, eraser)
-          : [element];
-      }
-
+  const eraseElements = (targetElements: CanvasElement[], eraser: Stroke) =>
+    targetElements.flatMap((element) => {
       if (element.kind !== "stroke" || element.tool !== "pen") {
         return [element];
       }
 
       return erasePenStroke(element, eraser);
     });
-  };
 
   const getSelectedPenElementIndexes = (selection: SelectionBox) => {
     const selectedIndexes = new Set<number>();
@@ -3262,7 +3121,6 @@ export default function Page() {
     const cssWidth = window.innerWidth;
     const cssHeight = window.innerHeight - topBarHeight;
 
-    configureCanvasQuality(ctx);
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     ctx.clearRect(0, 0, cssWidth, cssHeight);
 
@@ -3273,7 +3131,9 @@ export default function Page() {
     ctx.scale(zoom, zoom);
 
     for (const [index, element] of elements.entries()) {
-      
+      if (activeText?.editingIndex === index) {
+        continue;
+      }
 
       if (element.kind === "shape") {
         drawShape(
@@ -3357,7 +3217,6 @@ export default function Page() {
         const ctx = canvas.getContext("2d");
         if (!ctx) return;
 
-        configureCanvasQuality(ctx);
         ctx.lineCap = "round";
         ctx.lineJoin = "round";
         latestRedrawCanvasRef.current();
@@ -3396,6 +3255,15 @@ export default function Page() {
   useEffect(() => {
     loadCurrentAccount();
   }, []);
+
+  const isPositiveAuthMessage =
+    typeof authMessage === "string" &&
+    /check your email|account created|verified|utworzone|sent/i.test(
+      authMessage
+    ) &&
+    !/could not|incorrect|enter |match|failed|wait |not found|error/i.test(
+      authMessage
+    );
 
   useEffect(() => {
     if (!currentAccountId) return;
@@ -3533,7 +3401,8 @@ export default function Page() {
     gridMode,
     gridOpacity,
     isFloralBackgroundLoaded,
-    ]);
+    activeText?.editingIndex,
+  ]);
 
   useEffect(() => {
     if (!currentAccountId || !activeBoardId) return;
@@ -3593,6 +3462,195 @@ export default function Page() {
       document.body.style.userSelect = previousUserSelect;
     };
   }, [isPanning]);
+
+  useEffect(() => {
+    const positionTimer = window.setTimeout(() => {
+      setActiveText((prev) => {
+        if (!prev) {
+          activeTextZoomRef.current = zoom;
+          return prev;
+        }
+
+        const previousZoom = activeTextZoomRef.current || zoom;
+        const textScale = previousZoom === 0 ? 1 : zoom / previousZoom;
+        activeTextZoomRef.current = zoom;
+
+        return {
+          ...prev,
+          screenPoint: {
+            x: prev.point.x * zoom + offset.x,
+            y: prev.point.y * zoom + offset.y + topBarHeight,
+          },
+          width: prev.width * textScale,
+          height: prev.height * textScale,
+          fontSize: clampTextFontSize(prev.fontSize * textScale, prev.fontSize),
+          typingFontSize: clampTextFontSize(
+            prev.typingFontSize * textScale,
+            prev.typingFontSize
+          ),
+          runs: prev.runs.map((run) => ({
+            ...run,
+            fontSize: clampTextFontSize(run.fontSize * textScale, run.fontSize),
+          })),
+        };
+      });
+    }, 0);
+
+    return () => window.clearTimeout(positionTimer);
+  }, [offset, zoom]);
+
+  useEffect(() => {
+    if (activeTextScreenX === undefined || activeTextScreenY === undefined) return;
+
+    const focusTimer = window.setTimeout(() => {
+      textInputRef.current?.focus();
+      keepTextInputAligned(textInputRef.current);
+    }, 0);
+
+    return () => window.clearTimeout(focusTimer);
+  }, [activeTextScreenX, activeTextScreenY]);
+
+  useEffect(() => {
+    keepTextInputAligned(textInputRef.current);
+  }, [activeText?.value, activeText?.width, activeText?.height]);
+
+  useEffect(() => {
+    const moveOrResizeText = (clientX: number, clientY: number) => {
+      if (isResizingTextRef.current && textResizeStart.current) {
+        const dx = clientX - textResizeStart.current.screen.x;
+        const dy = clientY - textResizeStart.current.screen.y;
+        const startsOnLeft = textResizeStart.current.handle.includes("w");
+        const startsOnTop = textResizeStart.current.handle.includes("n");
+        const startsOnRight = textResizeStart.current.handle.includes("e");
+        const startsOnBottom = textResizeStart.current.handle.includes("s");
+        const changesWidth =
+          startsOnLeft || startsOnRight;
+        const changesHeight = startsOnTop || startsOnBottom;
+        const dragDirection = {
+          x: startsOnLeft ? -1 : startsOnRight ? 1 : 0,
+          y: startsOnTop ? -1 : startsOnBottom ? 1 : 0,
+        };
+        const scaleFromWidth = changesWidth
+          ? 1 + (dx * dragDirection.x) / textResizeStart.current.width
+          : 1;
+        const scaleFromHeight = changesHeight
+          ? 1 + (dy * dragDirection.y) / textResizeStart.current.height
+          : 1;
+        const textScale = Math.max(
+          0.05,
+          changesWidth && changesHeight
+            ? Math.max(scaleFromWidth, scaleFromHeight)
+            : changesWidth
+            ? scaleFromWidth
+            : scaleFromHeight
+        );
+        const nextWidth = textResizeStart.current.width * textScale;
+        const nextHeight = textResizeStart.current.height * textScale;
+        const nextScreenPoint = {
+          x: startsOnLeft
+            ? textResizeStart.current.screenPoint.x +
+              textResizeStart.current.width -
+              nextWidth
+            : changesHeight && !changesWidth
+            ? textResizeStart.current.screenPoint.x +
+              (textResizeStart.current.width - nextWidth) / 2
+            : textResizeStart.current.screenPoint.x,
+          y: startsOnTop
+            ? textResizeStart.current.screenPoint.y +
+              textResizeStart.current.height -
+              nextHeight
+            : changesWidth && !changesHeight
+            ? textResizeStart.current.screenPoint.y +
+              (textResizeStart.current.height - nextHeight) / 2
+            : textResizeStart.current.screenPoint.y,
+        };
+        const nextFontSize = clampTextFontSize(
+          textResizeStart.current.fontSize * textScale,
+          textResizeStart.current.fontSize
+        );
+        const nextRuns = textResizeStart.current.runs.map((run) => ({
+          ...run,
+          fontSize: clampTextFontSize(run.fontSize * textScale, run.fontSize),
+        }));
+        const boundedTextBox = keepTextBoxInViewportRef.current(
+          nextScreenPoint,
+          nextWidth,
+          nextHeight
+        );
+
+        setActiveText((prev) =>
+          prev
+            ? {
+                ...prev,
+                ...boundedTextBox,
+                fontSize: nextFontSize,
+                typingFontSize: nextFontSize,
+                runs: nextRuns,
+              }
+            : prev
+        );
+
+        return;
+      }
+
+      if (!isDraggingTextRef.current || !textDragStart.current) return;
+
+      const nextScreenPoint = {
+        x:
+          textDragStart.current.textScreen.x +
+          clientX -
+          textDragStart.current.screen.x,
+        y:
+          textDragStart.current.textScreen.y +
+          clientY -
+          textDragStart.current.screen.y,
+      };
+
+      setActiveText((prev) =>
+        prev
+          ? {
+              ...prev,
+              screenPoint: nextScreenPoint,
+              point: {
+                x: (nextScreenPoint.x - offsetRef.current.x) / zoomRef.current,
+                y:
+                  (nextScreenPoint.y -
+                    topBarHeight -
+                    offsetRef.current.y) /
+                  zoomRef.current,
+              },
+            }
+          : prev
+      );
+    };
+
+    const moveText = (e: MouseEvent) => {
+      moveOrResizeText(e.clientX, e.clientY);
+    };
+
+    const moveTextPointer = (e: PointerEvent) => {
+      moveOrResizeText(e.clientX, e.clientY);
+    };
+
+    const stopMovingText = () => {
+      isDraggingTextRef.current = false;
+      isResizingTextRef.current = false;
+      textDragStart.current = null;
+      textResizeStart.current = null;
+    };
+
+    window.addEventListener("mousemove", moveText);
+    window.addEventListener("mouseup", stopMovingText);
+    window.addEventListener("pointermove", moveTextPointer);
+    window.addEventListener("pointerup", stopMovingText);
+
+    return () => {
+      window.removeEventListener("mousemove", moveText);
+      window.removeEventListener("mouseup", stopMovingText);
+      window.removeEventListener("pointermove", moveTextPointer);
+      window.removeEventListener("pointerup", stopMovingText);
+    };
+  }, []);
 
   const getCanvasCoordinatesFromClient = (clientX: number, clientY: number) => {
     const canvas = canvasRef.current;
@@ -3709,31 +3767,26 @@ export default function Page() {
       }
 
       if (stroke.tool === "pen") {
-        const blend =
-          distance > 24 ? 0.52 : distance > 14 ? 0.4 : distance > 6 ? 0.28 : 0.18;
+        const smoothing =
+          distance > 18 ? 0.94 : distance > 10 ? 0.88 : distance > 4 ? 0.78 : 0.64;
         const stabilizedPoint = {
-          x: previousPoint.x + (point.x - previousPoint.x) * blend,
-          y: previousPoint.y + (point.y - previousPoint.y) * blend,
+          x: previousPoint.x + (point.x - previousPoint.x) * smoothing,
+          y: previousPoint.y + (point.y - previousPoint.y) * smoothing,
         };
         const stabilizedDistance = Math.hypot(
           stabilizedPoint.x - previousPoint.x,
           stabilizedPoint.y - previousPoint.y
         );
         const interpolationSteps = Math.min(
-          8,
-          Math.max(2, Math.ceil(stabilizedDistance / 2.2))
+          4,
+          Math.max(1, Math.floor(stabilizedDistance / 3.5))
         );
 
         for (let step = 1; step <= interpolationSteps; step += 1) {
           const t = step / interpolationSteps;
-          const easedT = 1 - (1 - t) * (1 - t);
           stroke.points.push({
-            x:
-              previousPoint.x +
-              (stabilizedPoint.x - previousPoint.x) * easedT,
-            y:
-              previousPoint.y +
-              (stabilizedPoint.y - previousPoint.y) * easedT,
+            x: previousPoint.x + (stabilizedPoint.x - previousPoint.x) * t,
+            y: previousPoint.y + (stabilizedPoint.y - previousPoint.y) * t,
           });
         }
 
@@ -3771,6 +3824,55 @@ export default function Page() {
     setOffset(nextOffset);
   };
 
+  const commitActiveText = () => {
+    if (!activeText) return;
+
+    if (activeText.value.length > 0 || activeText.backgroundColor) {
+      const safeScreenFontSize = clampTextFontSize(activeText.fontSize);
+      const commitZoom = zoomRef.current || activeTextZoomRef.current || 1;
+      const nextText: TextElement = {
+        kind: "text",
+        point: activeText.point,
+        value: activeText.value,
+        color: activeText.color,
+        runs: activeText.runs.map((run) => ({
+          ...run,
+          fontSize: clampTextFontSize(run.fontSize, safeScreenFontSize),
+        })),
+        fontFamily: activeText.fontFamily,
+        fontWeight: activeText.fontWeight,
+        fontSize: safeScreenFontSize,
+        fontStyle: activeText.fontStyle,
+        underline: activeText.underline,
+        textAlign: activeText.textAlign,
+        width: Math.max(1, activeText.width),
+        height: Math.max(1, activeText.height),
+        measurementSpace: "screen",
+        measurementZoom: commitZoom,
+        backgroundColor: activeText.backgroundColor,
+      };
+
+      setElements((prev) => {
+        if (activeText.editingIndex === undefined) {
+          return [...prev, nextText];
+        }
+
+        return prev.map((element, index) =>
+          index === activeText.editingIndex ? nextText : element
+        );
+      });
+    }
+
+    setActiveText(null);
+    setTextSizeMenu(null);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextColorMenu(false);
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setShowTextBoxOpacityMenu(false);
+  };
+
   const copySelection = () => {
     if (!selectionBox) return;
 
@@ -3798,7 +3900,57 @@ export default function Page() {
     setSelectionMenu(null);
   };
 
-  const openTextAtPoint = (_point: Point) => false;
+  const openTextAtPoint = (point: Point) => {
+    const textIndex = elements.findLastIndex(
+      (element) =>
+        element.kind === "text" &&
+        pointInBounds(point, getTextBounds(element))
+    );
+
+    if (textIndex === -1) return false;
+
+    const textElement = elements[textIndex];
+    if (textElement.kind !== "text") return false;
+
+    const textElementFontSize = clampTextFontSize(
+      getTextLengthInScreen(textElement, textElement.fontSize),
+      textElement.fontSize
+    );
+    setTextFontFamily(textElement.fontFamily);
+    setTextFontWeight(getTextFontWeight(textElement));
+    syncTextColorControls(textElement.color);
+    setTextSelection({
+      start: textElement.value.length,
+      end: textElement.value.length,
+    });
+    activeTextZoomRef.current = zoomRef.current;
+    setActiveText({
+      point: textElement.point,
+      screenPoint: {
+        x: textElement.point.x * zoomRef.current + offsetRef.current.x,
+        y:
+          textElement.point.y * zoomRef.current +
+          offsetRef.current.y +
+          topBarHeight,
+      },
+      value: textElement.value,
+      color: textElement.color,
+      runs: getScreenTextRuns(textElement),
+      width: Math.max(2, getTextLengthInScreen(textElement, textElement.width)),
+      height: Math.max(24, getTextLengthInScreen(textElement, textElement.height)),
+      fontSize: textElementFontSize,
+      fontFamily: textElement.fontFamily,
+      fontWeight: getTextFontWeight(textElement),
+      fontStyle: textElement.fontStyle ?? "normal",
+      underline: textElement.underline ?? false,
+      typingFontSize: textElementFontSize,
+      textAlign: textElement.textAlign ?? "left",
+      backgroundColor: textElement.backgroundColor,
+      editingIndex: textIndex,
+    });
+    setTool("cursor");
+    return true;
+  };
 
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     syncPenCursorPoint(e);
@@ -3825,7 +3977,9 @@ export default function Page() {
       if (e.button === 0) {
         const point = getCanvasCoordinates(e);
 
-        
+        if (activeText) {
+          commitActiveText();
+        }
 
         if (openTextAtPoint(point)) {
           return;
@@ -3841,7 +3995,9 @@ export default function Page() {
       return;
     }
 
-    
+    if (tool === "text" || tool === "textbox") {
+      return;
+    }
 
     const { x, y } = getCanvasCoordinates(e);
 
@@ -3867,9 +4023,6 @@ export default function Page() {
 
     if (tool === "pen" || tool === "eraser") {
       e.preventDefault();
-      if (tool === "pen") {
-        setShowPenMenu(false);
-      }
       currentStroke.current = {
         kind: "stroke",
         points: [{ x, y }],
@@ -3885,7 +4038,84 @@ export default function Page() {
     setIsDrawing(true);
   };
 
-  const handleCanvasClick = () => {};
+  const handleCanvasClick = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    if (tool !== "text" && tool !== "textbox") return;
+
+    const { x, y } = getCanvasCoordinates(e);
+
+    if (activeText) {
+      commitActiveText();
+    }
+
+    if (openTextAtPoint({ x, y })) {
+      return;
+    }
+
+    if (tool === "textbox") {
+      return;
+    }
+
+    syncTextColorControls(penColor);
+    setTextSelection({ start: 0, end: 0 });
+    activeTextZoomRef.current = zoomRef.current;
+    setActiveText({
+      point: { x, y },
+      screenPoint: { x: e.clientX, y: e.clientY },
+      value: "",
+      color: penColor,
+      runs: [],
+      width: 48,
+      height: 30,
+      fontSize: 24,
+      fontFamily: textFontFamily,
+      fontWeight: textFontWeight,
+      fontStyle: "normal",
+      underline: false,
+      typingFontSize: 24,
+      textAlign: "left",
+      editingIndex: undefined,
+    });
+    setTool("cursor");
+  };
+
+  const handleTextContextMenu = (e: React.MouseEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget;
+    const selectionStart = target.selectionStart;
+    const selectionEnd = target.selectionEnd;
+
+    if (
+      selectionStart === null ||
+      selectionEnd === null ||
+      selectionStart === selectionEnd
+    ) {
+      return;
+    }
+
+    e.preventDefault();
+    setSelectionMenu(null);
+    setTextSizeMenu({ x: e.clientX, y: e.clientY });
+  };
+
+  const startDraggingActiveText = (clientX: number, clientY: number) => {
+    if (!activeText || (!activeText.value.length && !activeText.backgroundColor)) {
+      return false;
+    }
+
+    setTextSizeMenu(null);
+    setShowTextStyleMenu(false);
+    setShowTextFormatMenu(false);
+    setShowTextColorMenu(false);
+    setShowTextAlignMenu(false);
+    setShowTextListMenu(false);
+    setShowTextBoxOpacityMenu(false);
+    isDraggingTextRef.current = true;
+    textDragStart.current = {
+      screen: { x: clientX, y: clientY },
+      textScreen: activeText.screenPoint,
+    };
+
+    return true;
+  };
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
     syncPenCursorPoint(e);
@@ -3966,10 +4196,7 @@ export default function Page() {
       }
 
       if (didAppendPoint) {
-        if (
-          currentStroke.current?.tool === "pen" &&
-          currentStroke.current.style === "solid"
-        ) {
+        if (currentStroke.current?.tool === "pen") {
           drawLivePenStrokeSegment();
         } else {
           scheduleRedrawCanvas();
@@ -3981,6 +4208,7 @@ export default function Page() {
 
   const clearCanvas = () => {
     setElements([]);
+    setActiveText(null);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -4120,20 +4348,11 @@ export default function Page() {
   };
 
   const canvasCursor: string =
-    isPanning || tool === "pen"
-      ? "none"
-      : tool === "cursor"
-      ? isSelecting
-        ? "crosshair"
-        : "default"
-      : tool === "text"
-      ? "text"
-      : tool === "eraser"
-      ? "cell"
-      : "crosshair";
+    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? "crosshair" : "default" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : "crosshair";
 
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
+  const isTextBoxActive = tool === "textbox";
   const isPenActive = tool === "pen";
   const isDarkCanvas = canvasBackground === darkCanvasColor;
   const isGreyCanvas = canvasBackground === greyCanvasColor;
@@ -4169,12 +4388,85 @@ export default function Page() {
     : isGreyCanvas
     ? "#596579"
     : "#ffffff";
+  const activeTextToolbar = activeText
+    ? (() => {
+        const viewportWidth =
+          typeof window === "undefined" ? 0 : window.innerWidth;
+        const margin = 12;
+        const toolbarWidth = viewportWidth
+          ? Math.min(390, Math.max(360, viewportWidth - margin * 2))
+          : 390;
+        const centeredLeft =
+          activeText.screenPoint.x + activeText.width / 2 - toolbarWidth / 2;
+        const left = viewportWidth
+          ? Math.min(
+              Math.max(margin, centeredLeft),
+              Math.max(margin, viewportWidth - toolbarWidth - margin)
+            )
+          : centeredLeft;
+        const topAbove = activeText.screenPoint.y - 58;
+        const topBelow = activeText.screenPoint.y + activeText.height + 14;
+
+        return {
+          left,
+          top: topAbove > topBarHeight + margin ? topAbove : topBelow,
+          width: toolbarWidth,
+        };
+      })()
+    : null;
+  const activeTextFont =
+    textFonts.find(
+      (font) =>
+        font.family === activeText?.fontFamily &&
+        font.weight === activeText.fontWeight
+    ) ?? textFonts[0];
+  const activeTextColor = activeText
+    ? parseCssColor(activeText.color).hex
+    : textColorBase;
+  const activeTextBoxOpacity = activeText?.backgroundColor
+    ? Math.round(parseCssColor(activeText.backgroundColor).opacity * 100)
+    : Math.round(textBoxOpacity * 100);
+  const activeTextLayoutSize = activeText
+    ? clampTextFontSize(activeText.value ? activeText.fontSize : activeText.typingFontSize)
+    : 24;
+  const activeTextSize = activeText
+    ? clampTextFontSize(activeText.typingFontSize)
+    : 24;
+  const activeTextDisplayRuns = activeText
+    ? activeText.runs.length
+      ? activeText.runs.map((run) => ({ ...run }))
+      : getTextRuns({
+          value: activeText.value,
+          color: activeText.color,
+          fontFamily: activeText.fontFamily,
+          fontWeight: activeText.fontWeight,
+          fontSize: activeTextLayoutSize,
+          fontStyle: activeText.fontStyle,
+          underline: activeText.underline,
+        })
+    : [];
+  const activeTextContentHeight = activeText
+    ? getTextRunsContentHeight(activeTextDisplayRuns, activeTextLayoutSize)
+    : activeTextLayoutSize * textLineHeight;
+  const activeTextBoxPaddingTop = activeText?.backgroundColor
+    ? textPaddingY +
+      Math.max(
+        0,
+        (activeText.height - textPaddingY * 2 - activeTextContentHeight) / 2
+      )
+    : textPaddingY;
 
   return (
-
     <div
       onMouseDown={() => {
         setSelectionMenu(null);
+        setTextSizeMenu(null);
+        setShowTextStyleMenu(false);
+        setShowTextFormatMenu(false);
+        setShowTextColorMenu(false);
+        setShowTextAlignMenu(false);
+        setShowTextListMenu(false);
+        setShowTextBoxOpacityMenu(false);
       }}
       style={{
         width: "100vw",
@@ -4294,17 +4586,1078 @@ export default function Page() {
         </div>
       )}
 
-      <KonvaTextPrototype
-        key={`konva-text-prototype-${textToolSession}`}
-        topOffset={topBarHeight}
-        active={tool === "text"}
-        interactive={tool === "text"}
-        toolbarBackground={toolbarBackground}
-        panelBorderColor={panelBorderColor}
-        panelTextColor={panelTextColor}
-        panelDividerColor={panelDividerColor}
-        selectedControlBackground={selectedControlBackground}
-      />
+      {activeText && (
+        <>
+          {activeTextToolbar && (
+            <div
+              onMouseDown={(e) => e.stopPropagation()}
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: "fixed",
+                top: `${activeTextToolbar.top}px`,
+                left: `${activeTextToolbar.left}px`,
+                width: `${activeTextToolbar.width}px`,
+                minHeight: "38px",
+                padding: "5px 7px",
+                borderRadius: "10px",
+                background: popoverBackground,
+                color: panelTextColor,
+                border: `1px solid ${panelBorderColor}`,
+                boxShadow: "0 14px 34px rgba(0,0,0,0.18)",
+                display: "flex",
+                alignItems: "center",
+                flexWrap: "wrap",
+                gap: "5px",
+                boxSizing: "border-box",
+                zIndex: 95,
+              }}
+            >
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingRight: "6px",
+                  borderRight: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose writing style"
+                  title="Choose writing style"
+                  onClick={() => {
+                    setShowTextColorMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextStyleMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "36px",
+                    height: "28px",
+                    borderRadius: "6px",
+                    border: "none",
+                    background: "transparent",
+                    color: panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontFamily: activeTextFont.family,
+                    fontSize: "14px",
+                    fontWeight: activeTextFont.weight,
+                    lineHeight: 1,
+                  }}
+                >
+                  {activeTextFont.preview}
+                </button>
+
+                {showTextStyleMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      gap: "6px",
+                      padding: "8px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 110,
+                    }}
+                  >
+                    {textFonts.map((font) => (
+                      <button
+                        key={font.name}
+                        aria-label={`${font.name} writing style`}
+                        title={`${font.name} writing style`}
+                        onClick={() => applyTextFont(font.family, font.weight)}
+                        style={{
+                          width: "34px",
+                          height: "28px",
+                          borderRadius: "7px",
+                          border:
+                            activeText.fontFamily === font.family &&
+                            activeText.fontWeight === font.weight
+                              ? "2px solid #7c3aed"
+                              : `1px solid ${panelBorderColor}`,
+                          background:
+                            activeText.fontFamily === font.family &&
+                            activeText.fontWeight === font.weight
+                              ? selectedControlBackground
+                              : controlBackground,
+                          color: panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                          fontFamily: font.family,
+                          fontSize: "14px",
+                          fontWeight: font.weight,
+                          lineHeight: 1,
+                        }}
+                      >
+                        {font.preview}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: "4px",
+                }}
+              >
+                <input
+                  aria-label="Text size"
+                  inputMode="numeric"
+                  value={activeTextSize}
+                  onChange={(e) => {
+                    const value = e.target.value.trim();
+                    if (!value) return;
+                    applyTextSize(Number(value));
+                  }}
+                  style={{
+                    width: "45px",
+                    height: "28px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: controlBackground,
+                    color: panelTextColor,
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    textAlign: "center",
+                    outline: "none",
+                    boxSizing: "border-box",
+                  }}
+                />
+                <div
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    justifyContent: "center",
+                    gap: "1px",
+                    width: "16px",
+                    height: "28px",
+                  }}
+                >
+                  <button
+                    aria-label="Increase text size"
+                    onClick={() => applyTextSize(activeTextSize + 1)}
+                    style={{
+                      width: "16px",
+                      height: "13px",
+                      border: "none",
+                      background: "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <ChevronUp size={16} strokeWidth={2.5} />
+                  </button>
+                  <button
+                    aria-label="Decrease text size"
+                    onClick={() => applyTextSize(activeTextSize - 1)}
+                    style={{
+                      width: "16px",
+                      height: "13px",
+                      border: "none",
+                      background: "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      padding: 0,
+                      cursor: "pointer",
+                    }}
+                  >
+                    <ChevronDown size={16} strokeWidth={2.5} />
+                  </button>
+                </div>
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text formatting"
+                  title="Choose text formatting"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextFormatMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "38px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextFormatMenu
+                      ? "#4f7cff"
+                      : "transparent",
+                    color: showTextFormatMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontSize: "16px",
+                    fontWeight: 800,
+                    lineHeight: 1,
+                  }}
+                >
+                  AA
+                </button>
+
+                {showTextFormatMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      padding: "4px",
+                      borderRadius: "10px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 112,
+                    }}
+                  >
+                    {(["bold", "italic", "underline"] as const).map((format) => {
+                      const isActive =
+                        format === "bold"
+                          ? activeText.fontWeight >= 700
+                          : format === "italic"
+                          ? activeText.fontStyle === "italic"
+                          : activeText.underline;
+
+                      return (
+                      <button
+                        key={format}
+                        aria-label={
+                          format === "bold"
+                            ? "Bold"
+                            : format === "italic"
+                            ? "Italic"
+                            : "Underline"
+                        }
+                        title={
+                          format === "bold"
+                            ? "Bold"
+                            : format === "italic"
+                            ? "Italic"
+                            : "Underline"
+                        }
+                        onClick={() => applyTextFormat(format)}
+                        style={{
+                          width: "34px",
+                          height: "30px",
+                          borderRadius: "7px",
+                          border: "none",
+                          background: isActive
+                            ? "#4f7cff"
+                            : "transparent",
+                          color: isActive ? "#ffffff" : panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {format === "bold" ? (
+                          <Bold size={19} strokeWidth={3} />
+                        ) : format === "italic" ? (
+                          <Italic size={19} strokeWidth={3} />
+                        ) : (
+                          <Underline size={19} strokeWidth={3} />
+                        )}
+                      </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              {activeText.backgroundColor && (
+                <div
+                  style={{
+                    position: "relative",
+                    display: "flex",
+                    alignItems: "center",
+                    paddingLeft: "6px",
+                    borderLeft: `1px solid ${panelDividerColor}`,
+                  }}
+                >
+                  <button
+                    aria-label="Square opacity"
+                    title="Square opacity"
+                    onClick={() => {
+                      setShowTextStyleMenu(false);
+                      setShowTextFormatMenu(false);
+                      setShowTextColorMenu(false);
+                      setShowTextAlignMenu(false);
+                      setShowTextListMenu(false);
+                      setShowTextBoxOpacityMenu((prev) => !prev);
+                    }}
+                    style={{
+                      width: "32px",
+                      height: "28px",
+                      borderRadius: "7px",
+                      border: "none",
+                      background: showTextBoxOpacityMenu
+                        ? selectedControlBackground
+                        : "transparent",
+                      color: panelTextColor,
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                      padding: 0,
+                    }}
+                  >
+                    <svg
+                      aria-hidden="true"
+                      width="20"
+                      height="20"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      xmlns="http://www.w3.org/2000/svg"
+                    >
+                      <circle
+                        cx="12"
+                        cy="12"
+                        r="8"
+                        stroke="currentColor"
+                        strokeWidth="2.4"
+                      />
+                      <path
+                        d="M12 4a8 8 0 0 1 0 16V4Z"
+                        fill="currentColor"
+                        opacity="0.35"
+                      />
+                    </svg>
+                  </button>
+
+                  {showTextBoxOpacityMenu && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "42px",
+                        right: 0,
+                        width: "190px",
+                        padding: "10px 12px 12px",
+                        borderRadius: "12px",
+                        background: popoverBackground,
+                        color: panelTextColor,
+                        border: `1px solid ${panelBorderColor}`,
+                        boxShadow: "0 16px 36px rgba(0,0,0,0.2)",
+                        boxSizing: "border-box",
+                        zIndex: 116,
+                      }}
+                    >
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          fontSize: "13px",
+                          fontWeight: 700,
+                          marginBottom: "9px",
+                        }}
+                      >
+                        <span>Opacity</span>
+                        <span>{activeTextBoxOpacity}%</span>
+                      </div>
+                      <input
+                        aria-label="Square opacity"
+                        type="range"
+                        className="modern-range"
+                        min="10"
+                        max="100"
+                        value={activeTextBoxOpacity}
+                        onChange={(e) =>
+                          applyTextBoxOpacity(Number(e.target.value) / 100)
+                        }
+                        style={{
+                          width: "100%",
+                          accentColor: "#4f7cff",
+                        }}
+                      />
+                    </div>
+                  )}
+                </div>
+              )}
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text color"
+                  title="Choose text color"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextColorMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "32px",
+                    height: "28px",
+                    borderRadius: "7px",
+                    border: "none",
+                    background: showTextColorMenu
+                      ? selectedControlBackground
+                      : "transparent",
+                    color: activeText.color,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                    fontSize: "17px",
+                    fontWeight: 700,
+                    lineHeight: 1,
+                  }}
+                >
+                  <span
+                    style={{
+                      display: "inline-block",
+                      paddingBottom: "2px",
+                      borderBottom: `3px solid ${activeText.color}`,
+                    }}
+                  >
+                    A
+                  </span>
+                </button>
+
+                {showTextColorMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "42px",
+                      right: 0,
+                      width: "226px",
+                      padding: "11px 13px 14px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      color: panelTextColor,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 16px 36px rgba(0,0,0,0.2)",
+                      boxSizing: "border-box",
+                      zIndex: 115,
+                    }}
+                  >
+                    <div
+                      style={{
+                        fontSize: "15px",
+                        fontWeight: 500,
+                        marginBottom: "9px",
+                      }}
+                    >
+                      Opacity
+                    </div>
+                    <input
+                      aria-label="Text opacity"
+                      type="range"
+                      className="modern-range"
+                      min="10"
+                      max="100"
+                      value={Math.round(textColorOpacity * 100)}
+                      onChange={(e) =>
+                        applyTextColorOpacity(Number(e.target.value) / 100)
+                      }
+                      style={{
+                        width: "100%",
+                        accentColor: "#4f7cff",
+                        marginBottom: "11px",
+                      }}
+                    />
+                    <div
+                      style={{
+                        display: "grid",
+                        gridTemplateColumns: "repeat(6, 24px)",
+                        gap: "8px",
+                      }}
+                    >
+                      {textColorPalette.map((color) => {
+                        const isSelected = activeTextColor === color.value;
+
+                        return (
+                          <button
+                            key={`${color.name}-${color.value}`}
+                            aria-label={`${color.name} text color`}
+                            title={color.name}
+                            onClick={() => applyTextColor(color.value)}
+                            style={{
+                              width: "24px",
+                              height: "24px",
+                              borderRadius: "6px",
+                              border: isSelected
+                                ? "3px solid #4f7cff"
+                                : `1px solid ${panelBorderColor}`,
+                              background: color.value,
+                              boxShadow:
+                                color.value === "#ffffff" ||
+                                color.value === "#f8fafc"
+                                  ? "inset 0 0 0 1px rgba(15,23,42,0.12)"
+                                  : "none",
+                              cursor: "pointer",
+                              padding: 0,
+                              display: "grid",
+                              placeItems: "center",
+                            }}
+                          >
+                            {isSelected && (
+                              <Check
+                                size={14}
+                                strokeWidth={3}
+                                color={
+                                  color.value === "#ffffff" ||
+                                  color.value === "#f8fafc"
+                                    ? "#4f7cff"
+                                    : "#ffffff"
+                                }
+                              />
+                            )}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose text alignment"
+                  title="Choose text alignment"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextListMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextAlignMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "34px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextAlignMenu
+                      ? "#4f7cff"
+                      : "transparent",
+                    color: showTextAlignMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  {activeText.textAlign === "center" ? (
+                    <AlignCenter size={20} strokeWidth={2.6} />
+                  ) : activeText.textAlign === "right" ? (
+                    <AlignRight size={20} strokeWidth={2.6} />
+                  ) : (
+                    <AlignLeft size={20} strokeWidth={2.6} />
+                  )}
+                </button>
+
+                {showTextAlignMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      left: 0,
+                      display: "flex",
+                      gap: "8px",
+                      padding: "6px",
+                      borderRadius: "12px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 113,
+                    }}
+                  >
+                    {(["left", "center", "right"] as TextAlign[]).map((alignment) => {
+                      const isActive = activeText.textAlign === alignment;
+
+                      return (
+                        <button
+                          key={alignment}
+                          aria-label={`${alignment} align text`}
+                          title={`${alignment} align text`}
+                          onClick={() => applyTextAlign(alignment)}
+                          style={{
+                            width: "34px",
+                            height: "30px",
+                            borderRadius: "8px",
+                            border: isActive
+                              ? "2px solid #4f7cff"
+                              : "none",
+                            background: isActive
+                              ? "#4f7cff"
+                              : "transparent",
+                            color: isActive ? "#ffffff" : panelTextColor,
+                            display: "grid",
+                            placeItems: "center",
+                            cursor: "pointer",
+                            padding: 0,
+                          }}
+                        >
+                          {alignment === "center" ? (
+                            <AlignCenter size={20} strokeWidth={2.6} />
+                          ) : alignment === "right" ? (
+                            <AlignRight size={20} strokeWidth={2.6} />
+                          ) : (
+                            <AlignLeft size={20} strokeWidth={2.6} />
+                          )}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  display: "flex",
+                  alignItems: "center",
+                  paddingLeft: "6px",
+                  borderLeft: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                <button
+                  aria-label="Choose list style"
+                  title="Choose list style"
+                  onClick={() => {
+                    setShowTextStyleMenu(false);
+                    setShowTextFormatMenu(false);
+                    setShowTextColorMenu(false);
+                    setShowTextAlignMenu(false);
+                    setShowTextBoxOpacityMenu(false);
+                    setShowTextListMenu((prev) => !prev);
+                  }}
+                  style={{
+                    width: "34px",
+                    height: "28px",
+                    borderRadius: "8px",
+                    border: "none",
+                    background: showTextListMenu ? "#4f7cff" : "transparent",
+                    color: showTextListMenu ? "#ffffff" : panelTextColor,
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <List size={20} strokeWidth={2.6} />
+                </button>
+
+                {showTextListMenu && (
+                  <div
+                    style={{
+                      position: "absolute",
+                      top: "40px",
+                      right: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      gap: "4px",
+                      padding: "4px",
+                      borderRadius: "10px",
+                      background: popoverBackground,
+                      border: `1px solid ${panelBorderColor}`,
+                      boxShadow: "0 12px 28px rgba(0,0,0,0.16)",
+                      zIndex: 114,
+                    }}
+                  >
+                    {(["bullet", "numbered"] as const).map((listStyle) => (
+                      <button
+                        key={listStyle}
+                        aria-label={
+                          listStyle === "bullet"
+                            ? "Bulleted list"
+                            : "Numbered list"
+                        }
+                        title={
+                          listStyle === "bullet"
+                            ? "Bulleted list"
+                            : "Numbered list"
+                        }
+                        onMouseDown={(e) => e.preventDefault()}
+                        onClick={() => applyTextList(listStyle)}
+                        style={{
+                          width: "34px",
+                          height: "30px",
+                          borderRadius: "7px",
+                          border: "none",
+                          background: "transparent",
+                          color: panelTextColor,
+                          display: "grid",
+                          placeItems: "center",
+                          cursor: "pointer",
+                          padding: 0,
+                        }}
+                      >
+                        {listStyle === "bullet" ? (
+                          <List size={20} strokeWidth={2.6} />
+                        ) : (
+                          <ListOrdered size={20} strokeWidth={2.6} />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+          {(activeText.value.length > 0 || activeText.backgroundColor) && (
+            <div
+              style={{
+                position: "fixed",
+                top: `${activeText.screenPoint.y}px`,
+                left: `${activeText.screenPoint.x}px`,
+                width: `${activeText.width}px`,
+                height: `${activeText.height}px`,
+                border: "1.5px solid #2563eb",
+                boxSizing: "border-box",
+                pointerEvents: "none",
+                zIndex: 62,
+              }}
+            />
+          )}
+          {(activeText.value.length > 0 || activeText.backgroundColor) &&
+            ([
+              {
+                edge: "top",
+                x: activeText.screenPoint.x,
+                y: activeText.screenPoint.y - 4,
+                width: activeText.width,
+                height: 4,
+              },
+              {
+                edge: "right",
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y,
+                width: 4,
+                height: activeText.height,
+              },
+              {
+                edge: "bottom",
+                x: activeText.screenPoint.x,
+                y: activeText.screenPoint.y + activeText.height,
+                width: activeText.width,
+                height: 4,
+              },
+              {
+                edge: "left",
+                x: activeText.screenPoint.x - 4,
+                y: activeText.screenPoint.y,
+                width: 4,
+                height: activeText.height,
+              },
+            ]).map(({ edge, x, y, width, height }) => (
+              <div
+                key={edge}
+                role="presentation"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  startDraggingActiveText(e.clientX, e.clientY);
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  startDraggingActiveText(e.clientX, e.clientY);
+                }}
+                style={{
+                  position: "fixed",
+                  left: `${x}px`,
+                  top: `${y}px`,
+                  width: `${width}px`,
+                  height: `${height}px`,
+                  cursor: "move",
+                  zIndex: 79,
+                }}
+              />
+            ))}
+          {(activeText.value.length > 0 || activeText.backgroundColor) &&
+            ([
+              {
+                handle: "nw" as const,
+                x: activeText.screenPoint.x - 16,
+                y: activeText.screenPoint.y - 16,
+                cursor: "nwse-resize",
+              },
+              {
+                handle: "n" as const,
+                x: activeText.screenPoint.x + activeText.width / 2 - 8,
+                y: activeText.screenPoint.y - 16,
+                cursor: "ns-resize",
+              },
+              {
+                handle: "ne" as const,
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y - 16,
+                cursor: "nesw-resize",
+              },
+              {
+                handle: "e" as const,
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y + activeText.height / 2 - 8,
+                cursor: "ew-resize",
+              },
+              {
+                handle: "se" as const,
+                x: activeText.screenPoint.x + activeText.width,
+                y: activeText.screenPoint.y + activeText.height,
+                cursor: "nwse-resize",
+              },
+              {
+                handle: "s" as const,
+                x: activeText.screenPoint.x + activeText.width / 2 - 8,
+                y: activeText.screenPoint.y + activeText.height,
+                cursor: "ns-resize",
+              },
+              {
+                handle: "sw" as const,
+                x: activeText.screenPoint.x - 16,
+                y: activeText.screenPoint.y + activeText.height,
+                cursor: "nesw-resize",
+              },
+              {
+                handle: "w" as const,
+                x: activeText.screenPoint.x - 16,
+                y: activeText.screenPoint.y + activeText.height / 2 - 8,
+                cursor: "ew-resize",
+              },
+            ]).map(({ handle, x, y, cursor }) => (
+              <div
+                key={handle}
+                role="presentation"
+                onMouseDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  isResizingTextRef.current = true;
+                  textResizeStart.current = {
+                    screen: { x: e.clientX, y: e.clientY },
+                    screenPoint: activeText.screenPoint,
+                    width: activeText.width,
+                    height: activeText.height,
+                    fontSize: activeTextLayoutSize,
+                    runs: activeText.runs,
+                    handle,
+                  };
+                }}
+                onPointerDown={(e) => {
+                  e.stopPropagation();
+                  e.preventDefault();
+                  e.currentTarget.setPointerCapture(e.pointerId);
+                  isResizingTextRef.current = true;
+                  textResizeStart.current = {
+                    screen: { x: e.clientX, y: e.clientY },
+                    screenPoint: activeText.screenPoint,
+                    width: activeText.width,
+                    height: activeText.height,
+                    fontSize: activeTextLayoutSize,
+                    runs: activeText.runs,
+                    handle,
+                  };
+                }}
+                style={{
+                  position: "fixed",
+                  left: `${x}px`,
+                  top: `${y}px`,
+                  width: "16px",
+                  height: "16px",
+                  border: "4px solid transparent",
+                  background: "transparent",
+                  boxSizing: "border-box",
+                  cursor,
+                  zIndex: 80,
+                }}
+              >
+                <span
+                  style={{
+                    position: "absolute",
+                    inset: "4px",
+                    border: "1.5px solid #2563eb",
+                    background: canvasFillColor,
+                    boxSizing: "border-box",
+                    pointerEvents: "none",
+                  }}
+                />
+              </div>
+            ))}
+          <textarea
+            ref={textInputRef}
+            className="custom-text-input"
+            autoFocus
+            wrap="off"
+            value={activeText.value}
+            onChange={(e) => {
+              const value = e.target.value;
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+              const scrollWidth = e.currentTarget.scrollWidth;
+              const scrollHeight = e.currentTarget.scrollHeight;
+              setActiveText((prev) => {
+                if (!prev) return prev;
+
+                const nextColor = prev.color;
+                const nextRuns = updateTextRuns(
+                  prev.value,
+                  value,
+                  prev.runs,
+                  nextColor,
+                  prev.fontFamily,
+                  prev.fontWeight,
+                  clampTextFontSize(prev.typingFontSize),
+                  prev.fontStyle,
+                  prev.underline
+                );
+                const nextSize = getTextRunsEditorSize(
+                  nextRuns,
+                  clampTextFontSize(prev.fontSize)
+                );
+
+                return {
+                  ...prev,
+                  value,
+                  runs: nextRuns,
+                  ...keepTextBoxInViewport(
+                    prev.screenPoint,
+                    Math.max(prev.width, nextSize.width, scrollWidth),
+                    Math.max(prev.height, nextSize.height, scrollHeight)
+                  ),
+                };
+              });
+            }}
+            onInput={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+            }}
+            onScroll={(e) => keepTextInputAligned(e.currentTarget)}
+            onSelect={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+            }}
+            onMouseUp={(e) => {
+              const target = e.currentTarget;
+              keepTextInputAligned(target);
+              syncTextSelection(target);
+              setActiveText((prev) =>
+                prev
+                  ? {
+                      ...prev,
+                      ...keepTextBoxInViewport(
+                        prev.screenPoint,
+                        target.offsetWidth,
+                        target.offsetHeight
+                      ),
+                    }
+                  : prev
+              );
+            }}
+            onKeyUp={(e) => syncTextSelection(e.currentTarget)}
+            onClick={(e) => e.stopPropagation()}
+            onMouseDown={(e) => {
+              e.stopPropagation();
+              syncTextSelection(e.currentTarget);
+            }}
+            onPointerDown={(e) => {
+              e.stopPropagation();
+              syncTextSelection(e.currentTarget);
+            }}
+            onContextMenu={handleTextContextMenu}
+            onKeyDown={(e) => {
+              keepTextInputAligned(e.currentTarget);
+              syncTextSelection(e.currentTarget);
+
+              if (continueTextList(e)) {
+                return;
+              }
+
+              if (e.key === "Escape") {
+                setActiveText(null);
+              }
+
+              if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+                commitActiveText();
+              }
+            }}
+            style={{
+              position: "fixed",
+              top: `${activeText.screenPoint.y}px`,
+              left: `${activeText.screenPoint.x}px`,
+              width: `${activeText.width}px`,
+              height: `${activeText.height}px`,
+              minWidth:
+                activeText.value.length > 0 || activeText.backgroundColor
+                  ? "48px"
+                  : "2px",
+              minHeight:
+                activeText.value.length > 0 || activeText.backgroundColor
+                  ? "30px"
+                  : "24px",
+              padding:
+                activeText.value.length > 0 || activeText.backgroundColor
+                  ? activeText.backgroundColor
+                    ? `${activeTextBoxPaddingTop}px ${textPaddingX}px 0`
+                    : `${textPaddingY}px ${textPaddingX}px`
+                  : 0,
+              border: "none",
+              borderRadius: "2px",
+              outline: "none",
+              background: "transparent",
+              boxShadow: "none",
+              color: activeText.color,
+              caretColor: activeText.color,
+              fontSize: `${activeTextLayoutSize}px`,
+              fontFamily: activeText.fontFamily,
+              fontWeight: activeText.fontWeight,
+              fontStyle: activeText.fontStyle,
+              lineHeight: textLineHeight,
+              whiteSpace: "pre",
+              textAlign: activeText.textAlign,
+              resize: "none",
+              overflow: "hidden",
+              boxSizing: "border-box",
+              zIndex: 60,
+              cursor: "text",
+              ...textEditorTypography,
+            }}
+          />
+        </>
+      )}
 
       {selectionMenu && (
         <div
@@ -4354,6 +5707,72 @@ export default function Page() {
           >
             Delete
           </button>
+        </div>
+      )}
+
+      {textSizeMenu && (
+        <div
+          onMouseDown={(e) => e.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: `${textSizeMenu.y}px`,
+            left: `${textSizeMenu.x}px`,
+            display: "flex",
+            flexDirection: "column",
+            minWidth: "110px",
+            maxWidth: "130px",
+            padding: "8px",
+            borderRadius: "16px",
+            background: popoverBackground,
+            boxShadow: "0 12px 28px rgba(0,0,0,0.14)",
+            border: `1px solid ${panelBorderColor}`,
+            zIndex: 90,
+          }}
+        >
+          <div
+            style={{
+              marginBottom: "8px",
+              fontSize: "13px",
+              fontWeight: 700,
+              color: panelTextColor,
+            }}
+          >
+            Text size
+          </div>
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              maxHeight: "220px",
+              overflowY: "auto",
+              paddingRight: "2px",
+            }}
+          >
+            {Array.from({ length: 100 }, (_, index) => index + 1).map((size) => (
+              <button
+                key={size}
+                onClick={() => {
+                  applyTextSize(size);
+                  setTextSizeMenu(null);
+                }}
+                style={{
+                  width: "100%",
+                  padding: "8px 10px",
+                  border: "none",
+                  borderRadius: "10px",
+                  background: "transparent",
+                  color: panelTextColor,
+                  textAlign: "left",
+                  fontSize: "13px",
+                  fontWeight: 500,
+                  cursor: "pointer",
+                  borderBottom: `1px solid ${panelDividerColor}`,
+                }}
+              >
+                {size}
+              </button>
+            ))}
+          </div>
         </div>
       )}
 
@@ -4413,9 +5832,7 @@ export default function Page() {
                   }}
                 >
                   <span style={{ fontSize: "24px" }}>
-                    {authStep === "verify"
-                      ? "Verify email"
-                      : authMode === "register"
+                    {authMode === "register"
                       ? "Utworz konto"
                       : "Zaloguj sie"}
                   </span>
@@ -4455,7 +5872,7 @@ export default function Page() {
 
             <div
               style={{
-                display: authStep === "credentials" ? "grid" : "none",
+                display: "grid",
                 gridTemplateColumns: "1fr 1fr",
                 gap: "10px",
                 marginBottom: "14px",
@@ -4484,7 +5901,7 @@ export default function Page() {
 
             <div
               style={{
-                display: authStep === "credentials" ? "flex" : "none",
+                display: "flex",
                 alignItems: "center",
                 gap: "10px",
                 margin: "12px 0",
@@ -4498,7 +5915,7 @@ export default function Page() {
               <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
             </div>
 
-            {authMode === "register" && authStep === "credentials" && (
+            {authMode === "register" && (
               <label
                 style={{
                   display: "block",
@@ -4572,7 +5989,6 @@ export default function Page() {
                   autoComplete="email"
                   placeholder="twoj@email.pl"
                   value={authEmail}
-                  readOnly={authStep === "verify"}
                   onChange={(e) => setAuthEmail(e.currentTarget.value)}
                   style={{
                     width: "100%",
@@ -4593,7 +6009,7 @@ export default function Page() {
 
             <label
               style={{
-                display: authStep === "credentials" ? "block" : "none",
+                display: "block",
                 marginBottom: "14px",
               }}
             >
@@ -4644,7 +6060,7 @@ export default function Page() {
               </div>
             </label>
 
-            {authMode === "register" && authStep === "credentials" && (
+            {authMode === "register" && (
               <label style={{ display: "block", marginBottom: "14px" }}>
                 <span
                   style={{
@@ -4694,74 +6110,9 @@ export default function Page() {
               </label>
             )}
 
-            {authStep === "verify" && (
-              <div style={{ marginBottom: "14px" }}>
-                <label style={{ display: "block", marginBottom: "10px" }}>
-                  <span
-                    style={{
-                      display: "block",
-                      marginBottom: "6px",
-                      color: "#475569",
-                      fontSize: "13px",
-                      fontWeight: 700,
-                    }}
-                  >
-                    Verification code
-                  </span>
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    autoComplete="one-time-code"
-                    maxLength={6}
-                    placeholder="123456"
-                    value={authCode}
-                    onChange={(e) =>
-                      setAuthCode(
-                        e.currentTarget.value.replace(/\D/g, "").slice(0, 6)
-                      )
-                    }
-                    style={{
-                      width: "100%",
-                      height: "50px",
-                      padding: "0 16px",
-                      borderRadius: "14px",
-                      border: "1px solid rgba(15,23,42,0.14)",
-                      background: "#ffffff",
-                      color: "#111827",
-                      fontSize: "22px",
-                      fontWeight: 800,
-                      letterSpacing: "0.18em",
-                      textAlign: "center",
-                      boxSizing: "border-box",
-                      outlineColor: "#7c3aed",
-                    }}
-                  />
-                </label>
-                <button
-                  type="button"
-                  onClick={resendVerificationCode}
-                  disabled={isAuthSubmitting}
-                  style={{
-                    border: "none",
-                    background: "transparent",
-                    color: "#7c3aed",
-                    fontSize: "13px",
-                    fontWeight: 800,
-                    cursor: isAuthSubmitting ? "default" : "pointer",
-                    padding: 0,
-                  }}
-                >
-                  Send a new code
-                </button>
-              </div>
-            )}
-
             <div
               style={{
-                display:
-                  authMode === "login" && authStep === "credentials"
-                    ? "flex"
-                    : "none",
+                display: authMode === "login" ? "flex" : "none",
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "12px",
@@ -4777,13 +6128,16 @@ export default function Page() {
               </label>
               <button
                 type="button"
+                onClick={requestPasswordReset}
+                disabled={isAuthSubmitting}
                 style={{
                   border: "none",
                   background: "transparent",
                   color: "#7c3aed",
                   fontSize: "13px",
                   fontWeight: 800,
-                  cursor: "pointer",
+                  cursor: isAuthSubmitting ? "default" : "pointer",
+                  opacity: isAuthSubmitting ? 0.72 : 1,
                   padding: 0,
                 }}
               >
@@ -4798,17 +6152,39 @@ export default function Page() {
                   padding: "10px 12px",
                   borderRadius: "12px",
                   background:
-                    authMessage.includes("utworzone")
+                    isPositiveAuthMessage
                       ? "rgba(34,197,94,0.1)"
                       : "rgba(239,68,68,0.1)",
                   color:
-                    authMessage.includes("utworzone") ? "#15803d" : "#b91c1c",
+                    isPositiveAuthMessage ? "#15803d" : "#b91c1c",
                   fontSize: "13px",
                   fontWeight: 700,
                   lineHeight: 1.3,
                 }}
               >
                 {authMessage}
+              </div>
+            )}
+
+            {canResendConfirmation && (
+              <div style={{ marginBottom: "14px" }}>
+                <button
+                  type="button"
+                  onClick={resendConfirmationEmail}
+                  disabled={isAuthSubmitting}
+                  style={{
+                    border: "none",
+                    background: "transparent",
+                    color: "#7c3aed",
+                    fontSize: "13px",
+                    fontWeight: 800,
+                    cursor: isAuthSubmitting ? "default" : "pointer",
+                    opacity: isAuthSubmitting ? 0.72 : 1,
+                    padding: 0,
+                  }}
+                >
+                  Resend confirmation email
+                </button>
               </div>
             )}
 
@@ -4833,10 +6209,8 @@ export default function Page() {
               <span style={{ fontSize: "16px" }}>
                 {isAuthSubmitting
                   ? "Please wait..."
-                  : authStep === "verify"
-                  ? "Verify email"
                   : authMode === "register"
-                  ? "Send verification code"
+                  ? "Create account"
                   : "Log in"}
               </span>
               Zaloguj się
@@ -4844,7 +6218,7 @@ export default function Page() {
 
             <div
               style={{
-                display: authStep === "credentials" ? "block" : "none",
+                display: "block",
                 marginTop: "16px",
                 textAlign: "center",
                 color: "#64748b",
@@ -5040,7 +6414,7 @@ export default function Page() {
                     <button
                       aria-label="Create board"
                       onClick={createBoard}
-                      disabled={isBoardsLoading || liveBoardsCount >= 10}
+                      disabled={isBoardsLoading || liveBoardsCount >= currentMaxBoards}
                       style={{
                       minHeight: "46px",
                       width: "100%",
@@ -5054,15 +6428,17 @@ export default function Page() {
                       justifyContent: "center",
                       gap: "10px",
                         cursor:
-                        isBoardsLoading || liveBoardsCount >= 10 ? "default" : "pointer",
-                      opacity: liveBoardsCount >= 10 ? 0.55 : 1,
+                        isBoardsLoading || liveBoardsCount >= currentMaxBoards
+                          ? "default"
+                          : "pointer",
+                      opacity: liveBoardsCount >= currentMaxBoards ? 0.55 : 1,
                       boxShadow: "0 14px 28px rgba(37,99,235,0.22)",
                       fontSize: "14px",
                       fontWeight: 500,
                     }}
                     title={
-                      liveBoardsCount >= 10
-                        ? "You can create up to 10 boards for now."
+                      liveBoardsCount >= currentMaxBoards
+                        ? `${currentPlanLabel} lets you create up to ${currentMaxBoards} boards.`
                         : "Create a new board"
                     }
                   >
@@ -5157,7 +6533,7 @@ export default function Page() {
                         fontWeight: 500,
                       }}
                     >
-                      {liveBoardsCount} / 10 boards used
+                      {liveBoardsCount} / {currentMaxBoards} boards used
                     </div>
                     <div
                       style={{
@@ -5378,8 +6754,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 14px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5399,8 +6775,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5414,8 +6790,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 16px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5432,8 +6808,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5449,8 +6825,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 14px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
@@ -5470,8 +6846,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5488,8 +6864,8 @@ export default function Page() {
                             height: "44px",
                             padding: "0 16px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(96,165,250,0.7)",
+                            background: "#eef6ff",
                             color: "#1d4ed8",
                             display: "flex",
                             alignItems: "center",
@@ -5507,8 +6883,8 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "none",
-                            background: "transparent",
+                            border: "1px solid rgba(203,213,225,0.84)",
+                            background: "#ffffff",
                             color: "#0f172a",
                             display: "grid",
                             placeItems: "center",
@@ -5711,6 +7087,7 @@ export default function Page() {
                           {[
                             {
                               name: "Basic",
+                              value: "basic" as const,
                               price: "39.99",
                               accent:
                                 "linear-gradient(180deg, rgba(124,58,237,0.08) 0%, rgba(255,255,255,0.98) 62%, rgba(59,130,246,0.06) 100%)",
@@ -5721,12 +7098,13 @@ export default function Page() {
                               checkBackground: "rgba(124,58,237,0.1)",
                               features: [
                                 "Calendar planning",
-                                "Essential boards",
+                                "Up to 5 boards",
                                 "Personal scheduling",
                               ],
                             },
                             {
                               name: "Pro",
+                              value: "pro" as const,
                               price: "59.99",
                               accent:
                                 "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
@@ -5737,13 +7115,14 @@ export default function Page() {
                               checkBackground: "rgba(255,255,255,0.18)",
                               features: [
                                 "Priority workspace",
-                                "Advanced planning flow",
+                                "Up to 12 boards",
                                 "Sharper organization tools",
                               ],
                               featured: true,
                             },
                             {
                               name: "Master",
+                              value: "master" as const,
                               price: "89.99",
                               accent:
                                 "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(255,255,255,0.98) 58%, rgba(59,130,246,0.08) 100%)",
@@ -5754,7 +7133,7 @@ export default function Page() {
                               checkBackground: "rgba(34,197,94,0.12)",
                               features: [
                                 "Full premium experience",
-                                "Top-tier scheduling feel",
+                                "Up to 25 boards",
                                 "Maximum workspace control",
                               ],
                             },
@@ -5793,6 +7172,30 @@ export default function Page() {
                                 >
                                   {plan.name}
                                 </div>
+                                {hasActivePaidSubscription &&
+                                  currentAccountPlan.toLowerCase() ===
+                                    plan.name.toLowerCase() && (
+                                  <div
+                                    style={{
+                                      height: "28px",
+                                      padding: "0 12px",
+                                      borderRadius: "999px",
+                                      background: plan.featured
+                                        ? "rgba(255,255,255,0.18)"
+                                        : "rgba(124,58,237,0.08)",
+                                      border: plan.featured
+                                        ? "1px solid rgba(255,255,255,0.18)"
+                                        : "1px solid rgba(124,58,237,0.14)",
+                                      color: plan.featured ? "#ffffff" : "#6d28d9",
+                                      display: "flex",
+                                      alignItems: "center",
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                    }}
+                                  >
+                                    Current plan
+                                  </div>
+                                )}
                                 {plan.featured && (
                                   <div
                                     style={{
@@ -5879,6 +7282,12 @@ export default function Page() {
 
                               <button
                                 type="button"
+                                onClick={() => startPlanCheckout(plan.value)}
+                                disabled={
+                                  (hasActivePaidSubscription &&
+                                    currentAccountPlan === plan.value) ||
+                                  Boolean(pendingBillingPlan)
+                                }
                                 style={{
                                   height: "44px",
                                   borderRadius: "12px",
@@ -5889,14 +7298,62 @@ export default function Page() {
                                   color: plan.buttonText,
                                   fontSize: "14px",
                                   fontWeight: 500,
-                                  cursor: "pointer",
+                                  cursor:
+                                    (hasActivePaidSubscription &&
+                                      currentAccountPlan === plan.value) ||
+                                    Boolean(pendingBillingPlan)
+                                      ? "default"
+                                      : "pointer",
+                                  opacity:
+                                    (hasActivePaidSubscription &&
+                                      currentAccountPlan === plan.value) ||
+                                    Boolean(pendingBillingPlan)
+                                      ? 0.88
+                                      : 1,
                                 }}
                               >
-                                Choose {plan.name}
+                                {pendingBillingPlan === plan.value
+                                  ? "Opening billing..."
+                                  : hasActivePaidSubscription &&
+                                    currentAccountPlan === plan.value
+                                  ? `${plan.name} active`
+                                  : currentPlanRank === 0
+                                  ? `Subscribe to ${plan.name}`
+                                  : plan.value === "basic"
+                                  ? "Switch to Basic"
+                                  : currentPlanRank < (plan.value === "master" ? 3 : 2)
+                                  ? `Upgrade to ${plan.name}`
+                                  : `Change to ${plan.name}`}
                               </button>
                             </div>
                           ))}
                         </div>
+                        {billingMessage && (
+                          <div
+                            style={{
+                              marginTop: "18px",
+                              padding: "14px 16px",
+                              borderRadius: "14px",
+                              border:
+                                billingMessageTone === "success"
+                                  ? "1px solid rgba(34,197,94,0.22)"
+                                  : "1px solid rgba(239,68,68,0.18)",
+                              background:
+                                billingMessageTone === "success"
+                                  ? "rgba(240,253,244,0.9)"
+                                  : "rgba(254,242,242,0.94)",
+                              color:
+                                billingMessageTone === "success"
+                                  ? "#166534"
+                                  : "#b91c1c",
+                              fontSize: "14px",
+                              fontWeight: 700,
+                              lineHeight: 1.45,
+                            }}
+                          >
+                            {billingMessage}
+                          </div>
+                        )}
                       </div>
                     ) : boardBrowserView === "calendar" ? (
                       <>
@@ -5957,14 +7414,14 @@ export default function Page() {
                               key={day.key}
                               style={{
                                 minHeight: "198px",
-                                borderRadius: "16px",
-                                border: "none",
+                                borderRadius: "12px",
+                                border: "1px solid rgba(214,224,238,0.95)",
                                 background: day.isToday
-                                  ? "linear-gradient(180deg, rgba(59,130,246,0.09) 0%, rgba(255,255,255,0.92) 58%, rgba(248,250,252,0.9) 100%)"
-                                  : "linear-gradient(180deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.82) 100%)",
+                                  ? "linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(255,255,255,1) 62%)"
+                                  : "#ffffff",
                                 boxShadow: day.isToday
-                                  ? "0 16px 34px rgba(59,130,246,0.08)"
-                                  : "0 10px 26px rgba(15,23,42,0.035)",
+                                  ? "0 14px 28px rgba(59,130,246,0.1)"
+                                  : "0 10px 22px rgba(15,23,42,0.045)",
                                 padding: "11px",
                                 display: "grid",
                                 alignContent: "start",
@@ -6016,13 +7473,7 @@ export default function Page() {
                                     textTransform: "uppercase",
                                   }}
                                 >
-                                  {hasActiveCalendarSearch
-                                    ? day.date.toLocaleDateString("en-US", {
-                                        month: "short",
-                                        day: "numeric",
-                                        weekday: "short",
-                                      })
-                                    : calendarDayLabel.format(day.date)}
+                                  {calendarDayLabel.format(day.date)}
                                 </span>
                               </div>
 
@@ -6334,12 +7785,10 @@ export default function Page() {
                                             fontWeight: 500,
                                           }}
                                         >
-                                          {hasActiveCalendarSearch
-                                            ? getCalendarHourRangeLabel(entry)
-                                            : getCalendarHourLabel(
-                                                entry.startHour,
-                                                "short"
-                                              )}
+                                          {getCalendarHourLabel(
+                                            entry.startHour,
+                                            "short"
+                                          )}
                                         </span>
                                         <span
                                           style={{
@@ -6395,10 +7844,10 @@ export default function Page() {
                                   }
                                   style={{
                                     height: "28px",
-                                    borderRadius: "999px",
-                                    border: "none",
-                                    background: "rgba(96,165,250,0.12)",
-                                    color: "rgba(29,78,216,0.88)",
+                                    borderRadius: "7px",
+                                    border: "1px dashed rgba(96,165,250,0.86)",
+                                    background: "rgba(239,246,255,0.68)",
+                                    color: "#1d4ed8",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
@@ -6406,7 +7855,6 @@ export default function Page() {
                                     fontSize: "12px",
                                     fontWeight: 500,
                                     cursor: "pointer",
-                                    boxShadow: "inset 0 0 0 1px rgba(96,165,250,0.18)",
                                   }}
                                 >
                                   <Plus size={12} />
@@ -6440,9 +7888,7 @@ export default function Page() {
                                   fontWeight: 750,
                                 }}
                               >
-                                {hasActiveCalendarSearch
-                                  ? "No matching schedules found"
-                                  : "No schedules on this calendar yet"}
+                                No schedules on this calendar yet
                               </div>
                               <div
                                 style={{
@@ -6452,9 +7898,8 @@ export default function Page() {
                                   lineHeight: 1.5,
                                 }}
                               >
-                                {hasActiveCalendarSearch
-                                  ? "Try a different meeting name, day, or time to find the schedule you want."
-                                  : "Add a meeting or schedule to any day and it will stay here with your board."}
+                                Add a meeting or schedule to any day and it will stay
+                                here with your board.
                               </div>
                             </div>
                           </div>
@@ -6604,7 +8049,7 @@ export default function Page() {
                                   >
                                     <button
                                       type="button"
-                                      onClick={(e) => {
+                                      onDoubleClick={(e) => {
                                         e.stopPropagation();
                                         if (isBoardsLoading || isInTrash) return;
                                         startRenamingBoard(board);
@@ -6622,8 +8067,13 @@ export default function Page() {
                                       cursor:
                                           isBoardsLoading || isInTrash
                                             ? "default"
-                                            : "text",
+                                            : "pointer",
                                       }}
+                                      title={
+                                        isBoardsLoading || isInTrash
+                                          ? undefined
+                                          : "Double-click to rename"
+                                      }
                                     >
                                       {board.name || `Board ${index + 1}`}
                                     </button>
@@ -6672,8 +8122,10 @@ export default function Page() {
                                           width: "32px",
                                           height: "32px",
                                           borderRadius: "10px",
-                                          border: "none",
-                                          background: "transparent",
+                                          border: board.starred
+                                            ? "1px solid rgba(245,158,11,0.24)"
+                                            : "1px solid rgba(148,163,184,0.18)",
+                                          background: "#ffffff",
                                           color: board.starred ? "#f59e0b" : "#64748b",
                                           display: "grid",
                                           placeItems: "center",
@@ -6698,8 +8150,8 @@ export default function Page() {
                                           width: "32px",
                                           height: "32px",
                                           borderRadius: "10px",
-                                          border: "none",
-                                          background: "transparent",
+                                          border: "1px solid rgba(239,68,68,0.16)",
+                                          background: "#ffffff",
                                           color: "#dc2626",
                                           display: "grid",
                                           placeItems: "center",
@@ -7378,7 +8830,61 @@ export default function Page() {
                         >
                           Signed in as
                           <div style={{ marginTop: "4px", color: "#7c3aed" }}>
+                            {currentAccountName || currentAccountEmail}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: "6px",
+                              color: "#64748b",
+                              fontSize: "13px",
+                              fontWeight: 600,
+                            }}
+                          >
                             {currentAccountEmail}
+                          </div>
+                        </div>
+                        <div
+                          style={{
+                            padding: "14px 16px",
+                            borderRadius: "12px",
+                            border: `1px solid ${panelBorderColor}`,
+                            background: controlBackground,
+                            color: panelTextColor,
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            lineHeight: 1.35,
+                          }}
+                        >
+                          Workspace plan
+                          <div
+                            style={{
+                              marginTop: "8px",
+                              display: "inline-flex",
+                              alignItems: "center",
+                              gap: "8px",
+                              height: "30px",
+                              padding: "0 12px",
+                              borderRadius: "999px",
+                              background: "rgba(124,58,237,0.1)",
+                              color: "#6d28d9",
+                              fontSize: "13px",
+                              fontWeight: 800,
+                              textTransform: "capitalize",
+                            }}
+                          >
+                            {currentPlanLabel}
+                          </div>
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              color: "#64748b",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              textTransform: "uppercase",
+                              letterSpacing: "0.04em",
+                            }}
+                          >
+                            {currentSubscriptionStatus.replace("_", " ")}
                           </div>
                         </div>
                         <button
@@ -7481,6 +8987,45 @@ export default function Page() {
                   }}
                 >
                   Account
+                </div>
+                <div
+                  style={{
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {currentAccountName || currentAccountEmail}
+                </div>
+                <div
+                  style={{
+                    color: "rgba(255,255,255,0.72)",
+                    fontSize: "12px",
+                    fontWeight: 500,
+                    lineHeight: 1.3,
+                  }}
+                >
+                  {currentAccountEmail}
+                </div>
+                <div
+                  style={{
+                    justifySelf: "start",
+                    height: "26px",
+                    padding: "0 10px",
+                    borderRadius: "999px",
+                    border: "1px solid rgba(255,255,255,0.16)",
+                    background: "rgba(255,255,255,0.08)",
+                    color: "#c4b5fd",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    fontSize: "11px",
+                    fontWeight: 700,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  {currentPlanLabel} plan
                 </div>
                 <button
                   type="button"
@@ -7622,7 +9167,9 @@ export default function Page() {
         <button
           aria-label="Upload files"
           onClick={() => {
-            
+            if (activeText) {
+              commitActiveText();
+            }
 
             setShowPenMenu(false);
             setShowTextMenu(false);
@@ -7672,31 +9219,32 @@ export default function Page() {
           <MousePointer2 size={17} />
         </button>
 
-        <button
-          onClick={() => {
-            setTextToolSession((current) => current + 1);
-            setTool("text");
-            setShowPenMenu(false);
-            setShowTextMenu(false);
-            setShowEraserMenu(false);
-            setShowShapesMenu(false);
-          }}
-          style={{
-            width: "38px",
-            height: "38px",
-            borderRadius: "8px",
-            border: "none",
-            background: isTextActive ? "#7c3aed" : inactiveToolBackground,
-            color: isTextActive ? "white" : panelTextColor,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            cursor: "pointer",
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Type size={17} />
-        </button>
+        <div style={{ position: "relative" }}>
+          <button
+            onClick={() => {
+              setTool("text");
+              setShowTextMenu(false);
+              setShowPenMenu(false);
+              setShowEraserMenu(false);
+              setShowShapesMenu(false);
+            }}
+            style={{
+              width: "38px",
+              height: "38px",
+              borderRadius: "8px",
+              border: "none",
+              background: isTextActive ? "#7c3aed" : inactiveToolBackground,
+              color: isTextActive ? "white" : panelTextColor,
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              cursor: "pointer",
+              transition: "all 0.2s ease",
+            }}
+          >
+            <Type size={18} />
+          </button>
+        </div>
 
         <div style={{ position: "relative" }}>
           <button
@@ -7898,9 +9446,8 @@ export default function Page() {
                             <div
                               key={index}
                               style={{
-                                width: `${Math.min(5, Math.max(3, penWidth / 5))}px`,
-                                height: `${Math.min(5, Math.max(3, penWidth / 5))}px`,
-                                borderRadius: "999px",
+                                width: "3px",
+                                height: "3px",
                                 background: panelTextColor,
                               }}
                             />
@@ -7921,6 +9468,7 @@ export default function Page() {
                               style={{
                                 width: "3px",
                                 height: "3px",
+                                borderRadius: "999px",
                                 background: panelTextColor,
                               }}
                             />
@@ -8182,6 +9730,4 @@ export default function Page() {
     </div>
   );
 }
-
-
 

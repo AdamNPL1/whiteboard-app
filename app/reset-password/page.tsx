@@ -1,52 +1,71 @@
 "use client";
 
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
-export default function RegisterPage() {
-  const router = useRouter();
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+
+export default function ResetPasswordPage() {
+  const searchParams = useSearchParams();
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [message, setMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const register = async (event: FormEvent<HTMLFormElement>) => {
+  const linkStateMessage = useMemo(() => {
+    const error = searchParams.get("error");
+
+    if (error === "invalid_or_expired_link") {
+      return "This reset link is invalid or expired. Request a new one.";
+    }
+
+    if (error === "missing_code") {
+      return "Open this page from your password reset email.";
+    }
+
+    if (searchParams.get("ready") === "1") {
+      return "Enter your new password below.";
+    }
+
+    return "";
+  }, [searchParams]);
+
+  const updatePassword = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (isSubmitting) return;
 
+    if (password.length < 8) {
+      setIsSuccess(false);
+      setMessage("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setIsSuccess(false);
+      setMessage("Passwords must match.");
+      return;
+    }
+
     setIsSubmitting(true);
     setMessage("");
-    setIsSuccess(false);
 
     try {
-      const response = await fetch("/api/auth/register", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, confirmPassword }),
-      });
-      const data = (await response.json().catch(() => ({}))) as {
-        error?: string;
-        message?: string;
-        user?: { id?: string } | null;
-      };
+      const supabase = getSupabaseBrowserClient();
+      const { error } = await supabase.auth.updateUser({ password });
 
-      if (!response.ok) {
-        setMessage(data.error ?? "Could not create your account.");
-        return;
-      }
-
-      if (data.user?.id) {
-        router.push("/custom");
+      if (error) {
+        setIsSuccess(false);
+        setMessage("Could not update your password.");
         return;
       }
 
       setIsSuccess(true);
-      setMessage(data.message ?? "Check your email to confirm your account.");
+      setPassword("");
+      setConfirmPassword("");
+      setMessage("Password updated. You can now go back to the board and log in.");
     } finally {
       setIsSubmitting(false);
     }
@@ -54,36 +73,22 @@ export default function RegisterPage() {
 
   return (
     <main style={pageStyle}>
-      <form onSubmit={register} style={cardStyle}>
+      <form onSubmit={updatePassword} style={cardStyle}>
         <div>
-          <h1 style={titleStyle}>Create account</h1>
-          <p style={subtitleStyle}>We will email you a confirmation link.</p>
+          <h1 style={titleStyle}>Reset password</h1>
+          <p style={subtitleStyle}>
+            Use the link from your email, then choose a new password.
+          </p>
         </div>
 
-        <label style={labelStyle}>
-          Name
-          <input
-            type="text"
-            autoComplete="name"
-            value={name}
-            onChange={(event) => setName(event.currentTarget.value)}
-            style={inputStyle}
-          />
-        </label>
+        {linkStateMessage && (
+          <div style={linkStateMessage.includes("Enter") ? successStyle : errorStyle}>
+            {linkStateMessage}
+          </div>
+        )}
 
         <label style={labelStyle}>
-          Email
-          <input
-            type="email"
-            autoComplete="email"
-            value={email}
-            onChange={(event) => setEmail(event.currentTarget.value)}
-            style={inputStyle}
-          />
-        </label>
-
-        <label style={labelStyle}>
-          Password
+          New password
           <input
             type="password"
             autoComplete="new-password"
@@ -94,7 +99,7 @@ export default function RegisterPage() {
         </label>
 
         <label style={labelStyle}>
-          Confirm password
+          Confirm new password
           <input
             type="password"
             autoComplete="new-password"
@@ -107,11 +112,11 @@ export default function RegisterPage() {
         {message && <div style={isSuccess ? successStyle : errorStyle}>{message}</div>}
 
         <button disabled={isSubmitting} type="submit" style={buttonStyle}>
-          {isSubmitting ? "Creating account..." : "Create account"}
+          {isSubmitting ? "Updating..." : "Save new password"}
         </button>
 
         <p style={footerStyle}>
-          Already have an account? <Link href="/custom">Open board</Link>
+          Back to <Link href="/custom">the board</Link>
         </p>
       </form>
     </main>
@@ -165,7 +170,7 @@ const inputStyle: CSSProperties = {
   border: "1px solid #cbd5e1",
   color: "#111827",
   fontSize: "15px",
-  fontWeight: 600,
+  fontWeight: 700,
   outlineColor: "#7c3aed",
 };
 

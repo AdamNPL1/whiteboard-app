@@ -1,45 +1,15 @@
-import { NextResponse } from "next/server";
-import { sendVerificationEmail } from "@/lib/email";
-import {
-  createPendingUser,
-  createVerificationCode,
-  findUserByEmail,
-  normalizeEmail,
-  updatePendingUserRegistration,
-} from "@/lib/auth-store";
+import { NextRequest, NextResponse } from "next/server";
+
+import { normalizeEmail } from "@/lib/auth-utils";
+import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
+import { mapSupabaseUserToAppUser } from "@/lib/supabase-auth";
+import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
 const isValidEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email);
 
-const getEmailConfigurationError = (error: unknown) => {
-  if (!(error instanceof Error)) return null;
-
-  if (error.message.startsWith("SMTP_NOT_CONFIGURED:")) {
-    const missingKeys = error.message.split(":")[1];
-    return `Email sending is not configured. Missing: ${missingKeys}.`;
-  }
-
-  if (error.message === "SMTP_INVALID_PORT") {
-    return "SMTP_PORT must be a valid number.";
-  }
-
-  if (error.message === "SMTP_AUTH_FAILED") {
-    return "SMTP login failed. For Gmail, set SMTP_USER to the same Gmail address that owns the app password, use that app password in SMTP_PASS, and restart the dev server.";
-  }
-
-  if (error.message === "SMTP_CONNECTION_FAILED") {
-    return "Could not connect to the SMTP server. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, and whether your network or provider is blocking SMTP.";
-  }
-
-  if (error.message === "SMTP_FROM_REJECTED") {
-    return "The SMTP server rejected the sender address. Set SMTP_FROM to the same address as SMTP_USER, or leave SMTP_FROM empty so it falls back to SMTP_USER.";
-  }
-
-  return null;
-};
-
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         name?: string;
@@ -81,61 +51,81 @@ export async function POST(request: Request) {
     );
   }
 
-  const verificationCode = createVerificationCode();
+  const responseCookies: Array<{
+    name: string;
+    value: string;
+    options: Parameters<NextResponse["cookies"]["set"]>[2];
+  }> = [];
+  const supabase = createSupabaseServerAuthClient({
+    getAll: () => request.cookies.getAll(),
+    setAll: (cookiesToSet) => {
+      cookiesToSet.forEach(({ name, value, options }) => {
+        responseCookies.push({ name, value, options });
+      });
+    },
+  });
 
-  try {
-    const { data, user: existingUser } = await findUserByEmail(email);
-    if (existingUser?.emailVerified) {
-      return NextResponse.json(
-        { error: "An account with this email already exists." },
-        { status: 409 }
-      );
-    }
-
-    await sendVerificationEmail({
-      to: email,
-      name,
-      code: verificationCode,
-    });
-
-    if (existingUser) {
-      await updatePendingUserRegistration(
-        data,
-        existingUser,
+  const {
+    data: { user, session },
+    error,
+  } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      emailRedirectTo: `${request.nextUrl.origin}/auth/callback?next=/custom`,
+      data: {
         name,
-        password,
-        verificationCode
-      );
-    } else {
-      await createPendingUser(name, email, password, verificationCode);
-    }
+      },
+    },
+  });
 
-    return NextResponse.json({
-      ok: true,
-      email,
-      message: existingUser
-        ? "A new verification code was sent. Check your email."
-        : "Verification code sent. Check your email.",
-    });
-  } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_EXISTS") {
+  if (error) {
+    const errorMessage = error.message.toLowerCase();
+
+    if (
+      errorMessage.includes("already registered") ||
+      errorMessage.includes("already been registered") ||
+      errorMessage.includes("user already exists")
+    ) {
       return NextResponse.json(
         { error: "An account with this email already exists." },
         { status: 409 }
       );
     }
 
-    const configurationError = getEmailConfigurationError(error);
-    if (configurationError) {
-      return NextResponse.json({ error: configurationError }, { status: 500 });
+    if (
+      errorMessage.includes("password") &&
+      (errorMessage.includes("weak") || errorMessage.includes("strength"))
+    ) {
+      return NextResponse.json(
+        { error: "Password must be at least 8 characters." },
+        { status: 400 }
+      );
     }
 
     return NextResponse.json(
-      {
-        error:
-          "Could not send the verification email with the current SMTP settings. Check SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASS, and SMTP_FROM.",
-      },
+      { error: "Could not create your account." },
       { status: 500 }
     );
   }
+
+  const appUser =
+    session && user
+      ? await ensureProfileForSupabaseUser(supabase, user)
+      : mapSupabaseUserToAppUser(user);
+  const response = NextResponse.json({
+    ok: true,
+    email,
+    user: session && appUser ? appUser : null,
+    message:
+      session && appUser
+        ? "Account created successfully."
+        : "Check your email to confirm your account.",
+  });
+
+  responseCookies.forEach(({ name, value, options }) => {
+    response.cookies.set(name, value, options);
+  });
+
+  return response;
 }
