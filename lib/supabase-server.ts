@@ -3,27 +3,14 @@ import "server-only";
 import { createServerClient, type CookieOptions } from "@supabase/ssr";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  getSupabaseAnonKey,
+  getSupabaseUrl,
+} from "@/lib/supabase-public-env";
+import { getSupabaseServiceRoleKey } from "@/lib/supabase-service-role-env";
+
 let supabaseServerClient: SupabaseClient | null = null;
-
-export const getSupabaseUrl = () => {
-  const value = process.env.NEXT_PUBLIC_SUPABASE_URL;
-
-  if (!value) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL.");
-  }
-
-  return value;
-};
-
-export const getSupabaseAnonKey = () => {
-  const value = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-
-  if (!value) {
-    throw new Error("Missing NEXT_PUBLIC_SUPABASE_ANON_KEY.");
-  }
-
-  return value;
-};
+let supabaseServiceRoleClient: SupabaseClient | null = null;
 
 export const getSupabaseServerClient = () => {
   if (!supabaseServerClient) {
@@ -40,6 +27,23 @@ export const getSupabaseServerClient = () => {
   }
 
   return supabaseServerClient;
+};
+
+export const getSupabaseServiceRoleClient = () => {
+  if (!supabaseServiceRoleClient) {
+    supabaseServiceRoleClient = createClient(
+      getSupabaseUrl(),
+      getSupabaseServiceRoleKey(),
+      {
+        auth: {
+          autoRefreshToken: false,
+          persistSession: false,
+        },
+      }
+    );
+  }
+
+  return supabaseServiceRoleClient;
 };
 
 type SupabaseAuthCookieStore = {

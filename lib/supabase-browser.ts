@@ -3,7 +3,7 @@
 import { createBrowserClient } from "@supabase/ssr";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
-import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase-server";
+import { getSupabaseAnonKey, getSupabaseUrl } from "@/lib/supabase-public-env";
 
 let supabaseBrowserClient: SupabaseClient | null = null;
 
