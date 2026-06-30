@@ -370,8 +370,8 @@ export async function POST(request: NextRequest) {
           userId: profile.id,
         },
       },
-      success_url: `${appOrigin}/custom?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appOrigin}/custom?checkout=cancelled&plan=${targetPlan}`,
+      success_url: `${appOrigin}/custom?view=plan&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appOrigin}/custom?view=plan&checkout=cancelled&plan=${targetPlan}`,
     });
   } catch (error) {
     return NextResponse.json(

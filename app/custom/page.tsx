@@ -1664,6 +1664,21 @@ export default function Page() {
     isBoardsBrowserVisible && boardBrowserView === "calendar";
 
   useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const requestedView = searchParams.get("view");
+    const checkoutStatus = searchParams.get("checkout");
+
+    if (requestedView === "plan" || checkoutStatus === "success" || checkoutStatus === "cancelled") {
+      setShowBoardsMenu(true);
+      setBoardBrowserView("plan");
+    }
+  }, []);
+
+  useEffect(() => {
     if (!canUseCalendar) {
       setSelectedCalendarEntryId("");
       setEditingCalendarEntryId("");
