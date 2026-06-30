@@ -1,6 +1,11 @@
 import { randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
-import type { AppProfilePlan } from "@/lib/profile-store";
+import type {
+  AppProfilePlan,
+  AppProfileSubscriptionStatus,
+} from "@/lib/profile-store";
+import { normalizeEmail } from "@/lib/auth-utils";
+import { getSupabaseServiceRoleClient } from "@/lib/supabase-server";
 
 const trashRetentionMs = 30 * 24 * 60 * 60 * 1000;
 const isValidCalendarEntryColor = (
@@ -25,6 +30,12 @@ export type BoardDocument = {
   }[];
 };
 
+export type BoardShareSummary = {
+  id: string;
+  email: string;
+  createdAt: string;
+};
+
 export type BoardSummary = {
   id: string;
   name: string;
@@ -33,10 +44,22 @@ export type BoardSummary = {
   deletedAt?: string;
   starred?: boolean;
   previewDocument: BoardDocument;
+  ownedByUser?: boolean;
+  shareCount?: number;
+};
+
+export type WorkspaceAccess = {
+  tier: "free" | AppProfilePlan;
+  maxBoards: number;
+  maxShares: number;
+  canUseCalendar: boolean;
 };
 
 type StoredBoard = BoardSummary & {
   document: BoardDocument;
+  ownerUserId: string;
+  ownedByUser: boolean;
+  shareCount: number;
 };
 
 type UserBoardCollection = {
@@ -61,10 +84,57 @@ type UserBoardStateRow = {
   active_board_id: string | null;
 };
 
-export const getBoardLimitForPlan = (plan: AppProfilePlan) => {
-  if (plan === "master") return 25;
-  if (plan === "pro") return 12;
-  return 5;
+type BoardShareRow = {
+  id: string;
+  board_id: string;
+  owner_user_id: string;
+  shared_with_email: string;
+  created_at: string;
+  updated_at: string;
+};
+
+export const hasActivePaidSubscription = (
+  status: AppProfileSubscriptionStatus
+) =>
+  status === "trialing" || status === "active" || status === "past_due";
+
+export const getWorkspaceAccess = (
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+): WorkspaceAccess => {
+  if (!hasActivePaidSubscription(subscriptionStatus)) {
+    return {
+      tier: "free",
+      maxBoards: 1,
+      maxShares: 0,
+      canUseCalendar: false,
+    };
+  }
+
+  if (plan === "master") {
+    return {
+      tier: "master",
+      maxBoards: Number.POSITIVE_INFINITY,
+      maxShares: 10,
+      canUseCalendar: true,
+    };
+  }
+
+  if (plan === "pro") {
+    return {
+      tier: "pro",
+      maxBoards: Number.POSITIVE_INFINITY,
+      maxShares: 3,
+      canUseCalendar: true,
+    };
+  }
+
+  return {
+    tier: "basic",
+    maxBoards: 5,
+    maxShares: 1,
+    canUseCalendar: false,
+  };
 };
 
 const defaultBoardDocument = (): BoardDocument => ({
@@ -154,17 +224,38 @@ const normalizeBoardDocument = (
     : [],
 });
 
+const applyCalendarAccessToDocument = (
+  document: BoardDocument,
+  canUseCalendar: boolean
+): BoardDocument =>
+  canUseCalendar
+    ? document
+    : {
+        ...document,
+        calendarEntries: [],
+      };
+
 const isWithinTrashRetention = (deletedAt?: string) => {
   if (!deletedAt) return true;
 
   return new Date(deletedAt).getTime() + trashRetentionMs > Date.now();
 };
 
-const mapBoardRowToStoredBoard = (board: BoardRow, index: number): StoredBoard => {
+const mapBoardRowToStoredBoard = (
+  board: BoardRow,
+  index: number,
+  options?: {
+    ownedByUser?: boolean;
+    shareCount?: number;
+  }
+): StoredBoard => {
   const document = normalizeBoardDocument(board.document);
 
   return {
     id: board.id,
+    ownerUserId: board.user_id,
+    ownedByUser: options?.ownedByUser ?? true,
+    shareCount: options?.shareCount ?? 0,
     name:
       typeof board.name === "string" && board.name.trim().length > 0
         ? board.name
@@ -186,6 +277,30 @@ const summarizeBoard = (board: StoredBoard): BoardSummary => ({
   deletedAt: board.deletedAt,
   starred: board.starred,
   previewDocument: board.document,
+  ownedByUser: board.ownedByUser,
+  shareCount: board.shareCount,
+});
+
+const sanitizeStoredBoardForAccess = (
+  board: StoredBoard,
+  canUseCalendar: boolean
+): StoredBoard => ({
+  ...board,
+  previewDocument: applyCalendarAccessToDocument(
+    board.previewDocument,
+    canUseCalendar
+  ),
+  document: applyCalendarAccessToDocument(board.document, canUseCalendar),
+});
+
+const sanitizeUserBoardCollectionForAccess = (
+  entry: UserBoardCollection,
+  canUseCalendar: boolean
+): UserBoardCollection => ({
+  ...entry,
+  boards: entry.boards.map((board) =>
+    sanitizeStoredBoardForAccess(board, canUseCalendar)
+  ),
 });
 
 const serializeUserBoards = (
@@ -204,17 +319,80 @@ const serializeUserBoards = (
           id: activeBoard.id,
           name: activeBoard.name,
           document: activeBoard.document,
+          ownedByUser: activeBoard.ownedByUser,
+          shareCount: activeBoard.shareCount,
         }
       : null,
-    maxBoards,
+    maxBoards: Number.isFinite(maxBoards) ? maxBoards : null,
   };
 };
 
-const loadUserBoardRows = async (supabase: SupabaseClient, userId: string) => {
+const getBoardStoreClient = (supabase?: SupabaseClient) =>
+  supabase ?? getSupabaseServiceRoleClient();
+
+const loadOwnedBoardRows = async (supabase: SupabaseClient, userId: string) => {
   const { data, error } = await supabase
     .from("boards")
     .select("id,user_id,name,created_at,updated_at,deleted_at,starred,document")
     .eq("user_id", userId)
+    .order("created_at", { ascending: true });
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARDS_READ_FAILED:${error.message}`);
+  }
+
+  return (data ?? []) as BoardRow[];
+};
+
+const loadBoardShareRowsForOwner = async (
+  supabase: SupabaseClient,
+  userId: string
+) => {
+  const { data, error } = await supabase
+    .from("board_shares")
+    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
+    .eq("owner_user_id", userId);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${error.message}`);
+  }
+
+  return (data ?? []) as BoardShareRow[];
+};
+
+const loadBoardShareRowsForRecipient = async (
+  supabase: SupabaseClient,
+  email: string
+) => {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) {
+    return [] as BoardShareRow[];
+  }
+
+  const { data, error } = await supabase
+    .from("board_shares")
+    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
+    .eq("shared_with_email", normalizedEmail);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${error.message}`);
+  }
+
+  return (data ?? []) as BoardShareRow[];
+};
+
+const loadBoardRowsByIds = async (
+  supabase: SupabaseClient,
+  boardIds: string[]
+) => {
+  if (boardIds.length === 0) {
+    return [] as BoardRow[];
+  }
+
+  const { data, error } = await supabase
+    .from("boards")
+    .select("id,user_id,name,created_at,updated_at,deleted_at,starred,document")
+    .in("id", boardIds)
     .order("created_at", { ascending: true });
 
   if (error) {
@@ -290,30 +468,54 @@ const createBoardRecord = async (
 
 const loadUserBoardCollection = async (
   supabase: SupabaseClient,
-  userId: string
+  userId: string,
+  userEmail?: string
 ): Promise<UserBoardCollection> => {
-  const [boardRows, boardState] = await Promise.all([
-    loadUserBoardRows(supabase, userId),
-    loadUserBoardState(supabase, userId),
-  ]);
+  const [ownedBoardRows, boardState, ownerShareRows, recipientShareRows] =
+    await Promise.all([
+      loadOwnedBoardRows(supabase, userId),
+      loadUserBoardState(supabase, userId),
+      loadBoardShareRowsForOwner(supabase, userId),
+      userEmail ? loadBoardShareRowsForRecipient(supabase, userEmail) : [],
+    ]);
 
-  let boards = boardRows
-    .map((board, index) => mapBoardRowToStoredBoard(board, index))
+  const ownerShareCountByBoardId = ownerShareRows.reduce<Record<string, number>>(
+    (accumulator, share) => {
+      accumulator[share.board_id] = (accumulator[share.board_id] ?? 0) + 1;
+      return accumulator;
+    },
+    {}
+  );
+
+  let boards = ownedBoardRows
+    .map((board, index) =>
+      mapBoardRowToStoredBoard(board, index, {
+        ownedByUser: true,
+        shareCount: ownerShareCountByBoardId[board.id] ?? 0,
+      })
+    )
     .filter((board) => isWithinTrashRetention(board.deletedAt));
 
   if (boards.length === 0) {
     const firstBoard = await createBoardRecord(supabase, userId, 1);
     boards = [firstBoard];
     await persistActiveBoardId(supabase, userId, firstBoard.id);
-
-    return {
-      userId,
-      activeBoardId: firstBoard.id,
-      boards,
-    };
   }
 
-  const availableBoards = boards.filter((board) => !board.deletedAt);
+  const sharedBoardIds = [...new Set(recipientShareRows.map((share) => share.board_id))];
+  const sharedBoardRows = await loadBoardRowsByIds(supabase, sharedBoardIds);
+  const sharedBoards = sharedBoardRows
+    .filter((board) => board.user_id !== userId)
+    .filter((board) => !board.deleted_at)
+    .map((board, index) =>
+      mapBoardRowToStoredBoard(board, boards.length + index, {
+        ownedByUser: false,
+        shareCount: 0,
+      })
+    );
+
+  const mergedBoards = [...boards, ...sharedBoards];
+  const availableBoards = mergedBoards.filter((board) => !board.deletedAt);
   const fallbackBoard = availableBoards[0];
   const requestedActiveBoardId = boardState?.active_board_id ?? "";
   const activeBoardId = availableBoards.some(
@@ -329,11 +531,14 @@ const loadUserBoardCollection = async (
   return {
     userId,
     activeBoardId,
-    boards,
+    boards: mergedBoards,
   };
 };
 
-const getLiveBoardOrThrow = (entry: UserBoardCollection, boardId: string) => {
+const getAccessibleBoardOrThrow = (
+  entry: UserBoardCollection,
+  boardId: string
+) => {
   const board = entry.boards.find((item) => item.id === boardId && !item.deletedAt);
 
   if (!board) {
@@ -343,9 +548,18 @@ const getLiveBoardOrThrow = (entry: UserBoardCollection, boardId: string) => {
   return board;
 };
 
+const getOwnedBoardOrThrow = (entry: UserBoardCollection, boardId: string) => {
+  const board = getAccessibleBoardOrThrow(entry, boardId);
+
+  if (!board.ownedByUser) {
+    throw new Error("BOARD_FORBIDDEN");
+  }
+
+  return board;
+};
+
 const updateBoardRow = async (
   supabase: SupabaseClient,
-  userId: string,
   boardId: string,
   updates: Partial<{
     name: string;
@@ -355,11 +569,7 @@ const updateBoardRow = async (
     document: BoardDocument;
   }>
 ) => {
-  const { error } = await supabase
-    .from("boards")
-    .update(updates)
-    .eq("user_id", userId)
-    .eq("id", boardId);
+  const { error } = await supabase.from("boards").update(updates).eq("id", boardId);
 
   if (error) {
     throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
@@ -369,77 +579,102 @@ const updateBoardRow = async (
 export const getUserBoards = async (
   supabase: SupabaseClient,
   userId: string,
-  plan: AppProfilePlan
+  userEmail: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  return serializeUserBoards(entry, getBoardLimitForPlan(plan));
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(
+    getBoardStoreClient(supabase),
+    userId,
+    userEmail
+  );
+  const sanitizedEntry = sanitizeUserBoardCollectionForAccess(
+    entry,
+    access.canUseCalendar
+  );
+  return serializeUserBoards(sanitizedEntry, access.maxBoards);
 };
 
 export const createBoardForUser = async (
   supabase: SupabaseClient,
   userId: string,
-  plan: AppProfilePlan
+  userEmail: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const availableBoardCount = entry.boards.filter((board) => !board.deletedAt).length;
-  const maxBoardsForPlan = getBoardLimitForPlan(plan);
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const availableBoardCount = entry.boards.filter(
+    (board) => board.ownedByUser && !board.deletedAt
+  ).length;
 
-  if (availableBoardCount >= maxBoardsForPlan) {
+  if (availableBoardCount >= access.maxBoards) {
     throw new Error("BOARD_LIMIT_REACHED");
   }
 
-  const board = await createBoardRecord(supabase, userId, availableBoardCount + 1);
-  await persistActiveBoardId(supabase, userId, board.id);
+  const board = await createBoardRecord(client, userId, availableBoardCount + 1);
+  await persistActiveBoardId(client, userId, board.id);
 
-  return serializeUserBoards({
-    ...entry,
-    activeBoardId: board.id,
-    boards: [...entry.boards, board],
-  }, maxBoardsForPlan);
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess({
+      ...entry,
+      activeBoardId: board.id,
+      boards: [...entry.boards, board],
+    }, access.canUseCalendar),
+    access.maxBoards
+  );
 };
 
 export const selectBoardForUser = async (
   supabase: SupabaseClient,
   userId: string,
+  userEmail: string,
   plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus,
   boardId: string
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const board = getLiveBoardOrThrow(entry, boardId);
-  const updatedAt = new Date().toISOString();
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getAccessibleBoardOrThrow(entry, boardId);
 
-  await Promise.all([
-    updateBoardRow(supabase, userId, board.id, { updated_at: updatedAt }),
-    persistActiveBoardId(supabase, userId, board.id),
-  ]);
+  await persistActiveBoardId(client, userId, board.id);
 
-  return serializeUserBoards({
-    ...entry,
-    activeBoardId: board.id,
-    boards: entry.boards.map((item) =>
-      item.id === board.id
-        ? {
-            ...item,
-            updatedAt,
-          }
-        : item
-    ),
-  }, getBoardLimitForPlan(plan));
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess({
+      ...entry,
+      activeBoardId: board.id,
+    }, access.canUseCalendar),
+    access.maxBoards
+  );
 };
 
 export const saveBoardForUser = async (
   supabase: SupabaseClient,
   userId: string,
+  userEmail: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus,
   boardId: string,
   document: Partial<BoardDocument>
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const board = getLiveBoardOrThrow(entry, boardId);
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getAccessibleBoardOrThrow(entry, boardId);
   const normalizedDocument = normalizeBoardDocument(document);
+  const documentToStore = access.canUseCalendar
+    ? normalizedDocument
+    : {
+        ...normalizedDocument,
+        calendarEntries: board.document.calendarEntries,
+      };
   const updatedAt = new Date().toISOString();
 
-  await updateBoardRow(supabase, userId, board.id, {
-    document: normalizedDocument,
+  await updateBoardRow(client, board.id, {
+    document: documentToStore,
     updated_at: updatedAt,
   });
 
@@ -452,7 +687,12 @@ export const saveBoardForUser = async (
       updatedAt,
       deletedAt: board.deletedAt,
       starred: board.starred,
-      document: normalizedDocument,
+      document: applyCalendarAccessToDocument(
+        documentToStore,
+        access.canUseCalendar
+      ),
+      ownedByUser: board.ownedByUser,
+      shareCount: board.shareCount,
     },
   };
 };
@@ -460,11 +700,16 @@ export const saveBoardForUser = async (
 export const renameBoardForUser = async (
   supabase: SupabaseClient,
   userId: string,
+  userEmail: string,
   boardId: string,
-  name: string
+  name: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const board = getLiveBoardOrThrow(entry, boardId);
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardOrThrow(entry, boardId);
   const normalizedName = name.trim().slice(0, 40);
 
   if (!normalizedName) {
@@ -472,61 +717,77 @@ export const renameBoardForUser = async (
   }
 
   const updatedAt = new Date().toISOString();
-  await updateBoardRow(supabase, userId, board.id, {
+  await updateBoardRow(client, board.id, {
     name: normalizedName,
     updated_at: updatedAt,
   });
 
-  return serializeUserBoards({
-    ...entry,
-    boards: entry.boards.map((item) =>
-      item.id === board.id
-        ? {
-            ...item,
-            name: normalizedName,
-            updatedAt,
-          }
-        : item
-    ),
-  });
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess({
+      ...entry,
+      boards: entry.boards.map((item) =>
+        item.id === board.id
+          ? {
+              ...item,
+              name: normalizedName,
+              updatedAt,
+            }
+          : item
+      ),
+    }, access.canUseCalendar),
+    access.maxBoards
+  );
 };
 
 export const setBoardStarredForUser = async (
   supabase: SupabaseClient,
   userId: string,
+  userEmail: string,
   boardId: string,
-  starred: boolean
+  starred: boolean,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const board = getLiveBoardOrThrow(entry, boardId);
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardOrThrow(entry, boardId);
   const updatedAt = new Date().toISOString();
 
-  await updateBoardRow(supabase, userId, board.id, {
+  await updateBoardRow(client, board.id, {
     starred,
     updated_at: updatedAt,
   });
 
-  return serializeUserBoards({
-    ...entry,
-    boards: entry.boards.map((item) =>
-      item.id === board.id
-        ? {
-            ...item,
-            starred,
-            updatedAt,
-          }
-        : item
-    ),
-  });
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess({
+      ...entry,
+      boards: entry.boards.map((item) =>
+        item.id === board.id
+          ? {
+              ...item,
+              starred,
+              updatedAt,
+            }
+          : item
+      ),
+    }, access.canUseCalendar),
+    access.maxBoards
+  );
 };
 
 export const moveBoardToTrashForUser = async (
   supabase: SupabaseClient,
   userId: string,
-  boardId: string
+  userEmail: string,
+  boardId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
 ) => {
-  const entry = await loadUserBoardCollection(supabase, userId);
-  const board = getLiveBoardOrThrow(entry, boardId);
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardOrThrow(entry, boardId);
   const deletedAt = new Date().toISOString();
   const nextBoards = entry.boards.map((item) =>
     item.id === board.id
@@ -543,16 +804,151 @@ export const moveBoardToTrashForUser = async (
       : entry.activeBoardId;
 
   await Promise.all([
-    updateBoardRow(supabase, userId, board.id, {
+    updateBoardRow(client, board.id, {
       deleted_at: deletedAt,
       updated_at: deletedAt,
     }),
-    persistActiveBoardId(supabase, userId, nextActiveBoard),
+    persistActiveBoardId(client, userId, nextActiveBoard),
   ]);
 
-  return serializeUserBoards({
-    ...entry,
-    activeBoardId: nextActiveBoard,
-    boards: nextBoards,
-  });
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess({
+      ...entry,
+      activeBoardId: nextActiveBoard,
+      boards: nextBoards,
+    }, access.canUseCalendar),
+    access.maxBoards
+  );
+};
+
+export const getBoardSharesForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  getOwnedBoardOrThrow(entry, boardId);
+
+  const shares = await loadBoardShareRowsForOwner(client, userId);
+  const boardShares = shares
+    .filter((share) => share.board_id === boardId)
+    .sort((first, second) => first.created_at.localeCompare(second.created_at))
+    .map<BoardShareSummary>((share) => ({
+      id: share.id,
+      email: share.shared_with_email,
+      createdAt: share.created_at,
+    }));
+
+  return {
+    shares: boardShares,
+    shareLimit: access.maxShares,
+  };
+};
+
+export const shareBoardWithUserForPlan = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus,
+  email: string
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  getOwnedBoardOrThrow(entry, boardId);
+
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail || !/^\S+@\S+\.\S+$/.test(normalizedEmail)) {
+    throw new Error("BOARD_SHARE_EMAIL_REQUIRED");
+  }
+
+  if (normalizedEmail === normalizeEmail(userEmail)) {
+    throw new Error("BOARD_SHARE_SELF");
+  }
+
+  const existingShares = (await loadBoardShareRowsForOwner(client, userId)).filter(
+    (share) => share.board_id === boardId
+  );
+
+  if (existingShares.some((share) => share.shared_with_email === normalizedEmail)) {
+    throw new Error("BOARD_SHARE_EXISTS");
+  }
+
+  if (existingShares.length >= access.maxShares) {
+    throw new Error("BOARD_SHARE_LIMIT_REACHED");
+  }
+
+  const now = new Date().toISOString();
+  const row = {
+    id: randomBytes(16).toString("hex"),
+    board_id: boardId,
+    owner_user_id: userId,
+    shared_with_email: normalizedEmail,
+    created_at: now,
+    updated_at: now,
+  };
+
+  const { data, error } = await client
+    .from("board_shares")
+    .insert(row)
+    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
+    .single();
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_SHARE_CREATE_FAILED:${error.message}`);
+  }
+
+  return {
+    ok: true,
+    share: {
+      id: (data as BoardShareRow).id,
+      email: (data as BoardShareRow).shared_with_email,
+      createdAt: (data as BoardShareRow).created_at,
+    } satisfies BoardShareSummary,
+    shareCount: existingShares.length + 1,
+    shareLimit: access.maxShares,
+  };
+};
+
+export const removeBoardShareForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  shareId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  getOwnedBoardOrThrow(entry, boardId);
+
+  const { error } = await client
+    .from("board_shares")
+    .delete()
+    .eq("id", shareId)
+    .eq("board_id", boardId)
+    .eq("owner_user_id", userId);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_SHARE_DELETE_FAILED:${error.message}`);
+  }
+
+  const remainingShares = (await loadBoardShareRowsForOwner(client, userId)).filter(
+    (share) => share.board_id === boardId
+  );
+
+  return {
+    ok: true,
+    shareCount: remainingShares.length,
+    shareLimit: access.maxShares,
+  };
 };

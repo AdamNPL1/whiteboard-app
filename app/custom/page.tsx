@@ -33,6 +33,7 @@ import {
   Plus,
   Search,
   Settings,
+  Share2,
   Star,
   Underline,
   Upload,
@@ -153,6 +154,13 @@ type BoardSummary = {
   deletedAt?: string;
   starred?: boolean;
   previewDocument: BoardDocument;
+  ownedByUser?: boolean;
+  shareCount?: number;
+};
+type BoardShareSummary = {
+  id: string;
+  email: string;
+  createdAt: string;
 };
 type CalendarEntry = {
   id: string;
@@ -437,15 +445,38 @@ export default function Page() {
   const [billingMessageTone, setBillingMessageTone] = useState<
     "error" | "success"
   >("success");
+  const [billingNotice, setBillingNotice] = useState<{
+    title: string;
+    message: string;
+    tone: "error" | "success";
+  } | null>(null);
+  const [billingChangeRequest, setBillingChangeRequest] = useState<{
+    currentPlan: "basic" | "pro" | "master";
+    targetPlan: "basic" | "pro" | "master";
+    currency: "pln" | "eur";
+    estimatedImmediateCharge?: number | null;
+    estimatedNextMonthlyCharge?: number | null;
+  } | null>(null);
+  const [billingCurrency, setBillingCurrency] = useState<"pln" | "eur">("pln");
   const [pendingBillingPlan, setPendingBillingPlan] = useState<
     "basic" | "pro" | "master" | ""
   >("");
+  const [isBillingPortalLoading, setIsBillingPortalLoading] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsSection>("background");
   const [showBoardsMenu, setShowBoardsMenu] = useState(false);
   const [boards, setBoards] = useState<BoardSummary[]>([]);
+  const [sharingBoard, setSharingBoard] = useState<BoardSummary | null>(null);
+  const [boardShares, setBoardShares] = useState<BoardShareSummary[]>([]);
+  const [shareEmailInput, setShareEmailInput] = useState("");
+  const [shareLimit, setShareLimit] = useState(1);
+  const [sharePanelMessage, setSharePanelMessage] = useState("");
+  const [sharePanelTone, setSharePanelTone] = useState<"error" | "success">(
+    "success"
+  );
+  const [isSharePanelLoading, setIsSharePanelLoading] = useState(false);
   const [activeBoardId, setActiveBoardId] = useState("");
   const [editingBoardId, setEditingBoardId] = useState("");
   const [editingBoardName, setEditingBoardName] = useState("");
@@ -1114,7 +1145,7 @@ export default function Page() {
       error?: string;
       boards?: BoardSummary[];
       activeBoardId?: string;
-      maxBoards?: number;
+      maxBoards?: number | null;
       board?: {
         id: string;
         name: string;
@@ -1123,6 +1154,8 @@ export default function Page() {
         deletedAt?: string;
         starred?: boolean;
         previewDocument?: BoardDocument;
+        ownedByUser?: boolean;
+        shareCount?: number;
         document: BoardDocument;
       } | null;
     };
@@ -1221,7 +1254,11 @@ export default function Page() {
       const data = await readBoardResponse(await fetch("/api/boards"));
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? "");
-      setCurrentMaxBoards(data.maxBoards ?? 5);
+      setCurrentMaxBoards(
+        data.maxBoards === null
+          ? Number.POSITIVE_INFINITY
+          : data.maxBoards ?? 5
+      );
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1259,7 +1296,11 @@ export default function Page() {
 
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? boardId);
-      setCurrentMaxBoards(data.maxBoards ?? currentMaxBoards);
+      setCurrentMaxBoards(
+        data.maxBoards === null
+          ? Number.POSITIVE_INFINITY
+          : data.maxBoards ?? currentMaxBoards
+      );
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1299,7 +1340,11 @@ export default function Page() {
       setBoardSearchQuery("");
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? "");
-      setCurrentMaxBoards(data.maxBoards ?? currentMaxBoards);
+      setCurrentMaxBoards(
+        data.maxBoards === null
+          ? Number.POSITIVE_INFINITY
+          : data.maxBoards ?? currentMaxBoards
+      );
 
       if (data.board?.document) {
         applyBoardDocument(data.board.document);
@@ -1436,7 +1481,159 @@ export default function Page() {
     }
   };
 
-  const liveBoardsCount = boards.filter((board) => !board.deletedAt).length;
+  const openSharePanel = async (board: BoardSummary) => {
+    if (board.ownedByUser === false) return;
+
+    setSharingBoard(board);
+    setBoardShares([]);
+    setShareEmailInput("");
+    setSharePanelMessage("");
+    setSharePanelTone("success");
+    setIsSharePanelLoading(true);
+
+    try {
+      const response = await fetch(`/api/boards/${board.id}/shares`);
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        shares?: BoardShareSummary[];
+        shareLimit?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not load board sharing.");
+      }
+
+      setBoardShares(data.shares ?? []);
+      setShareLimit(data.shareLimit ?? 1);
+    } catch (error) {
+      setSharePanelMessage(
+        error instanceof Error ? error.message : "Could not load board sharing."
+      );
+      setSharePanelTone("error");
+    } finally {
+      setIsSharePanelLoading(false);
+    }
+  };
+
+  const submitBoardShare = async () => {
+    if (!sharingBoard || !shareEmailInput.trim()) return;
+
+    setIsSharePanelLoading(true);
+    setSharePanelMessage("");
+
+    try {
+      const response = await fetch(`/api/boards/${sharingBoard.id}/shares`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email: shareEmailInput.trim() }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        share?: BoardShareSummary;
+        shareCount?: number;
+        shareLimit?: number;
+        inviteEmailSent?: boolean;
+        inviteEmailError?: string;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not share this board.");
+      }
+
+      if (data.share) {
+        setBoardShares((previous) => [...previous, data.share as BoardShareSummary]);
+      }
+      if (typeof data.shareLimit === "number") {
+        setShareLimit(data.shareLimit);
+      }
+      if (typeof data.shareCount === "number") {
+        setBoards((previousBoards) =>
+          previousBoards.map((board) =>
+            board.id === sharingBoard.id
+              ? { ...board, shareCount: data.shareCount }
+              : board
+          )
+        );
+      }
+      setShareEmailInput("");
+      if (data.inviteEmailSent) {
+        setSharePanelMessage("Board shared successfully and invite email sent.");
+        setSharePanelTone("success");
+      } else {
+        setSharePanelMessage(
+          "Board shared successfully, but the invite email could not be sent."
+        );
+        setSharePanelTone("error");
+      }
+    } catch (error) {
+      setSharePanelMessage(
+        error instanceof Error ? error.message : "Could not share this board."
+      );
+      setSharePanelTone("error");
+    } finally {
+      setIsSharePanelLoading(false);
+    }
+  };
+
+  const removeBoardShare = async (share: BoardShareSummary) => {
+    if (!sharingBoard) return;
+
+    setIsSharePanelLoading(true);
+    setSharePanelMessage("");
+
+    try {
+      const response = await fetch(
+        `/api/boards/${sharingBoard.id}/shares/${share.id}`,
+        {
+          method: "DELETE",
+        }
+      );
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        shareCount?: number;
+        shareLimit?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not remove board sharing.");
+      }
+
+      setBoardShares((previous) =>
+        previous.filter((item) => item.id !== share.id)
+      );
+      if (typeof data.shareLimit === "number") {
+        setShareLimit(data.shareLimit);
+      }
+      if (typeof data.shareCount === "number") {
+        setBoards((previousBoards) =>
+          previousBoards.map((board) =>
+            board.id === sharingBoard.id
+              ? { ...board, shareCount: data.shareCount }
+              : board
+          )
+        );
+      }
+      setSharePanelMessage("Sharing removed.");
+      setSharePanelTone("success");
+    } catch (error) {
+      setSharePanelMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not remove board sharing."
+      );
+      setSharePanelTone("error");
+    } finally {
+      setIsSharePanelLoading(false);
+    }
+  };
+
+  const liveBoardsCount = boards.filter(
+    (board) => board.ownedByUser !== false && !board.deletedAt
+  ).length;
+  const hasUnlimitedBoards = !Number.isFinite(currentMaxBoards);
+  const boardUsageLabel = hasUnlimitedBoards
+    ? `${liveBoardsCount} board${liveBoardsCount === 1 ? "" : "s"} used`
+    : `${liveBoardsCount} / ${currentMaxBoards} boards used`;
   const hasActivePaidSubscription =
     currentSubscriptionStatus === "trialing" ||
     currentSubscriptionStatus === "active" ||
@@ -1447,7 +1644,10 @@ export default function Page() {
       : currentAccountPlan === "pro"
       ? "Pro"
       : "Basic"
-    : "No active plan";
+    : "Free";
+  const currentWorkspacePlanLabel = currentPlanLabel;
+  const displayedSavedBoardCount = Math.max(1, liveBoardsCount);
+  const currentWorkspaceStatusMessage = `You are currently logged in on the ${currentWorkspacePlanLabel} plan with ${displayedSavedBoardCount} saved board${displayedSavedBoardCount === 1 ? "" : "s"}.`;
   const currentPlanRank = hasActivePaidSubscription
     ? currentAccountPlan === "master"
       ? 3
@@ -1455,9 +1655,20 @@ export default function Page() {
       ? 2
       : 1
     : 0;
+  const canUseCalendar =
+    hasActivePaidSubscription &&
+    (currentAccountPlan === "pro" || currentAccountPlan === "master");
+  const isCalendarReadOnly = !canUseCalendar;
   const isBoardsBrowserVisible = showBoardsMenu;
   const isCalendarBrowserVisible =
     isBoardsBrowserVisible && boardBrowserView === "calendar";
+
+  useEffect(() => {
+    if (!canUseCalendar) {
+      setSelectedCalendarEntryId("");
+      setEditingCalendarEntryId("");
+    }
+  }, [canUseCalendar]);
 
   const getBoardTimestamp = (value: string) => {
     const timestamp = new Date(value).getTime();
@@ -1505,6 +1716,122 @@ export default function Page() {
     return matchingBoards;
   })();
 
+  const formatBillingAmount = (
+    amount: number | null | undefined,
+    currency: "pln" | "eur"
+  ) => {
+    if (typeof amount !== "number" || !Number.isFinite(amount)) {
+      return null;
+    }
+
+    return new Intl.NumberFormat("en-US", {
+      style: "currency",
+      currency: currency.toUpperCase(),
+    }).format(amount / 100);
+  };
+
+  const applyBillingCheckoutResponse = (data: {
+    message?: string;
+    plan?: "basic" | "pro" | "master";
+    maxBoards?: number | null;
+    subscriptionStatus?:
+      | "inactive"
+      | "trialing"
+      | "active"
+      | "past_due"
+      | "canceled";
+  }) => {
+    if (data.plan) {
+      setCurrentAccountPlan(data.plan);
+    }
+
+    if (data.subscriptionStatus) {
+      setCurrentSubscriptionStatus(data.subscriptionStatus);
+    }
+
+    if (data.maxBoards === null) {
+      setCurrentMaxBoards(Number.POSITIVE_INFINITY);
+    } else if (typeof data.maxBoards === "number") {
+      setCurrentMaxBoards(data.maxBoards);
+    }
+
+    setBillingMessageTone("success");
+    setBillingMessage(
+      data.message ?? "Billing flow is ready for the next Stripe step."
+    );
+    setBillingNotice({
+      title: "Billing updated",
+      message: data.message ?? "Billing flow is ready for the next Stripe step.",
+      tone: "success",
+    });
+  };
+
+  const runPlanCheckout = async (
+    targetPlan: "basic" | "pro" | "master",
+    confirmSubscriptionChange = false
+  ): Promise<void> => {
+    const response = await fetch("/api/billing/checkout", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        targetPlan,
+        targetCurrency: billingCurrency,
+        confirmSubscriptionChange,
+      }),
+    });
+    const data = (await response.json().catch(() => ({}))) as {
+      ok?: boolean;
+      error?: string;
+      message?: string;
+      checkoutUrl?: string;
+      plan?: "basic" | "pro" | "master";
+      maxBoards?: number | null;
+      subscriptionStatus?:
+        | "inactive"
+        | "trialing"
+        | "active"
+        | "past_due"
+        | "canceled";
+      requiresPlanChangeConfirmation?: boolean;
+      currentPlan?: "basic" | "pro" | "master";
+      targetPlan?: "basic" | "pro" | "master";
+      currency?: "pln" | "eur";
+      estimatedImmediateCharge?: number | null;
+      estimatedNextMonthlyCharge?: number | null;
+    };
+
+    if (!response.ok) {
+      const nextMessage =
+        data.error ?? "Could not start the billing flow for this plan.";
+      setBillingMessageTone("error");
+      setBillingMessage(nextMessage);
+      setBillingNotice({
+        title: "Billing error",
+        message: nextMessage,
+        tone: "error",
+      });
+      return;
+    }
+
+    if (data.requiresPlanChangeConfirmation) {
+      setBillingChangeRequest({
+        currentPlan: data.currentPlan ?? currentAccountPlan,
+        targetPlan: data.targetPlan ?? targetPlan,
+        currency: data.currency ?? billingCurrency,
+        estimatedImmediateCharge: data.estimatedImmediateCharge,
+        estimatedNextMonthlyCharge: data.estimatedNextMonthlyCharge,
+      });
+      return;
+    }
+
+    if (data.checkoutUrl) {
+      window.location.assign(data.checkoutUrl);
+      return;
+    }
+
+    applyBillingCheckoutResponse(data);
+  };
+
   const startPlanCheckout = async (targetPlan: "basic" | "pro" | "master") => {
     if (!currentAccountId || pendingBillingPlan) {
       return;
@@ -1514,39 +1841,134 @@ export default function Page() {
     setBillingMessage("");
 
     try {
-      const response = await fetch("/api/billing/checkout", {
+      await runPlanCheckout(targetPlan, false);
+    } finally {
+      setPendingBillingPlan("");
+    }
+  };
+
+  const openBillingPortal = async () => {
+    if (!currentAccountId || isBillingPortalLoading || !hasActivePaidSubscription) {
+      return;
+    }
+
+    setIsBillingPortalLoading(true);
+    setBillingMessage("");
+
+    try {
+      const response = await fetch("/api/billing/portal", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ targetPlan }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         ok?: boolean;
         error?: string;
-        message?: string;
-        checkoutUrl?: string;
+        portalUrl?: string;
       };
 
       if (!response.ok) {
         setBillingMessageTone("error");
         setBillingMessage(
-          data.error ?? "Could not start the billing flow for this plan."
+          data.error ?? "Could not open the billing portal."
         );
         return;
       }
 
-      if (data.checkoutUrl) {
-        window.location.assign(data.checkoutUrl);
+      if (data.portalUrl) {
+        window.location.assign(data.portalUrl);
         return;
       }
 
-      setBillingMessageTone("success");
-      setBillingMessage(
-        data.message ?? "Billing flow is ready for the next Stripe step."
-      );
+      setBillingMessageTone("error");
+      setBillingMessage("Stripe billing portal did not return a redirect URL.");
     } finally {
-      setPendingBillingPlan("");
+      setIsBillingPortalLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentAccountId || typeof window === "undefined") {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const checkoutStatus = searchParams.get("checkout");
+    const sessionId = searchParams.get("session_id");
+
+    if (checkoutStatus !== "success" || !sessionId) {
+      return;
+    }
+
+    let isCancelled = false;
+
+    const confirmCheckout = async () => {
+      setBillingMessageTone("success");
+      setBillingMessage("Confirming your Stripe payment...");
+
+      try {
+        const response = await fetch("/api/billing/confirm", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ sessionId }),
+        });
+        const data = (await response.json().catch(() => ({}))) as {
+          ok?: boolean;
+          error?: string;
+          plan?: "basic" | "pro" | "master";
+          maxBoards?: number | null;
+          subscriptionStatus?:
+            | "inactive"
+            | "trialing"
+            | "active"
+            | "past_due"
+            | "canceled";
+        };
+
+        if (isCancelled) {
+          return;
+        }
+
+        if (!response.ok) {
+          setBillingMessageTone("error");
+          setBillingMessage(
+            data.error ?? "Could not confirm the Stripe checkout result."
+          );
+          return;
+        }
+
+        setCurrentAccountPlan(data.plan ?? "basic");
+        setCurrentSubscriptionStatus(data.subscriptionStatus ?? "active");
+        setCurrentMaxBoards(
+          data.maxBoards === null
+            ? Number.POSITIVE_INFINITY
+            : typeof data.maxBoards === "number"
+              ? data.maxBoards
+              : 5
+        );
+        setBillingMessageTone("success");
+        setBillingMessage(
+          `Your workspace is now on the ${(data.plan ?? "basic").toUpperCase()} plan.`
+        );
+
+        const nextUrl = new URL(window.location.href);
+        nextUrl.searchParams.delete("checkout");
+        nextUrl.searchParams.delete("session_id");
+        window.history.replaceState({}, "", nextUrl.toString());
+      } catch {
+        if (isCancelled) {
+          return;
+        }
+
+        setBillingMessageTone("error");
+        setBillingMessage("Could not confirm the Stripe checkout result.");
+      }
+    };
+
+    void confirmCheckout();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [currentAccountId]);
 
   const calendarSchedules = isCalendarBrowserVisible
     ? [...normalizeCalendarEntries(calendarEntries)]
@@ -1561,6 +1983,65 @@ export default function Page() {
             first.title.localeCompare(second.title)
         )
     : [];
+
+  const billingCurrencyLabel = billingCurrency.toUpperCase();
+  const billingPlans = [
+    {
+      name: "Basic",
+      value: "basic" as const,
+      prices: { pln: "29.99", eur: "9.99" },
+      priceSuffix: `${billingCurrencyLabel} / month`,
+      accent:
+        "linear-gradient(180deg, rgba(124,58,237,0.08) 0%, rgba(255,255,255,0.98) 62%, rgba(59,130,246,0.06) 100%)",
+      border: "rgba(124,58,237,0.22)",
+      text: "#1f2937",
+      buttonBackground: "#f5f3ff",
+      buttonText: "#6d28d9",
+      checkBackground: "rgba(124,58,237,0.1)",
+      features: [
+        "Up to 5 boards",
+        "Share with up to 1 person",
+      ],
+    },
+    {
+      name: "Pro",
+      value: "pro" as const,
+      prices: { pln: "49.99", eur: "14.99" },
+      priceSuffix: `${billingCurrencyLabel} / month`,
+      accent: "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+      border: "rgba(59,130,246,0.3)",
+      text: "#ffffff",
+      buttonBackground: "#ffffff",
+      buttonText: "#166534",
+      checkBackground: "rgba(255,255,255,0.18)",
+      features: [
+        "Unlimited boards",
+        "Share with up to 3 people",
+        "Calendar planning",
+      ],
+      featured: true,
+    },
+    {
+      name: "Master",
+      value: "master" as const,
+      prices: { pln: "79.99", eur: "21.99" },
+      priceSuffix: `${billingCurrencyLabel} / month`,
+      accent:
+        "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(255,255,255,0.98) 58%, rgba(59,130,246,0.08) 100%)",
+      border: "rgba(34,197,94,0.22)",
+      text: "#0f172a",
+      buttonBackground: "#f0fdf4",
+      buttonText: "#166534",
+      checkBackground: "rgba(34,197,94,0.12)",
+      features: [
+        "Unlimited boards",
+        "Share with up to 10 people",
+        "Calendar planning",
+        "Full premium experience",
+        "Maximum workspace control",
+      ],
+    },
+  ];
 
   const calendarMonthDate = new Date(
     calendarCursor.getFullYear(),
@@ -1629,6 +2110,8 @@ export default function Page() {
   })();
 
   const createCalendarEntry = (date: string) => {
+    if (!canUseCalendar) return;
+
     const entryId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -1650,6 +2133,8 @@ export default function Page() {
   };
 
   const updateCalendarEntry = (entryId: string, title: string) => {
+    if (!canUseCalendar) return;
+
     setCalendarEntries((previousEntries) =>
       previousEntries.map((entry) =>
         entry.id === entryId
@@ -1663,6 +2148,8 @@ export default function Page() {
   };
 
   const removeCalendarEntry = (entryId: string) => {
+    if (!canUseCalendar) return;
+
     setEditingCalendarEntryId((previousId) =>
       previousId === entryId ? "" : previousId
     );
@@ -1679,6 +2166,8 @@ export default function Page() {
     field: "startHour" | "endHour",
     hour: string
   ) => {
+    if (!canUseCalendar) return;
+
     const normalizedHour = normalizeCalendarHourValue(hour, "12:00");
 
     setCalendarEntries((previousEntries) =>
@@ -1707,6 +2196,8 @@ export default function Page() {
   };
 
   const updateCalendarEntryColor = (entryId: string, color: string) => {
+    if (!canUseCalendar) return;
+
     const normalizedColor = normalizeCalendarEntryColor(color, entryId);
 
     setCalendarEntries((previousEntries) =>
@@ -1740,11 +2231,15 @@ export default function Page() {
     normalizeCalendarEntryColor(entry.color, entry.id);
 
   const beginEditingCalendarEntry = (entryId: string) => {
+    if (!canUseCalendar) return;
+
     setSelectedCalendarEntryId(entryId);
     setEditingCalendarEntryId(entryId);
   };
 
   const lockCalendarEntry = (entryId: string) => {
+    if (!canUseCalendar) return;
+
     setEditingCalendarEntryId((previousId) =>
       previousId === entryId ? "" : previousId
     );
@@ -1752,6 +2247,8 @@ export default function Page() {
   };
 
   const selectCalendarEntry = (entryId: string) => {
+    if (!canUseCalendar) return;
+
     setEditingCalendarEntryId("");
     setSelectedCalendarEntryId(entryId);
   };
@@ -6477,6 +6974,7 @@ export default function Page() {
                         label: "Calendar",
                         value: "calendar" as const,
                         icon: <CalendarDays size={15} />,
+                        locked: !canUseCalendar,
                       },
                       {
                         label: "Your plan",
@@ -6485,12 +6983,18 @@ export default function Page() {
                       },
                     ].map((item) => {
                       const isActive = boardBrowserView === item.value;
+                      const isLocked = item.locked === true;
 
                       return (
                       <button
                         key={item.label}
                         type="button"
-                        onClick={() => setBoardBrowserView(item.value)}
+                        onClick={() => {
+                          if (item.value === "calendar") {
+                            setBillingNotice(null);
+                          }
+                          setBoardBrowserView(item.value);
+                        }}
                         style={{
                           height: "44px",
                           padding: "0 14px",
@@ -6504,14 +7008,25 @@ export default function Page() {
                           color: isActive ? "#1d4ed8" : "#334155",
                           display: "flex",
                           alignItems: "center",
+                          justifyContent: "space-between",
                           gap: "10px",
                           fontSize: "14px",
                           fontWeight: isActive ? 560 : 460,
                           cursor: "pointer",
+                          opacity: isLocked ? 0.82 : 1,
                         }}
                       >
-                        {item.icon}
-                        {item.label}
+                        <span
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "10px",
+                          }}
+                        >
+                          {item.icon}
+                          {item.label}
+                        </span>
+                        {isLocked && <Lock size={14} color="#64748b" />}
                       </button>
                       );
                     })}
@@ -6533,7 +7048,7 @@ export default function Page() {
                         fontWeight: 500,
                       }}
                     >
-                      {liveBoardsCount} / {currentMaxBoards} boards used
+                      {boardUsageLabel}
                     </div>
                     <div
                       style={{
@@ -6591,6 +7106,18 @@ export default function Page() {
                       >
                         {boardBrowserDescription}
                       </div>
+                      {boardBrowserView === "plan" && (
+                        <div
+                          style={{
+                            marginTop: "10px",
+                            color: "#4f46e5",
+                            fontSize: "13px",
+                            fontWeight: 500,
+                          }}
+                        >
+                          {currentWorkspaceStatusMessage}
+                        </div>
+                      )}
                     </div>
 
                     <div
@@ -7063,7 +7590,7 @@ export default function Page() {
                                 lineHeight: 1.1,
                               }}
                             >
-                              Clear pricing in PLN.
+                              Clear pricing in {billingCurrencyLabel}.
                             </div>
                             <div
                               style={{
@@ -7074,6 +7601,74 @@ export default function Page() {
                             >
                               Start simple, move up when your boards, schedules, and team rhythm need more room.
                             </div>
+                            <div
+                              style={{
+                                display: "inline-flex",
+                                alignItems: "center",
+                                gap: "8px",
+                                padding: "6px",
+                                width: "fit-content",
+                                borderRadius: "999px",
+                                border: "1px solid rgba(34,197,94,0.16)",
+                                background: "#ffffff",
+                                boxShadow: "0 10px 24px rgba(15,23,42,0.06)",
+                              }}
+                            >
+                              {(["pln", "eur"] as const).map((currency) => (
+                                <button
+                                  key={currency}
+                                  type="button"
+                                  onClick={() => setBillingCurrency(currency)}
+                                  style={{
+                                    height: "34px",
+                                    minWidth: "64px",
+                                    padding: "0 14px",
+                                    borderRadius: "999px",
+                                    border:
+                                      billingCurrency === currency
+                                        ? "1px solid rgba(34,197,94,0.2)"
+                                        : "1px solid transparent",
+                                    background:
+                                      billingCurrency === currency
+                                        ? "linear-gradient(135deg, #22c55e 0%, #3b82f6 100%)"
+                                        : "transparent",
+                                    color:
+                                      billingCurrency === currency
+                                        ? "#ffffff"
+                                        : "#475569",
+                                    fontSize: "13px",
+                                    fontWeight: 700,
+                                    cursor: "pointer",
+                                  }}
+                                >
+                                  {currency.toUpperCase()}
+                                </button>
+                              ))}
+                            </div>
+                            {hasActivePaidSubscription && (
+                              <button
+                                type="button"
+                                onClick={openBillingPortal}
+                                disabled={isBillingPortalLoading}
+                                style={{
+                                  height: "42px",
+                                  padding: "0 16px",
+                                  width: "fit-content",
+                                  borderRadius: "12px",
+                                  border: "1px solid rgba(59,130,246,0.16)",
+                                  background: "#ffffff",
+                                  color: "#1d4ed8",
+                                  fontSize: "13px",
+                                  fontWeight: 700,
+                                  cursor: isBillingPortalLoading ? "default" : "pointer",
+                                  opacity: isBillingPortalLoading ? 0.72 : 1,
+                                }}
+                              >
+                                {isBillingPortalLoading
+                                  ? "Opening billing..."
+                                  : "Manage subscription"}
+                              </button>
+                            )}
                           </div>
                         </div>
 
@@ -7084,60 +7679,7 @@ export default function Page() {
                             gap: "18px",
                           }}
                         >
-                          {[
-                            {
-                              name: "Basic",
-                              value: "basic" as const,
-                              price: "39.99",
-                              accent:
-                                "linear-gradient(180deg, rgba(124,58,237,0.08) 0%, rgba(255,255,255,0.98) 62%, rgba(59,130,246,0.06) 100%)",
-                              border: "rgba(124,58,237,0.22)",
-                              text: "#1f2937",
-                              buttonBackground: "#f5f3ff",
-                              buttonText: "#6d28d9",
-                              checkBackground: "rgba(124,58,237,0.1)",
-                              features: [
-                                "Calendar planning",
-                                "Up to 5 boards",
-                                "Personal scheduling",
-                              ],
-                            },
-                            {
-                              name: "Pro",
-                              value: "pro" as const,
-                              price: "59.99",
-                              accent:
-                                "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
-                              border: "rgba(59,130,246,0.3)",
-                              text: "#ffffff",
-                              buttonBackground: "#ffffff",
-                              buttonText: "#166534",
-                              checkBackground: "rgba(255,255,255,0.18)",
-                              features: [
-                                "Priority workspace",
-                                "Up to 12 boards",
-                                "Sharper organization tools",
-                              ],
-                              featured: true,
-                            },
-                            {
-                              name: "Master",
-                              value: "master" as const,
-                              price: "89.99",
-                              accent:
-                                "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(255,255,255,0.98) 58%, rgba(59,130,246,0.08) 100%)",
-                              border: "rgba(34,197,94,0.22)",
-                              text: "#0f172a",
-                              buttonBackground: "#f0fdf4",
-                              buttonText: "#166534",
-                              checkBackground: "rgba(34,197,94,0.12)",
-                              features: [
-                                "Full premium experience",
-                                "Up to 25 boards",
-                                "Maximum workspace control",
-                              ],
-                            },
-                          ].map((plan) => (
+                          {billingPlans.map((plan) => (
                             <div
                               key={plan.name}
                               style={{
@@ -7173,8 +7715,7 @@ export default function Page() {
                                   {plan.name}
                                 </div>
                                 {hasActivePaidSubscription &&
-                                  currentAccountPlan.toLowerCase() ===
-                                    plan.name.toLowerCase() && (
+                                  currentAccountPlan === plan.value && (
                                   <div
                                     style={{
                                       height: "28px",
@@ -7230,17 +7771,21 @@ export default function Page() {
                                     fontWeight: 600,
                                   }}
                                 >
-                                  {plan.price}
+                                  {plan.prices[billingCurrency] === "0"
+                                    ? "Free"
+                                    : plan.prices[billingCurrency]}
                                 </span>
-                                <span
-                                  style={{
-                                    fontSize: "15px",
-                                    opacity: plan.featured ? 0.86 : 0.72,
-                                    paddingBottom: "7px",
-                                  }}
-                                >
-                                  PLN / month
-                                </span>
+                                {plan.priceSuffix ? (
+                                  <span
+                                    style={{
+                                      fontSize: "15px",
+                                      opacity: plan.featured ? 0.86 : 0.72,
+                                      paddingBottom: "7px",
+                                    }}
+                                  >
+                                    {plan.priceSuffix}
+                                  </span>
+                                ) : null}
                               </div>
 
                               <div
@@ -7354,9 +7899,263 @@ export default function Page() {
                             {billingMessage}
                           </div>
                         )}
+                        {(billingNotice || billingChangeRequest) && (
+                          <div
+                            style={{
+                              position: "fixed",
+                              inset: 0,
+                              background: "rgba(15,23,42,0.48)",
+                              display: "grid",
+                              placeItems: "center",
+                              padding: "24px",
+                              zIndex: 140,
+                            }}
+                          >
+                            <div
+                              style={{
+                                width: "min(100%, 480px)",
+                                borderRadius: "22px",
+                                background: "#ffffff",
+                                boxShadow: "0 30px 80px rgba(15,23,42,0.28)",
+                                border: "1px solid rgba(203,213,225,0.9)",
+                                padding: "24px",
+                                display: "grid",
+                                gap: "16px",
+                              }}
+                            >
+                              {billingChangeRequest ? (
+                                <>
+                                  <div
+                                    style={{
+                                      color: "#0f172a",
+                                      fontSize: "24px",
+                                      fontWeight: 700,
+                                      lineHeight: 1.1,
+                                    }}
+                                  >
+                                    Confirm plan change
+                                  </div>
+                                  <div
+                                    style={{
+                                      color: "#475569",
+                                      fontSize: "14px",
+                                      lineHeight: 1.6,
+                                    }}
+                                  >
+                                    You are changing from{" "}
+                                    <strong style={{ color: "#0f172a" }}>
+                                      {billingChangeRequest.currentPlan}
+                                    </strong>{" "}
+                                    to{" "}
+                                    <strong style={{ color: "#0f172a" }}>
+                                      {billingChangeRequest.targetPlan}
+                                    </strong>
+                                    .
+                                  </div>
+                                  <div
+                                    style={{
+                                      borderRadius: "16px",
+                                      border: "1px solid rgba(59,130,246,0.14)",
+                                      background: "rgba(239,246,255,0.9)",
+                                      padding: "16px",
+                                      display: "grid",
+                                      gap: "10px",
+                                    }}
+                                  >
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        gap: "12px",
+                                        fontSize: "14px",
+                                        color: "#334155",
+                                      }}
+                                    >
+                                      <span>Estimated charge now</span>
+                                      <strong style={{ color: "#0f172a" }}>
+                                        {formatBillingAmount(
+                                          billingChangeRequest.estimatedImmediateCharge,
+                                          billingChangeRequest.currency
+                                        ) ?? "Estimated by Stripe"}
+                                      </strong>
+                                    </div>
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        gap: "12px",
+                                        fontSize: "14px",
+                                        color: "#334155",
+                                      }}
+                                    >
+                                      <span>Next monthly price</span>
+                                      <strong style={{ color: "#0f172a" }}>
+                                        {formatBillingAmount(
+                                          billingChangeRequest.estimatedNextMonthlyCharge,
+                                          billingChangeRequest.currency
+                                        ) ??
+                                          `${billingChangeRequest.targetPlan === "master" ? "79.99" : billingChangeRequest.targetPlan === "pro" ? "49.99" : "29.99"} ${billingChangeRequest.currency.toUpperCase()}`}
+                                      </strong>
+                                    </div>
+                                  </div>
+                                  <div
+                                    style={{
+                                      color: "#64748b",
+                                      fontSize: "13px",
+                                      lineHeight: 1.55,
+                                    }}
+                                  >
+                                    Stripe may prorate the remaining days in your current billing period automatically.
+                                  </div>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "flex-end",
+                                      gap: "10px",
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => {
+                                        setBillingChangeRequest(null);
+                                        setBillingMessageTone("success");
+                                        setBillingMessage("Plan change canceled.");
+                                      }}
+                                      style={{
+                                        height: "44px",
+                                        padding: "0 16px",
+                                        borderRadius: "12px",
+                                        border: "1px solid rgba(203,213,225,0.9)",
+                                        background: "#ffffff",
+                                        color: "#475569",
+                                        fontSize: "14px",
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={async () => {
+                                        const nextPlan = billingChangeRequest.targetPlan;
+                                        setBillingChangeRequest(null);
+                                        setPendingBillingPlan(nextPlan);
+                                        try {
+                                          await runPlanCheckout(nextPlan, true);
+                                        } finally {
+                                          setPendingBillingPlan("");
+                                        }
+                                      }}
+                                      style={{
+                                        height: "44px",
+                                        padding: "0 18px",
+                                        borderRadius: "12px",
+                                        border: "1px solid rgba(59,130,246,0.16)",
+                                        background:
+                                          "linear-gradient(135deg, #2563eb 0%, #22c55e 100%)",
+                                        color: "#ffffff",
+                                        fontSize: "14px",
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      Confirm change
+                                    </button>
+                                  </div>
+                                </>
+                              ) : billingNotice ? (
+                                <>
+                                  <div
+                                    style={{
+                                      color: "#0f172a",
+                                      fontSize: "24px",
+                                      fontWeight: 700,
+                                      lineHeight: 1.1,
+                                    }}
+                                  >
+                                    {billingNotice.title}
+                                  </div>
+                                  <div
+                                    style={{
+                                      color:
+                                        billingNotice.tone === "success"
+                                          ? "#166534"
+                                          : "#b91c1c",
+                                      fontSize: "15px",
+                                      fontWeight: 700,
+                                      lineHeight: 1.45,
+                                    }}
+                                  >
+                                    {billingNotice.message}
+                                  </div>
+                                  <div
+                                    style={{
+                                      display: "flex",
+                                      justifyContent: "flex-end",
+                                    }}
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => setBillingNotice(null)}
+                                      style={{
+                                        height: "44px",
+                                        padding: "0 18px",
+                                        borderRadius: "12px",
+                                        border: "1px solid rgba(59,130,246,0.16)",
+                                        background: "#ffffff",
+                                        color: "#1d4ed8",
+                                        fontSize: "14px",
+                                        fontWeight: 700,
+                                        cursor: "pointer",
+                                      }}
+                                    >
+                                      OK
+                                    </button>
+                                  </div>
+                                </>
+                              ) : null}
+                            </div>
+                          </div>
+                        )}
                       </div>
                     ) : boardBrowserView === "calendar" ? (
                       <>
+                        {isCalendarReadOnly && (
+                          <div
+                            style={{
+                              marginBottom: "16px",
+                              borderRadius: "18px",
+                              border: "1px solid rgba(59,130,246,0.18)",
+                              background:
+                                "linear-gradient(135deg, rgba(239,246,255,0.96) 0%, rgba(240,253,244,0.94) 100%)",
+                              padding: "16px 18px",
+                              display: "grid",
+                              gap: "6px",
+                            }}
+                          >
+                            <div
+                              style={{
+                                color: "#0f172a",
+                                fontSize: "18px",
+                                fontWeight: 700,
+                                lineHeight: 1.2,
+                              }}
+                            >
+                              Calendar preview
+                            </div>
+                            <div
+                              style={{
+                                color: "#166534",
+                                fontSize: "14px",
+                                fontWeight: 600,
+                                lineHeight: 1.55,
+                              }}
+                            >
+                              You can view your calendar here, but editing is available on the Pro and Master plans.
+                            </div>
+                          </div>
+                        )}
                         <div
                           ref={calendarScrollContainerRef}
                           className="calendar-scroll-area"
@@ -7765,7 +8564,9 @@ export default function Page() {
                                           fontWeight: 500,
                                           lineHeight: 1,
                                           textAlign: "left",
-                                          cursor: "pointer",
+                                          cursor: canUseCalendar
+                                            ? "pointer"
+                                            : "default",
                                           display: "flex",
                                           alignItems: "center",
                                           gap: "6px",
@@ -7803,7 +8604,8 @@ export default function Page() {
                                         </span>
                                       </button>
                                     )}
-                                    {selectedCalendarEntryId === entry.id &&
+                                    {canUseCalendar &&
+                                      selectedCalendarEntryId === entry.id &&
                                       editingCalendarEntryId !== entry.id && (
                                         <button
                                           type="button"
@@ -7837,6 +8639,7 @@ export default function Page() {
 
                                 <button
                                   type="button"
+                                  disabled={!canUseCalendar}
                                   onClick={() =>
                                     createCalendarEntry(
                                       getLocalCalendarDateKey(day.date)
@@ -7854,11 +8657,14 @@ export default function Page() {
                                     gap: "4px",
                                     fontSize: "12px",
                                     fontWeight: 500,
-                                    cursor: "pointer",
+                                    cursor: canUseCalendar
+                                      ? "pointer"
+                                      : "not-allowed",
+                                    opacity: canUseCalendar ? 1 : 0.65,
                                   }}
                                 >
                                   <Plus size={12} />
-                                  Add
+                                  {canUseCalendar ? "Add" : "Upgrade to edit"}
                                 </button>
                               </div>
                             </div>
@@ -7949,6 +8755,7 @@ export default function Page() {
                         const isActive = board.id === activeBoardId;
                         const isEditing = board.id === editingBoardId;
                         const isInTrash = Boolean(board.deletedAt);
+                        const isOwnedBoard = board.ownedByUser !== false;
 
                         return (
                           <div
@@ -8051,7 +8858,8 @@ export default function Page() {
                                       type="button"
                                       onDoubleClick={(e) => {
                                         e.stopPropagation();
-                                        if (isBoardsLoading || isInTrash) return;
+                                        if (isBoardsLoading || isInTrash || !isOwnedBoard)
+                                          return;
                                         startRenamingBoard(board);
                                       }}
                                       style={{
@@ -8065,39 +8873,91 @@ export default function Page() {
                                       lineHeight: 1.15,
                                       textAlign: "left",
                                       cursor:
-                                          isBoardsLoading || isInTrash
+                                          isBoardsLoading ||
+                                          isInTrash ||
+                                          !isOwnedBoard
                                             ? "default"
                                             : "pointer",
                                       }}
                                       title={
-                                        isBoardsLoading || isInTrash
+                                        isBoardsLoading || isInTrash || !isOwnedBoard
                                           ? undefined
                                           : "Double-click to rename"
                                       }
                                     >
                                       {board.name || `Board ${index + 1}`}
                                     </button>
-                                    {isActive && !isInTrash && (
-                                      <div
-                                        style={{
-                                          width: "fit-content",
-                                          height: "24px",
-                                          padding: "0 10px",
-                                          borderRadius: "999px",
-                                          border: "1px solid rgba(59,130,246,0.16)",
-                                          background: "rgba(219,234,254,0.72)",
-                                          color: "#2563eb",
-                                          display: "flex",
-                                          alignItems: "center",
-                                          fontSize: "11px",
-                                          fontWeight: 600,
-                                          letterSpacing: "0.04em",
-                                          textTransform: "uppercase",
-                                        }}
-                                      >
-                                        Active board
-                                      </div>
-                                    )}
+                                    <div
+                                      style={{
+                                        display: "flex",
+                                        flexWrap: "wrap",
+                                        gap: "6px",
+                                      }}
+                                    >
+                                      {isActive && !isInTrash && (
+                                        <div
+                                          style={{
+                                            width: "fit-content",
+                                            height: "24px",
+                                            padding: "0 10px",
+                                            borderRadius: "999px",
+                                            border: "1px solid rgba(59,130,246,0.16)",
+                                            background: "rgba(219,234,254,0.72)",
+                                            color: "#2563eb",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            fontSize: "11px",
+                                            fontWeight: 600,
+                                            letterSpacing: "0.04em",
+                                            textTransform: "uppercase",
+                                          }}
+                                        >
+                                          Active board
+                                        </div>
+                                      )}
+                                      {!isOwnedBoard && !isInTrash && (
+                                        <div
+                                          style={{
+                                            width: "fit-content",
+                                            height: "24px",
+                                            padding: "0 10px",
+                                            borderRadius: "999px",
+                                            border: "1px solid rgba(16,185,129,0.16)",
+                                            background: "rgba(236,253,245,0.92)",
+                                            color: "#047857",
+                                            display: "flex",
+                                            alignItems: "center",
+                                            fontSize: "11px",
+                                            fontWeight: 600,
+                                          }}
+                                        >
+                                          Shared with you
+                                        </div>
+                                      )}
+                                      {isOwnedBoard &&
+                                        !isInTrash &&
+                                        (board.shareCount ?? 0) > 0 && (
+                                          <div
+                                            style={{
+                                              width: "fit-content",
+                                              height: "24px",
+                                              padding: "0 10px",
+                                              borderRadius: "999px",
+                                              border:
+                                                "1px solid rgba(99,102,241,0.16)",
+                                              background:
+                                                "rgba(238,242,255,0.92)",
+                                              color: "#4f46e5",
+                                              display: "flex",
+                                              alignItems: "center",
+                                              fontSize: "11px",
+                                              fontWeight: 600,
+                                            }}
+                                          >
+                                            Shared with {board.shareCount}
+                                          </div>
+                                        )}
+                                    </div>
                                   </div>
                                   {!isInTrash && (
                                     <div
@@ -8108,59 +8968,95 @@ export default function Page() {
                                         flex: "0 0 auto",
                                       }}
                                     >
-                                      <button
-                                        type="button"
-                                        aria-label={`${
-                                          board.starred ? "Remove" : "Add"
-                                        } ${board.name} ${board.starred ? "from" : "to"} starred`}
-                                        disabled={isBoardsLoading}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          toggleBoardStarred(board).catch(() => null);
-                                        }}
-                                        style={{
-                                          width: "32px",
-                                          height: "32px",
-                                          borderRadius: "10px",
-                                          border: board.starred
-                                            ? "1px solid rgba(245,158,11,0.24)"
-                                            : "1px solid rgba(148,163,184,0.18)",
-                                          background: "#ffffff",
-                                          color: board.starred ? "#f59e0b" : "#64748b",
-                                          display: "grid",
-                                          placeItems: "center",
-                                          cursor: isBoardsLoading ? "default" : "pointer",
-                                          padding: 0,
-                                        }}
-                                      >
-                                        <Star
-                                          size={15}
-                                          fill={board.starred ? "#f59e0b" : "none"}
-                                        />
-                                      </button>
-                                      <button
-                                        type="button"
-                                        aria-label={`Move ${board.name} to trash`}
-                                        disabled={isBoardsLoading}
-                                        onClick={(e) => {
-                                          e.stopPropagation();
-                                          moveBoardToTrash(board).catch(() => null);
-                                        }}
-                                        style={{
-                                          width: "32px",
-                                          height: "32px",
-                                          borderRadius: "10px",
-                                          border: "1px solid rgba(239,68,68,0.16)",
-                                          background: "#ffffff",
-                                          color: "#dc2626",
-                                          display: "grid",
-                                          placeItems: "center",
-                                          cursor: isBoardsLoading ? "default" : "pointer",
-                                          padding: 0,
-                                        }}
-                                      >
-                                        <Trash2 size={15} />
-                                      </button>
+                                      {isOwnedBoard && (
+                                        <>
+                                          <button
+                                            type="button"
+                                            aria-label={`Share ${board.name}`}
+                                            disabled={isBoardsLoading}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openSharePanel(board).catch(() => null);
+                                            }}
+                                            style={{
+                                              width: "32px",
+                                              height: "32px",
+                                              borderRadius: "10px",
+                                              border:
+                                                "1px solid rgba(99,102,241,0.18)",
+                                              background: "#ffffff",
+                                              color: "#4f46e5",
+                                              display: "grid",
+                                              placeItems: "center",
+                                              cursor:
+                                                isBoardsLoading ? "default" : "pointer",
+                                              padding: 0,
+                                            }}
+                                          >
+                                            <Share2 size={15} />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            aria-label={`${
+                                              board.starred ? "Remove" : "Add"
+                                            } ${board.name} ${
+                                              board.starred ? "from" : "to"
+                                            } starred`}
+                                            disabled={isBoardsLoading}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              toggleBoardStarred(board).catch(() => null);
+                                            }}
+                                            style={{
+                                              width: "32px",
+                                              height: "32px",
+                                              borderRadius: "10px",
+                                              border: board.starred
+                                                ? "1px solid rgba(245,158,11,0.24)"
+                                                : "1px solid rgba(148,163,184,0.18)",
+                                              background: "#ffffff",
+                                              color: board.starred
+                                                ? "#f59e0b"
+                                                : "#64748b",
+                                              display: "grid",
+                                              placeItems: "center",
+                                              cursor:
+                                                isBoardsLoading ? "default" : "pointer",
+                                              padding: 0,
+                                            }}
+                                          >
+                                            <Star
+                                              size={15}
+                                              fill={board.starred ? "#f59e0b" : "none"}
+                                            />
+                                          </button>
+                                          <button
+                                            type="button"
+                                            aria-label={`Move ${board.name} to trash`}
+                                            disabled={isBoardsLoading}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              moveBoardToTrash(board).catch(() => null);
+                                            }}
+                                            style={{
+                                              width: "32px",
+                                              height: "32px",
+                                              borderRadius: "10px",
+                                              border:
+                                                "1px solid rgba(239,68,68,0.16)",
+                                              background: "#ffffff",
+                                              color: "#dc2626",
+                                              display: "grid",
+                                              placeItems: "center",
+                                              cursor:
+                                                isBoardsLoading ? "default" : "pointer",
+                                              padding: 0,
+                                            }}
+                                          >
+                                            <Trash2 size={15} />
+                                          </button>
+                                        </>
+                                      )}
                                     </div>
                                   )}
                                 </div>
@@ -9046,6 +9942,243 @@ export default function Page() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {sharingBoard && (
+          <div
+            onClick={() => {
+              if (isSharePanelLoading) return;
+              setSharingBoard(null);
+              setSharePanelMessage("");
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.36)",
+              display: "grid",
+              placeItems: "center",
+              padding: "20px",
+              zIndex: 120,
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: "min(520px, 100%)",
+                borderRadius: "24px",
+                border: "1px solid rgba(203,213,225,0.86)",
+                background: "#ffffff",
+                boxShadow: "0 30px 90px rgba(15,23,42,0.22)",
+                padding: "24px",
+                display: "grid",
+                gap: "18px",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                }}
+              >
+                <div style={{ display: "grid", gap: "8px" }}>
+                  <div
+                    style={{
+                      color: "#0f172a",
+                      fontSize: "24px",
+                      fontWeight: 700,
+                    }}
+                  >
+                    Share board
+                  </div>
+                  <div
+                    style={{
+                      color: "#64748b",
+                      fontSize: "14px",
+                      lineHeight: 1.5,
+                    }}
+                  >
+                    {sharingBoard.name} can be shared with up to {shareLimit}{" "}
+                    {shareLimit === 1 ? "person" : "people"} on your{" "}
+                    {currentPlanLabel} plan.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setSharingBoard(null);
+                    setSharePanelMessage("");
+                  }}
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(203,213,225,0.8)",
+                    background: "#ffffff",
+                    color: "#475569",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  alignItems: "center",
+                }}
+              >
+                <input
+                  value={shareEmailInput}
+                  onChange={(event) => setShareEmailInput(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter") {
+                      event.preventDefault();
+                      submitBoardShare().catch(() => null);
+                    }
+                  }}
+                  placeholder="Enter email address"
+                  style={{
+                    flex: "1 1 auto",
+                    height: "44px",
+                    padding: "0 14px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(203,213,225,0.86)",
+                    background: "#ffffff",
+                    color: "#0f172a",
+                    fontSize: "14px",
+                    outline: "none",
+                  }}
+                />
+                <button
+                  type="button"
+                  disabled={isSharePanelLoading || !shareEmailInput.trim()}
+                  onClick={() => submitBoardShare().catch(() => null)}
+                  style={{
+                    height: "44px",
+                    padding: "0 16px",
+                    borderRadius: "12px",
+                    border: "none",
+                    background:
+                      "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    fontWeight: 600,
+                    cursor:
+                      isSharePanelLoading || !shareEmailInput.trim()
+                        ? "default"
+                        : "pointer",
+                    opacity: isSharePanelLoading || !shareEmailInput.trim() ? 0.6 : 1,
+                  }}
+                >
+                  Share
+                </button>
+              </div>
+
+              {sharePanelMessage && (
+                <div
+                  style={{
+                    padding: "12px 14px",
+                    borderRadius: "12px",
+                    border:
+                      sharePanelTone === "success"
+                        ? "1px solid rgba(34,197,94,0.22)"
+                        : "1px solid rgba(239,68,68,0.18)",
+                    background:
+                      sharePanelTone === "success"
+                        ? "rgba(240,253,244,0.9)"
+                        : "rgba(254,242,242,0.95)",
+                    color:
+                      sharePanelTone === "success" ? "#166534" : "#b91c1c",
+                    fontSize: "13px",
+                    fontWeight: 500,
+                  }}
+                >
+                  {sharePanelMessage}
+                </div>
+              )}
+
+              <div style={{ display: "grid", gap: "10px" }}>
+                <div
+                  style={{
+                    color: "#0f172a",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                  }}
+                >
+                  People with access
+                </div>
+
+                {boardShares.length === 0 ? (
+                  <div
+                    style={{
+                      padding: "16px",
+                      borderRadius: "14px",
+                      border: "1px dashed rgba(203,213,225,0.86)",
+                      color: "#64748b",
+                      fontSize: "13px",
+                    }}
+                  >
+                    No one else has access yet.
+                  </div>
+                ) : (
+                  <div style={{ display: "grid", gap: "10px" }}>
+                    {boardShares.map((share) => (
+                      <div
+                        key={share.id}
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "12px",
+                          padding: "12px 14px",
+                          borderRadius: "14px",
+                          border: "1px solid rgba(226,232,240,0.92)",
+                          background: "#f8fafc",
+                        }}
+                      >
+                        <div
+                          style={{
+                            color: "#0f172a",
+                            fontSize: "14px",
+                            fontWeight: 500,
+                            overflow: "hidden",
+                            textOverflow: "ellipsis",
+                          }}
+                        >
+                          {share.email}
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isSharePanelLoading}
+                          onClick={() => removeBoardShare(share).catch(() => null)}
+                          style={{
+                            height: "34px",
+                            padding: "0 12px",
+                            borderRadius: "10px",
+                            border: "1px solid rgba(239,68,68,0.16)",
+                            background: "#ffffff",
+                            color: "#dc2626",
+                            fontSize: "13px",
+                            fontWeight: 600,
+                            cursor: isSharePanelLoading ? "default" : "pointer",
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
           </div>
         )}
 

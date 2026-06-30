@@ -24,7 +24,13 @@ export async function GET(request: NextRequest) {
     : null;
 
   return NextResponse.json(
-    await getUserBoards(supabase, user.id, profile?.plan ?? "basic")
+    await getUserBoards(
+      supabase,
+      user.id,
+      user.email,
+      profile?.plan ?? "basic",
+      profile?.subscriptionStatus ?? "inactive"
+    )
   );
 }
 
@@ -47,7 +53,13 @@ export async function POST(request: NextRequest) {
       : null;
 
     return NextResponse.json(
-      await createBoardForUser(supabase, user.id, profile?.plan ?? "basic")
+      await createBoardForUser(
+        supabase,
+        user.id,
+        user.email,
+        profile?.plan ?? "basic",
+        profile?.subscriptionStatus ?? "inactive"
+      )
     );
   } catch (error) {
     if (error instanceof Error && error.message === "BOARD_LIMIT_REACHED") {
