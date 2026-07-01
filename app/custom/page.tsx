@@ -1646,8 +1646,9 @@ export default function Page() {
       : "Basic"
     : "Free";
   const currentWorkspacePlanLabel = currentPlanLabel;
-  const displayedSavedBoardCount = Math.max(1, liveBoardsCount);
-  const currentWorkspaceStatusMessage = `You are currently logged in on the ${currentWorkspacePlanLabel} plan with ${displayedSavedBoardCount} saved board${displayedSavedBoardCount === 1 ? "" : "s"}.`;
+  const currentWorkspaceStatusMessage = hasUnlimitedBoards
+    ? `You are currently logged in on the ${currentWorkspacePlanLabel} plan with unlimited saved boards.`
+    : `You are currently logged in on the ${currentWorkspacePlanLabel} plan with up to ${currentMaxBoards} saved board${currentMaxBoards === 1 ? "" : "s"}.`;
   const currentPlanRank = hasActivePaidSubscription
     ? currentAccountPlan === "master"
       ? 3
