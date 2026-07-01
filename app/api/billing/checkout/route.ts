@@ -13,6 +13,12 @@ export const runtime = "nodejs";
 type BillingPlan = "basic" | "pro" | "master";
 type BillingCurrency = "pln" | "eur";
 
+const BILLING_PLAN_RANK: Record<BillingPlan, number> = {
+  basic: 0,
+  pro: 1,
+  master: 2,
+};
+
 const isBillingPlan = (value: string): value is BillingPlan =>
   value === "basic" || value === "pro" || value === "master";
 
@@ -38,6 +44,11 @@ const hasActiveSubscriptionStatus = (
 ) => status === "trialing" || status === "active" || status === "past_due";
 
 const getAppOrigin = (value: string) => value.replace(/\/+$/, "");
+
+const isPlanUpgrade = (
+  currentPlan: BillingPlan,
+  targetPlan: BillingPlan
+) => BILLING_PLAN_RANK[targetPlan] > BILLING_PLAN_RANK[currentPlan];
 
 const getPlanFromStripeSubscription = (
   subscription: Stripe.Subscription
@@ -220,6 +231,7 @@ export async function POST(request: NextRequest) {
         const activePlan = getPlanFromStripeSubscription(
           existingActiveSubscription
         );
+        const upgradingPlan = isPlanUpgrade(activePlan, targetPlan);
 
         if (activePlan === targetPlan) {
           const access = getWorkspaceAccess(targetPlan, "active");
@@ -249,29 +261,38 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        const upcomingInvoice = await stripe.invoices.createPreview({
-          customer: profile.stripeCustomerId,
-          subscription: existingActiveSubscription.id,
-          subscription_details: {
-            items: [
-              {
-                id: existingSubscriptionItem.id,
-                price: stripePriceId,
-              },
-            ],
-            proration_behavior: "create_prorations",
-          },
-        });
-        const estimatedImmediateCharge = upcomingInvoice.amount_due;
-        const estimatedNextMonthlyCharge =
-          upcomingInvoice.lines.data.find(
-            (line) =>
-              line.parent?.type === "subscription_item_details" &&
-              typeof line.pricing?.price_details?.price === "string" &&
-              line.pricing.price_details.price === stripePriceId
-          )?.amount ?? null;
+        let estimatedImmediateCharge: number | null = null;
+        let estimatedNextMonthlyCharge: number | null = null;
 
-        if (!confirmSubscriptionChange) {
+        if (upgradingPlan) {
+          const targetPrice = await stripe.prices.retrieve(stripePriceId);
+          estimatedImmediateCharge = 0;
+          estimatedNextMonthlyCharge = targetPrice.unit_amount;
+        } else {
+          const upcomingInvoice = await stripe.invoices.createPreview({
+            customer: profile.stripeCustomerId,
+            subscription: existingActiveSubscription.id,
+            subscription_details: {
+              items: [
+                {
+                  id: existingSubscriptionItem.id,
+                  price: stripePriceId,
+                },
+              ],
+              proration_behavior: "create_prorations",
+            },
+          });
+          estimatedImmediateCharge = upcomingInvoice.amount_due;
+          estimatedNextMonthlyCharge =
+            upcomingInvoice.lines.data.find(
+              (line) =>
+                line.parent?.type === "subscription_item_details" &&
+                typeof line.pricing?.price_details?.price === "string" &&
+                line.pricing.price_details.price === stripePriceId
+            )?.amount ?? null;
+        }
+
+        if (!upgradingPlan && !confirmSubscriptionChange) {
           const response = NextResponse.json(
             {
               ok: true,
@@ -301,7 +322,9 @@ export async function POST(request: NextRequest) {
                 price: stripePriceId,
               },
             ],
-            proration_behavior: "create_prorations",
+            proration_behavior: upgradingPlan
+              ? "none"
+              : "create_prorations",
             metadata: {
               ...existingActiveSubscription.metadata,
               targetPlan,
@@ -332,7 +355,9 @@ export async function POST(request: NextRequest) {
         const response = NextResponse.json(
           {
             ok: true,
-            message: `Your subscription has been updated to ${targetPlan}.`,
+            message: upgradingPlan
+              ? `Your workspace is now on ${targetPlan}. You will be charged the ${targetPlan} price on your next renewal date.`
+              : `Your subscription has been updated to ${targetPlan}.`,
             plan: targetPlan,
             subscriptionStatus: nextSubscriptionStatus,
             maxBoards: Number.isFinite(access.maxBoards) ? access.maxBoards : null,

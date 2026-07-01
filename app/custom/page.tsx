@@ -1745,6 +1745,27 @@ export default function Page() {
     }).format(amount / 100);
   };
 
+  const getBillingPlanBasePrice = (
+    plan: "basic" | "pro" | "master",
+    currency: "pln" | "eur"
+  ) => {
+    if (plan === "master") {
+      return currency === "eur" ? "24.99" : "79.99";
+    }
+
+    if (plan === "pro") {
+      return currency === "eur" ? "14.99" : "49.99";
+    }
+
+    return currency === "eur" ? "9.99" : "29.99";
+  };
+
+  const getBillingPlanRank = (plan: "basic" | "pro" | "master") => {
+    if (plan === "master") return 2;
+    if (plan === "pro") return 1;
+    return 0;
+  };
+
   const applyBillingCheckoutResponse = (data: {
     message?: string;
     plan?: "basic" | "pro" | "master";
@@ -1825,6 +1846,24 @@ export default function Page() {
         message: nextMessage,
         tone: "error",
       });
+      return;
+    }
+
+    if (
+      data.requiresPlanChangeConfirmation &&
+      !confirmSubscriptionChange &&
+      (data.estimatedImmediateCharge ?? null) === 0 &&
+      getBillingPlanRank(data.targetPlan ?? targetPlan) >
+        getBillingPlanRank(data.currentPlan ?? currentAccountPlan)
+    ) {
+      setBillingMessageTone("success");
+      setBillingMessage(
+        `Your upgrade starts now. From next month you will be charged ${getBillingPlanBasePrice(
+          data.targetPlan ?? targetPlan,
+          data.currency ?? billingCurrency
+        )} ${(data.currency ?? billingCurrency).toUpperCase()} per month.`
+      );
+      await runPlanCheckout(targetPlan, true);
       return;
     }
 
@@ -7939,7 +7978,21 @@ export default function Page() {
                               }}
                             >
                               {billingChangeRequest ? (
-                                <>
+                                (() => {
+                                  const isFreeUpgradeNow =
+                                    billingChangeRequest.estimatedImmediateCharge === 0;
+                                  const nextMonthlyPrice =
+                                    formatBillingAmount(
+                                      billingChangeRequest.estimatedNextMonthlyCharge,
+                                      billingChangeRequest.currency
+                                    ) ??
+                                    `${getBillingPlanBasePrice(
+                                      billingChangeRequest.targetPlan,
+                                      billingChangeRequest.currency
+                                    )} ${billingChangeRequest.currency.toUpperCase()}`;
+
+                                  return (
+                                    <>
                                   <div
                                     style={{
                                       color: "#0f172a",
@@ -7988,10 +8041,12 @@ export default function Page() {
                                     >
                                       <span>Estimated charge now</span>
                                       <strong style={{ color: "#0f172a" }}>
-                                        {formatBillingAmount(
-                                          billingChangeRequest.estimatedImmediateCharge,
-                                          billingChangeRequest.currency
-                                        ) ?? "Estimated by Stripe"}
+                                        {isFreeUpgradeNow
+                                          ? `0 ${billingChangeRequest.currency.toUpperCase()}`
+                                          : formatBillingAmount(
+                                              billingChangeRequest.estimatedImmediateCharge,
+                                              billingChangeRequest.currency
+                                            ) ?? "Estimated by Stripe"}
                                       </strong>
                                     </div>
                                     <div
@@ -8003,13 +8058,13 @@ export default function Page() {
                                         color: "#334155",
                                       }}
                                     >
-                                      <span>Next monthly price</span>
+                                      <span>
+                                        {isFreeUpgradeNow
+                                          ? "Next renewal price"
+                                          : "Next monthly price"}
+                                      </span>
                                       <strong style={{ color: "#0f172a" }}>
-                                        {formatBillingAmount(
-                                          billingChangeRequest.estimatedNextMonthlyCharge,
-                                          billingChangeRequest.currency
-                                        ) ??
-                                          `${billingChangeRequest.targetPlan === "master" ? "79.99" : billingChangeRequest.targetPlan === "pro" ? "49.99" : "29.99"} ${billingChangeRequest.currency.toUpperCase()}`}
+                                        {nextMonthlyPrice}
                                       </strong>
                                     </div>
                                   </div>
@@ -8020,7 +8075,9 @@ export default function Page() {
                                       lineHeight: 1.55,
                                     }}
                                   >
-                                    Stripe may prorate the remaining days in your current billing period automatically.
+                                    {isFreeUpgradeNow
+                                      ? "Your upgrade starts right away. You keep the higher plan for the rest of this billing cycle at no extra cost, then Stripe charges the normal monthly price on your next renewal date."
+                                      : "Stripe may prorate the remaining days in your current billing period automatically."}
                                   </div>
                                   <div
                                     style={{
@@ -8078,7 +8135,9 @@ export default function Page() {
                                       Confirm change
                                     </button>
                                   </div>
-                                </>
+                                    </>
+                                  );
+                                })()
                               ) : billingNotice ? (
                                 <>
                                   <div
