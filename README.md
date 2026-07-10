@@ -39,7 +39,16 @@ STRIPE_PRICE_MASTER_MONTHLY_PLN=
 STRIPE_PRICE_BASIC_MONTHLY_EUR=
 STRIPE_PRICE_PRO_MONTHLY_EUR=
 STRIPE_PRICE_MASTER_MONTHLY_EUR=
+SITE_CLOSED=false
 ```
+
+## Maintenance Mode
+
+Set `SITE_CLOSED=true` in Vercel and redeploy to show the maintenance page
+instead of the app. Set `SITE_CLOSED=false` and redeploy to reopen the app.
+
+While maintenance mode is on, `/privacy`, `/terms`, and static assets stay
+public, app pages redirect to `/maintenance`, and app API routes return `503`.
 
 3. Run the Supabase SQL in this order:
 
