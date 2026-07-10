@@ -196,8 +196,6 @@ export default function Page() {
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
-  const topBarGuestActionFontFamily =
-    '"Inter Tight", "Segoe UI Variable Display", "Inter", "Helvetica Neue", Arial, sans-serif';
   const accountPanelFontFamily = appSansFontFamily;
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
@@ -278,7 +276,6 @@ export default function Page() {
     const hourLabel =
       hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
     const meridiem = hour < 12 ? "AM" : "PM";
-    const minuteLabel = minutes === "00" ? "" : `:${minutes}`;
     const compactLabel = `${hour.toString().padStart(2, "0")}:${minutes}`;
 
     return {
@@ -571,8 +568,6 @@ export default function Page() {
   const textPaddingX = 4;
   const textPaddingY = 2;
   const textLineHeight = 1.25;
-  const textBoxSize = 200;
-  const textBoxTextColor = "#ffffff";
   const textEditorTypography = {
     letterSpacing: "0",
     wordSpacing: "0",
@@ -2359,12 +2354,6 @@ export default function Page() {
     if (!option) return hour;
     return format === "short" ? option.shortLabel : option.label;
   };
-
-  const getCalendarHourRangeLabel = (entry: CalendarEntry) =>
-    `${getCalendarHourLabel(entry.startHour, "short")} - ${getCalendarHourLabel(
-      entry.endHour,
-      "short"
-    )}`;
 
   const getCalendarEntryColor = (entry: CalendarEntry) =>
     normalizeCalendarEntryColor(entry.color, entry.id);
@@ -5076,7 +5065,6 @@ export default function Page() {
 
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
-  const isTextBoxActive = tool === "textbox";
   const isPenActive = tool === "pen";
   const isDarkCanvas = canvasBackground === darkCanvasColor;
   const isGreyCanvas = canvasBackground === greyCanvasColor;

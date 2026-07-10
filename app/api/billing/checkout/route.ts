@@ -74,15 +74,6 @@ const resolveStripePriceId = (
     }
   }
 
-  // Temporary production fallback for the live Basic PLN checkout path.
-  // This keeps checkout testable while Vercel env editing is being sorted out.
-  if (plan === "basic" && currency === "pln") {
-    return {
-      priceId: "price_1Tougg2QRL4DVk5CJfDt10TV",
-      checkedKeys,
-    };
-  }
-
   return { checkedKeys };
 };
 
@@ -442,8 +433,8 @@ export async function POST(request: NextRequest) {
           userId: profile.id,
         },
       },
-      success_url: `${appOrigin}/custom?view=plan&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appOrigin}/custom?view=plan&checkout=cancelled&plan=${targetPlan}`,
+      success_url: `${appOrigin}/?view=plan&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appOrigin}/?view=plan&checkout=cancelled&plan=${targetPlan}`,
     });
   } catch (error) {
     return NextResponse.json(

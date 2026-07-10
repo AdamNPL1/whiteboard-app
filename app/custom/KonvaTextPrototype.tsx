@@ -118,22 +118,35 @@ export default function KonvaTextPrototype({
 
   useEffect(() => {
     if (interactive) return;
-    setIsEditing(false);
-    setShowColorPalette(false);
+
+    const frame = window.requestAnimationFrame(() => {
+      setIsEditing(false);
+      setShowColorPalette(false);
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
   }, [interactive]);
 
   useEffect(() => {
-    if (!active) {
-      setIsEditing(false);
-      setIsSelected(false);
-      setShowColorPalette(false);
-      return;
-    }
+    const frame = window.requestAnimationFrame(() => {
+      if (!active) {
+        setIsEditing(false);
+        setIsSelected(false);
+        setShowColorPalette(false);
+        return;
+      }
 
-    if (isVisible) {
-      setIsSelected(true);
-    }
-  }, [active, isVisible, textObject.text]);
+      if (isVisible) {
+        setIsSelected(true);
+      }
+    });
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+    };
+  }, [active, isVisible]);
 
   useEffect(() => {
     if (!isEditing) return;
