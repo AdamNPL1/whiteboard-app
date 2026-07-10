@@ -1,5 +1,5 @@
-import { redirect } from "next/navigation";
+import CustomPage from "./custom/page";
 
 export default function Home() {
-  redirect("/register");
+  return <CustomPage />;
 }
