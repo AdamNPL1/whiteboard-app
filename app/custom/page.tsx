@@ -1,5 +1,6 @@
 ﻿"use client";
 
+import Link from "next/link";
 import { useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   Pen,
@@ -40,6 +41,7 @@ import {
   UserRound,
   X,
 } from "lucide-react";
+import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
@@ -133,6 +135,7 @@ type GridMode = "none" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
 type AuthMode = "login" | "register";
+type SocialAuthProvider = "google" | "apple";
 type PublicAccount = {
   id: string;
   name: string;
@@ -142,6 +145,8 @@ type PublicAccount = {
   updatedAt?: string;
   plan: "basic" | "pro" | "master";
   subscriptionStatus: "inactive" | "trialing" | "active" | "past_due" | "canceled";
+  subscriptionCancelAtPeriodEnd?: boolean;
+  subscriptionCurrentPeriodEnd?: string | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   onboardingStatus: "new" | "started" | "completed";
@@ -191,6 +196,9 @@ export default function Page() {
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+  const topBarGuestActionFontFamily =
+    '"Inter Tight", "Segoe UI Variable Display", "Inter", "Helvetica Neue", Arial, sans-serif';
+  const accountPanelFontFamily = appSansFontFamily;
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
   const darkCanvasColor = "#111111";
@@ -440,6 +448,10 @@ export default function Page() {
   const [currentSubscriptionStatus, setCurrentSubscriptionStatus] = useState<
     "inactive" | "trialing" | "active" | "past_due" | "canceled"
   >("inactive");
+  const [currentSubscriptionCancelAtPeriodEnd, setCurrentSubscriptionCancelAtPeriodEnd] =
+    useState(false);
+  const [currentSubscriptionCurrentPeriodEnd, setCurrentSubscriptionCurrentPeriodEnd] =
+    useState<string | null>(null);
   const [currentMaxBoards, setCurrentMaxBoards] = useState(5);
   const [billingMessage, setBillingMessage] = useState("");
   const [billingMessageTone, setBillingMessageTone] = useState<
@@ -491,7 +503,7 @@ export default function Page() {
   const [editingCalendarEntryId, setEditingCalendarEntryId] = useState("");
   const [selectedCalendarEntryId, setSelectedCalendarEntryId] = useState("");
   const [isBoardsLoading, setIsBoardsLoading] = useState(false);
-  const [isRegisterHovered, setIsRegisterHovered] = useState(false);
+  const [isRegisterCtaHovered, setIsRegisterCtaHovered] = useState(false);
   const [isFloralBackgroundLoaded, setIsFloralBackgroundLoaded] =
     useState(false);
   const [panningCursorPoint, setPanningCursorPoint] = useState<Point | null>(
@@ -999,6 +1011,12 @@ export default function Page() {
           setCurrentAccountEmail(data.user.email ?? email);
           setCurrentAccountPlan(data.user.plan ?? "basic");
           setCurrentSubscriptionStatus(data.user.subscriptionStatus ?? "inactive");
+          setCurrentSubscriptionCancelAtPeriodEnd(
+            data.user.subscriptionCancelAtPeriodEnd ?? false
+          );
+          setCurrentSubscriptionCurrentPeriodEnd(
+            data.user.subscriptionCurrentPeriodEnd ?? null
+          );
           setAuthMessage("");
           setShowLoginModal(false);
           return;
@@ -1021,8 +1039,7 @@ export default function Page() {
       setCurrentAccountId(data.user?.id ?? "");
       setCurrentAccountName(data.user?.name ?? "");
       setCurrentAccountEmail(data.user?.email ?? email);
-      setCurrentAccountPlan(data.user?.plan ?? "basic");
-      setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
+      await loadCurrentAccount();
       setAuthPassword("");
       setAuthMessage("");
       setShowLoginModal(false);
@@ -1087,6 +1104,8 @@ export default function Page() {
     setCurrentAccountEmail("");
     setCurrentAccountPlan("basic");
     setCurrentSubscriptionStatus("inactive");
+    setCurrentSubscriptionCancelAtPeriodEnd(false);
+    setCurrentSubscriptionCurrentPeriodEnd(null);
     setCurrentMaxBoards(5);
     setBoards([]);
     setActiveBoardId("");
@@ -1101,7 +1120,9 @@ export default function Page() {
   };
 
   const loadCurrentAccount = async () => {
-    const data = (await fetch("/api/auth/me")
+    const data = (await fetch("/api/auth/me", {
+      cache: "no-store",
+    })
       .then((response) => response.json())
       .catch(() => ({ user: null }))) as { user: PublicAccount | null };
 
@@ -1110,6 +1131,12 @@ export default function Page() {
     setCurrentAccountEmail(data.user?.email ?? "");
     setCurrentAccountPlan(data.user?.plan ?? "basic");
     setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
+    setCurrentSubscriptionCancelAtPeriodEnd(
+      data.user?.subscriptionCancelAtPeriodEnd ?? false
+    );
+    setCurrentSubscriptionCurrentPeriodEnd(
+      data.user?.subscriptionCurrentPeriodEnd ?? null
+    );
   };
 
   const closeAuthModal = () => {
@@ -1649,6 +1676,17 @@ export default function Page() {
   const currentWorkspaceStatusMessage = hasUnlimitedBoards
     ? `You are currently logged in on the ${currentWorkspacePlanLabel} plan with unlimited saved boards.`
     : `You are currently logged in on the ${currentWorkspacePlanLabel} plan with up to ${currentMaxBoards} saved board${currentMaxBoards === 1 ? "" : "s"}.`;
+  const currentSubscriptionEndLabel = currentSubscriptionCurrentPeriodEnd
+    ? new Intl.DateTimeFormat("en", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      }).format(new Date(currentSubscriptionCurrentPeriodEnd))
+    : "";
+  const currentSubscriptionEndingMessage =
+    currentSubscriptionCancelAtPeriodEnd && currentSubscriptionEndLabel
+      ? `Your ${currentWorkspacePlanLabel} plan is scheduled to end on ${currentSubscriptionEndLabel}.`
+      : "";
   const currentPlanRank = hasActivePaidSubscription
     ? currentAccountPlan === "master"
       ? 3
@@ -2025,6 +2063,20 @@ export default function Page() {
     };
   }, [currentAccountId]);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+
+    if (searchParams.get("view") !== "plan") {
+      return;
+    }
+
+    void loadCurrentAccount();
+  }, []);
+
   const calendarSchedules = isCalendarBrowserVisible
     ? [...normalizeCalendarEntries(calendarEntries)]
         .filter((entry) =>
@@ -2040,19 +2092,52 @@ export default function Page() {
     : [];
 
   const billingCurrencyLabel = billingCurrency.toUpperCase();
+  const topBarPaletteGradient =
+    "linear-gradient(90deg, #8b46ff 0%, #4b8fff 46%, #19c3bc 78%, #30cf68 100%)";
+  const signatureIndigoGradient =
+    `linear-gradient(0deg, rgba(4,8,34,0.12), rgba(4,8,34,0.12)), ${topBarPaletteGradient}`;
+  const signatureIndigoButtonGradient =
+    `linear-gradient(0deg, rgba(12,19,63,0.12), rgba(12,19,63,0.12)), ${topBarPaletteGradient}`;
+  const topBarSoftCardGradient =
+    "linear-gradient(135deg, rgba(235,142,76,0.16) 0%, rgba(248,207,96,0.13) 18%, rgba(239,226,114,0.12) 34%, rgba(145,203,114,0.1) 54%, rgba(66,179,182,0.11) 76%, rgba(104,168,239,0.16) 100%)";
+  const topBarWarmCardGradient =
+    "linear-gradient(135deg, rgba(235,142,76,0.17) 0%, rgba(248,207,96,0.14) 30%, rgba(255,255,255,0.98) 72%, rgba(104,168,239,0.1) 100%)";
+  const topBarCoolCardGradient =
+    "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,226,114,0.1) 24%, rgba(66,179,182,0.12) 68%, rgba(104,168,239,0.15) 100%)";
+  const topBarFeaturedChipGradient =
+    "linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)";
+  const topBarGradient =
+    `linear-gradient(154deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 9.5%, rgba(255,255,255,0.14) 10.2%, rgba(255,255,255,0.1) 10.7%, rgba(255,255,255,0.02) 12.6%, rgba(255,255,255,0) 14.3%), linear-gradient(26deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 33%, rgba(255,255,255,0.12) 33.7%, rgba(255,255,255,0.09) 34.15%, rgba(255,255,255,0.02) 35.8%, rgba(255,255,255,0) 37.5%), linear-gradient(154deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 58%, rgba(255,255,255,0.14) 58.7%, rgba(255,255,255,0.1) 59.15%, rgba(255,255,255,0.02) 60.8%, rgba(255,255,255,0) 62.4%), linear-gradient(166deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 18%, rgba(255,255,255,0.08) 19%, rgba(255,255,255,0.045) 29%, rgba(255,255,255,0.008) 40%, rgba(255,255,255,0) 46%), linear-gradient(14deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 36%, rgba(255,255,255,0.1) 37%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.01) 60%, rgba(255,255,255,0) 67%), ${topBarPaletteGradient}`;
+  const premiumHeadingStyle = {
+    letterSpacing: "-0.045em",
+    fontWeight: 650,
+    textRendering: "optimizeLegibility" as const,
+    WebkitFontSmoothing: "antialiased" as const,
+    MozOsxFontSmoothing: "grayscale" as const,
+  };
+  const premiumBodyStyle = {
+    textRendering: "optimizeLegibility" as const,
+    WebkitFontSmoothing: "antialiased" as const,
+    MozOsxFontSmoothing: "grayscale" as const,
+  };
+  const premiumShellShadow =
+    "0 30px 86px rgba(15,23,42,0.16), 0 1px 0 rgba(255,255,255,0.82) inset";
+  const premiumCardShadow =
+    "0 18px 44px rgba(15,23,42,0.08), 0 1px 0 rgba(255,255,255,0.7) inset";
+  const premiumFeaturedCardShadow =
+    "0 30px 74px rgba(31,74,178,0.24), 0 1px 0 rgba(255,255,255,0.14) inset";
   const billingPlans = [
     {
       name: "Basic",
       value: "basic" as const,
       prices: { pln: "29.99", eur: "9.99" },
       priceSuffix: `${billingCurrencyLabel} / month`,
-      accent:
-        "linear-gradient(180deg, rgba(124,58,237,0.08) 0%, rgba(255,255,255,0.98) 62%, rgba(59,130,246,0.06) 100%)",
-      border: "rgba(124,58,237,0.22)",
+      accent: topBarWarmCardGradient,
+      border: "rgba(217,138,86,0.24)",
       text: "#1f2937",
-      buttonBackground: "#f5f3ff",
-      buttonText: "#6d28d9",
-      checkBackground: "rgba(124,58,237,0.1)",
+      buttonBackground: "rgba(255,255,255,0.78)",
+      buttonText: "#c25c2f",
+      checkBackground: "rgba(217,138,86,0.12)",
       features: [
         "Up to 5 boards",
         "Share with up to 1 person",
@@ -2063,7 +2148,7 @@ export default function Page() {
       value: "pro" as const,
       prices: { pln: "49.99", eur: "14.99" },
       priceSuffix: `${billingCurrencyLabel} / month`,
-      accent: "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+      accent: signatureIndigoGradient,
       border: "rgba(59,130,246,0.3)",
       text: "#ffffff",
       buttonBackground: "#ffffff",
@@ -2081,13 +2166,12 @@ export default function Page() {
       value: "master" as const,
       prices: { pln: "79.99", eur: "21.99" },
       priceSuffix: `${billingCurrencyLabel} / month`,
-      accent:
-        "linear-gradient(180deg, rgba(34,197,94,0.08) 0%, rgba(255,255,255,0.98) 58%, rgba(59,130,246,0.08) 100%)",
-      border: "rgba(34,197,94,0.22)",
+      accent: topBarCoolCardGradient,
+      border: "rgba(89,171,168,0.26)",
       text: "#0f172a",
-      buttonBackground: "#f0fdf4",
-      buttonText: "#166534",
-      checkBackground: "rgba(34,197,94,0.12)",
+      buttonBackground: "rgba(255,255,255,0.72)",
+      buttonText: "#16738a",
+      checkBackground: "rgba(89,171,168,0.14)",
       features: [
         "Unlimited boards",
         "Share with up to 10 people",
@@ -3154,6 +3238,68 @@ export default function Page() {
   const getStrokeLineCap = (style: StrokeStyle | undefined) =>
     style === "dashed" ? "butt" : "round";
 
+  const getSmoothedStrokePoints = (points: Point[]) => {
+    if (points.length < 3) return points;
+
+    const smoothPass = (input: Point[]) => {
+      const output = [input[0]];
+
+      for (let i = 1; i < input.length - 1; i += 1) {
+        const previous = input[i - 1];
+        const current = input[i];
+        const next = input[i + 1];
+
+        output.push({
+          x: previous.x * 0.2 + current.x * 0.6 + next.x * 0.2,
+          y: previous.y * 0.2 + current.y * 0.6 + next.y * 0.2,
+        });
+      }
+
+      output.push(input[input.length - 1]);
+      return output;
+    };
+
+    const firstPass = smoothPass(points);
+    return points.length > 5 ? smoothPass(firstPass) : firstPass;
+  };
+
+  const handleSocialAuth = async (provider: SocialAuthProvider) => {
+    if (isAuthSubmitting) return;
+
+    setIsAuthSubmitting(true);
+    setAuthMessage("");
+    setCanResendConfirmation(false);
+
+    try {
+      const supabase = getSupabaseBrowserClient();
+      const redirectTo = `${window.location.origin}/auth/callback?next=/custom`;
+      const { data, error } = await supabase.auth.signInWithOAuth({
+        provider,
+        options: {
+          redirectTo,
+        },
+      });
+
+      if (error) {
+        throw error;
+      }
+
+      if (!data.url) {
+        throw new Error("Could not start social login.");
+      }
+
+      window.location.assign(data.url);
+    } catch (error) {
+      const providerLabel = provider === "google" ? "Google" : "Apple";
+      setAuthMessage(
+        error instanceof Error
+          ? error.message
+          : `${providerLabel} login is not available right now.`
+      );
+      setIsAuthSubmitting(false);
+    }
+  };
+
   const drawStrokePath = (
     ctx: CanvasRenderingContext2D,
     points: Point[],
@@ -3162,13 +3308,15 @@ export default function Page() {
   ) => {
     if (!points.length) return;
 
+    const smoothedPoints = getSmoothedStrokePoints(points);
+
     ctx.lineCap = getStrokeLineCap(style);
     ctx.lineJoin = "round";
     ctx.lineWidth = width;
     ctx.setLineDash(getStrokeDashPattern(style, width));
 
-    if (points.length === 1) {
-      const point = points[0];
+    if (smoothedPoints.length === 1) {
+      const point = smoothedPoints[0];
       ctx.beginPath();
       ctx.arc(point.x, point.y, width / 2, 0, Math.PI * 2);
       ctx.fill();
@@ -3176,21 +3324,21 @@ export default function Page() {
     }
 
     ctx.beginPath();
-    ctx.moveTo(points[0].x, points[0].y);
+    ctx.moveTo(smoothedPoints[0].x, smoothedPoints[0].y);
 
-    if (points.length === 2) {
-      ctx.lineTo(points[1].x, points[1].y);
+    if (smoothedPoints.length === 2) {
+      ctx.lineTo(smoothedPoints[1].x, smoothedPoints[1].y);
       ctx.stroke();
       return;
     }
 
-    const tension = 0.18;
+    const tension = 0.14;
 
-    for (let i = 0; i < points.length - 1; i++) {
-      const p0 = points[i - 1] ?? points[i];
-      const p1 = points[i];
-      const p2 = points[i + 1];
-      const p3 = points[i + 2] ?? p2;
+    for (let i = 0; i < smoothedPoints.length - 1; i++) {
+      const p0 = smoothedPoints[i - 1] ?? smoothedPoints[i];
+      const p1 = smoothedPoints[i];
+      const p2 = smoothedPoints[i + 1];
+      const p3 = smoothedPoints[i + 2] ?? p2;
 
       ctx.bezierCurveTo(
         p1.x + (p2.x - p0.x) * tension,
@@ -3808,6 +3956,30 @@ export default function Page() {
     loadCurrentAccount();
   }, []);
 
+  useEffect(() => {
+    if (typeof window === "undefined") {
+      return;
+    }
+
+    const refreshAccountState = () => {
+      if (document.visibilityState === "hidden") {
+        return;
+      }
+
+      void loadCurrentAccount();
+    };
+
+    window.addEventListener("focus", refreshAccountState);
+    window.addEventListener("pageshow", refreshAccountState);
+    document.addEventListener("visibilitychange", refreshAccountState);
+
+    return () => {
+      window.removeEventListener("focus", refreshAccountState);
+      window.removeEventListener("pageshow", refreshAccountState);
+      document.removeEventListener("visibilitychange", refreshAccountState);
+    };
+  }, []);
+
   const isPositiveAuthMessage =
     typeof authMessage === "string" &&
     /check your email|account created|verified|utworzone|sent/i.test(
@@ -4299,7 +4471,7 @@ export default function Page() {
     const previousPoint = stroke.points[stroke.points.length - 1];
     const minDistance =
       stroke.tool === "pen"
-        ? Math.max(0.18, 0.45 / zoomRef.current)
+        ? Math.max(0.24, 0.6 / zoomRef.current)
         : Math.max(0.25, 0.7 / zoomRef.current);
 
     if (previousPoint) {
@@ -4320,7 +4492,7 @@ export default function Page() {
 
       if (stroke.tool === "pen") {
         const smoothing =
-          distance > 18 ? 0.94 : distance > 10 ? 0.88 : distance > 4 ? 0.78 : 0.64;
+          distance > 18 ? 0.9 : distance > 10 ? 0.82 : distance > 4 ? 0.72 : 0.58;
         const stabilizedPoint = {
           x: previousPoint.x + (point.x - previousPoint.x) * smoothing,
           y: previousPoint.y + (point.y - previousPoint.y) * smoothing,
@@ -4330,8 +4502,8 @@ export default function Page() {
           stabilizedPoint.y - previousPoint.y
         );
         const interpolationSteps = Math.min(
-          4,
-          Math.max(1, Math.floor(stabilizedDistance / 3.5))
+          5,
+          Math.max(1, Math.floor(stabilizedDistance / 2.8))
         );
 
         for (let step = 1; step <= interpolationSteps; step += 1) {
@@ -6355,14 +6527,19 @@ export default function Page() {
             }}
             style={{
               width: "min(390px, calc(100vw - 32px))",
-              padding: "22px",
-              borderRadius: "22px",
-              border: "1px solid rgba(255,255,255,0.34)",
+              padding: "24px",
+              borderRadius: "24px",
+              border: "1px solid rgba(255,255,255,0.56)",
               background:
-                "linear-gradient(180deg, rgba(255,255,255,0.96), rgba(248,250,252,0.92))",
+                "linear-gradient(180deg, rgba(255,255,255,0.985) 0%, rgba(248,251,255,0.965) 100%)",
               boxShadow:
-                "0 26px 80px rgba(17,24,39,0.32), inset 0 1px 0 rgba(255,255,255,0.85)",
+                "0 30px 90px rgba(17,24,39,0.24), 0 10px 28px rgba(59,130,246,0.08), inset 0 1px 0 rgba(255,255,255,0.94)",
               color: "#111827",
+              backdropFilter: "blur(20px)",
+              fontFamily: appSansFontFamily,
+              textRendering: "optimizeLegibility",
+              WebkitFontSmoothing: "antialiased",
+              MozOsxFontSmoothing: "grayscale",
             }}
           >
             <div
@@ -6377,18 +6554,17 @@ export default function Page() {
               <div>
                 <div
                   style={{
-                    fontSize: 0,
+                    fontSize: "25px",
                     fontWeight: 800,
-                    letterSpacing: "0",
-                    lineHeight: 1.05,
+                    letterSpacing: "-0.045em",
+                    lineHeight: 1.02,
+                    color: "#0f172a",
+                    textRendering: "optimizeLegibility",
+                    WebkitFontSmoothing: "antialiased",
+                    MozOsxFontSmoothing: "grayscale",
                   }}
                 >
-                  <span style={{ fontSize: "24px" }}>
-                    {authMode === "register"
-                      ? "Utworz konto"
-                      : "Zaloguj sie"}
-                  </span>
-                  Zaloguj się
+                  {authMode === "register" ? "Utworz konto" : "Zaloguj sie"}
                 </div>
                 <div
                   style={{
@@ -6396,6 +6572,7 @@ export default function Page() {
                     color: "#64748b",
                     fontSize: "14px",
                     fontWeight: 500,
+                    letterSpacing: "-0.015em",
                   }}
                 >
                   Wróć do swojej tablicy.
@@ -6406,16 +6583,18 @@ export default function Page() {
                 aria-label="Zamknij logowanie"
                 onClick={closeAuthModal}
                 style={{
-                  width: "34px",
-                  height: "34px",
-                  borderRadius: "10px",
-                  border: "none",
-                  background: "rgba(15,23,42,0.06)",
-                  color: "#111827",
+                  width: "36px",
+                  height: "36px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(203,213,225,0.78)",
+                  background: "linear-gradient(180deg, rgba(255,255,255,0.92), rgba(244,247,251,0.92))",
+                  color: "#0f172a",
                   display: "grid",
                   placeItems: "center",
                   cursor: "pointer",
                   flexShrink: 0,
+                  boxShadow: "0 10px 24px rgba(15,23,42,0.07), inset 0 1px 0 rgba(255,255,255,0.84)",
+                  transition: "transform 0.18s ease, box-shadow 0.18s ease, background 0.18s ease",
                 }}
               >
                 <X size={18} />
@@ -6430,23 +6609,30 @@ export default function Page() {
                 marginBottom: "14px",
               }}
             >
-              {["Google", "Apple"].map((provider) => (
+              {[
+                { label: "Google", value: "google" as const },
+                { label: "Apple", value: "apple" as const },
+              ].map((provider) => (
                 <button
-                  key={provider}
+                  key={provider.value}
                   type="button"
+                  disabled={isAuthSubmitting}
+                  onClick={() => void handleSocialAuth(provider.value)}
                   style={{
-                    height: "42px",
-                    borderRadius: "12px",
-                    border: "1px solid rgba(15,23,42,0.12)",
-                    background: "#ffffff",
+                    height: "44px",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(203,213,225,0.9)",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(248,250,252,0.98))",
                     color: "#111827",
                     fontSize: "14px",
                     fontWeight: 700,
-                    cursor: "pointer",
-                    boxShadow: "0 8px 20px rgba(15,23,42,0.06)",
+                    cursor: isAuthSubmitting ? "default" : "pointer",
+                    boxShadow: "0 10px 22px rgba(15,23,42,0.055), inset 0 1px 0 rgba(255,255,255,0.9)",
+                    letterSpacing: "-0.01em",
+                    opacity: isAuthSubmitting ? 0.72 : 1,
                   }}
                 >
-                  {provider}
+                  {provider.label}
                 </button>
               ))}
             </div>
@@ -6456,15 +6642,17 @@ export default function Page() {
                 display: "flex",
                 alignItems: "center",
                 gap: "10px",
-                margin: "12px 0",
-                color: "#94a3b8",
+                margin: "14px 0 16px",
+                color: "#9aa8ba",
                 fontSize: "12px",
-                fontWeight: 700,
+                fontWeight: 800,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
               }}
             >
-              <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+              <div style={{ height: "1px", flex: 1, background: "linear-gradient(90deg, rgba(226,232,240,0), rgba(226,232,240,1))" }} />
               lub
-              <div style={{ height: "1px", flex: 1, background: "#e2e8f0" }} />
+              <div style={{ height: "1px", flex: 1, background: "linear-gradient(90deg, rgba(226,232,240,1), rgba(226,232,240,0))" }} />
             </div>
 
             {authMode === "register" && (
@@ -6493,16 +6681,17 @@ export default function Page() {
                   onChange={(e) => setAuthName(e.currentTarget.value)}
                   style={{
                     width: "100%",
-                    height: "44px",
+                    height: "46px",
                     padding: "0 14px",
-                    borderRadius: "13px",
-                    border: "1px solid rgba(15,23,42,0.14)",
-                    background: "#ffffff",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(203,213,225,0.92)",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98))",
                     color: "#111827",
                     fontSize: "15px",
                     fontWeight: 600,
                     boxSizing: "border-box",
                     outlineColor: "#7c3aed",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px rgba(15,23,42,0.035)",
                   }}
                 />
               </label>
@@ -6544,16 +6733,17 @@ export default function Page() {
                   onChange={(e) => setAuthEmail(e.currentTarget.value)}
                   style={{
                     width: "100%",
-                    height: "44px",
+                    height: "46px",
                     padding: "0 14px 0 40px",
-                    borderRadius: "13px",
-                    border: "1px solid rgba(15,23,42,0.14)",
-                    background: "#ffffff",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(203,213,225,0.92)",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98))",
                     color: "#111827",
                     fontSize: "15px",
                     fontWeight: 600,
                     boxSizing: "border-box",
                     outlineColor: "#7c3aed",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px rgba(15,23,42,0.035)",
                   }}
                 />
               </div>
@@ -6597,16 +6787,17 @@ export default function Page() {
                   placeholder="Wpisz hasło"
                   style={{
                     width: "100%",
-                    height: "44px",
+                    height: "46px",
                     padding: "0 14px 0 40px",
-                    borderRadius: "13px",
-                    border: "1px solid rgba(15,23,42,0.14)",
-                    background: "#ffffff",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(203,213,225,0.92)",
+                    background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98))",
                     color: "#111827",
                     fontSize: "15px",
                     fontWeight: 600,
                     boxSizing: "border-box",
                     outlineColor: "#7c3aed",
+                    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px rgba(15,23,42,0.035)",
                   }}
                 />
               </div>
@@ -6646,16 +6837,17 @@ export default function Page() {
                     }
                     style={{
                       width: "100%",
-                      height: "44px",
+                      height: "46px",
                       padding: "0 14px 0 40px",
-                      borderRadius: "13px",
-                      border: "1px solid rgba(15,23,42,0.14)",
-                      background: "#ffffff",
+                      borderRadius: "14px",
+                      border: "1px solid rgba(203,213,225,0.92)",
+                      background: "linear-gradient(180deg, rgba(255,255,255,0.98), rgba(250,252,255,0.98))",
                       color: "#111827",
                       fontSize: "15px",
                       fontWeight: 600,
                       boxSizing: "border-box",
                       outlineColor: "#7c3aed",
+                      boxShadow: "inset 0 1px 0 rgba(255,255,255,0.9), 0 4px 12px rgba(15,23,42,0.035)",
                     }}
                   />
                 </div>
@@ -6668,7 +6860,7 @@ export default function Page() {
                 alignItems: "center",
                 justifyContent: "space-between",
                 gap: "12px",
-                marginBottom: "16px",
+                marginBottom: "18px",
                 color: "#64748b",
                 fontSize: "13px",
                 fontWeight: 700,
@@ -6745,43 +6937,43 @@ export default function Page() {
               disabled={isAuthSubmitting}
               style={{
                 width: "100%",
-                height: "46px",
-                borderRadius: "14px",
+                height: "48px",
+                borderRadius: "16px",
                 border: "none",
                 background:
-                  "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                  signatureIndigoButtonGradient,
                 color: "#ffffff",
                 fontSize: 0,
                 fontWeight: 800,
                 cursor: isAuthSubmitting ? "default" : "pointer",
                 opacity: isAuthSubmitting ? 0.72 : 1,
-                boxShadow: "0 14px 30px rgba(79,70,229,0.28)",
+                boxShadow: "0 16px 36px rgba(79,70,229,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
+                transition: "transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease",
               }}
             >
-              <span style={{ fontSize: "16px" }}>
+              <span style={{ fontSize: "16px", letterSpacing: "-0.02em" }}>
                 {isAuthSubmitting
                   ? "Please wait..."
                   : authMode === "register"
                   ? "Create account"
                   : "Log in"}
               </span>
-              Zaloguj się
             </button>
 
             <div
               style={{
                 display: "block",
-                marginTop: "16px",
+                marginTop: "18px",
                 textAlign: "center",
                 color: "#64748b",
-                fontSize: 0,
+                fontSize: "13px",
                 fontWeight: 700,
+                lineHeight: 1.45,
               }}
             >
-              <span style={{ fontSize: "13px" }}>
+              <span>
                 {authMode === "register" ? "Masz juz konto?" : "Nie masz konta?"}
               </span>{" "}
-              Nie masz konta?{" "}
               <button
                 type="button"
                 onClick={() => {
@@ -6796,16 +6988,14 @@ export default function Page() {
                   border: "none",
                   background: "transparent",
                   color: "#7c3aed",
-                  fontSize: 0,
+                  fontSize: "13px",
                   fontWeight: 900,
                   cursor: "pointer",
                   padding: 0,
+                  letterSpacing: "-0.01em",
                 }}
               >
-                <span style={{ fontSize: "13px" }}>
-                  {authMode === "register" ? "Zaloguj sie" : "Zarejestruj sie"}
-                </span>
-                Zarejestruj się
+                {authMode === "register" ? "Zaloguj sie" : "Zarejestruj sie"}
               </button>
             </div>
           </form>
@@ -6821,10 +7011,12 @@ export default function Page() {
           left: 0,
           width: "100%",
           height: `${topBarHeight}px`,
-          background:
-            "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+          background: topBarGradient,
           cursor: "default",
           zIndex: 50,
+          textRendering: "optimizeLegibility",
+          WebkitFontSmoothing: "antialiased",
+          MozOsxFontSmoothing: "grayscale",
         }}
       >
         <button
@@ -6856,16 +7048,15 @@ export default function Page() {
           <Settings size={18} />
         </button>
 
-        {currentAccountEmail && (
-          <div
-            ref={boardsMenuContainerRef}
-            style={{
-              position: "absolute",
-              top: "50%",
-              left: "64px",
-              transform: "translateY(-50%)",
-            }}
-          >
+        <div
+          ref={boardsMenuContainerRef}
+          style={{
+            position: "absolute",
+            top: "50%",
+            left: "64px",
+            transform: "translateY(-50%)",
+          }}
+        >
             <button
               aria-label="Boards"
               onClick={() => {
@@ -6888,12 +7079,12 @@ export default function Page() {
                 cursor: "pointer",
                 padding: 0,
                 backdropFilter: "blur(8px)",
-              }}
-            >
-              <LayoutGrid size={16} />
-            </button>
+                }}
+              >
+                <LayoutGrid size={16} />
+              </button>
 
-            {showBoardsMenu && (
+          {showBoardsMenu && (
               <div
                 style={{
                   position: "absolute",
@@ -6901,15 +7092,19 @@ export default function Page() {
                   left: "-38px",
                   width: "min(1560px, calc(100vw - 24px))",
                   height: "min(880px, calc(100vh - 64px))",
-                  borderRadius: "22px",
-                  background: "rgba(248,250,252,0.98)",
-                  border: "1px solid rgba(203,213,225,0.86)",
-                  boxShadow: "0 34px 90px rgba(15,23,42,0.18)",
+                  borderRadius: "24px",
+                  background:
+                    "linear-gradient(180deg, rgba(250,252,255,0.985) 0%, rgba(247,251,255,0.985) 100%)",
+                  border: "1px solid rgba(205,218,236,0.92)",
+                  boxShadow: premiumShellShadow,
                   display: "grid",
                   gridTemplateColumns: "300px minmax(0, 1fr)",
                   overflow: "hidden",
                   zIndex: 90,
                   fontFamily: appSansFontFamily,
+                  textRendering: "optimizeLegibility",
+                  WebkitFontSmoothing: "antialiased",
+                  MozOsxFontSmoothing: "grayscale",
                 }}
               >
                 <aside
@@ -6921,6 +7116,7 @@ export default function Page() {
                     display: "grid",
                     gridTemplateRows: "auto auto 1fr auto",
                     gap: "18px",
+                    ...premiumBodyStyle,
                   }}
                 >
                   <div
@@ -6973,20 +7169,23 @@ export default function Page() {
                       borderRadius: "12px",
                       border: "none",
                       background:
-                        "linear-gradient(135deg, #2563eb 0%, #4338ca 100%)",
+                        signatureIndigoButtonGradient,
                       color: "#ffffff",
                       display: "flex",
                       alignItems: "center",
                       justifyContent: "center",
                       gap: "10px",
-                        cursor:
+                      overflow: "hidden",
+                      backgroundClip: "padding-box",
+                      cursor:
                         isBoardsLoading || liveBoardsCount >= currentMaxBoards
                           ? "default"
                           : "pointer",
                       opacity: liveBoardsCount >= currentMaxBoards ? 0.55 : 1,
-                      boxShadow: "0 14px 28px rgba(37,99,235,0.22)",
+                      boxShadow:
+                        "0 16px 34px rgba(42,108,165,0.18), 0 1px 0 rgba(255,255,255,0.2) inset",
                       fontSize: "14px",
-                      fontWeight: 500,
+                      fontWeight: 600,
                     }}
                     title={
                       liveBoardsCount >= currentMaxBoards
@@ -7055,12 +7254,12 @@ export default function Page() {
                           padding: "0 14px",
                           borderRadius: "12px",
                           border: isActive
-                            ? "1px solid rgba(37,99,235,0.18)"
+                            ? "1px solid rgba(110,163,215,0.2)"
                             : "1px solid transparent",
                           background: isActive
-                            ? "rgba(219,234,254,0.85)"
+                            ? "linear-gradient(90deg, rgba(139,70,255,0.055) 0%, rgba(75,143,255,0.05) 38%, rgba(25,195,188,0.048) 72%, rgba(48,207,104,0.048) 100%)"
                             : "transparent",
-                          color: isActive ? "#1d4ed8" : "#334155",
+                          color: isActive ? "#145d93" : "#334155",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
@@ -7069,6 +7268,9 @@ export default function Page() {
                           fontWeight: isActive ? 560 : 460,
                           cursor: "pointer",
                           opacity: isLocked ? 0.82 : 1,
+                          boxShadow: isActive
+                            ? "0 8px 18px rgba(71,127,189,0.08), 0 1px 0 rgba(255,255,255,0.58) inset"
+                            : "none",
                         }}
                       >
                         <span
@@ -7090,31 +7292,75 @@ export default function Page() {
                   <div
                     style={{
                       marginTop: "auto",
-                      padding: "16px",
-                      borderRadius: "14px",
-                      background: "rgba(255,255,255,0.72)",
-                      border: "1px solid rgba(203,213,225,0.74)",
+                      display: "grid",
+                      gap: "12px",
                     }}
                   >
                     <div
                       style={{
-                        color: "#0f172a",
-                        fontSize: "14px",
-                        fontWeight: 500,
+                        padding: "16px",
+                        borderRadius: "14px",
+                        background:
+                          "linear-gradient(135deg, rgba(255,255,255,0.82) 0%, rgba(239,196,93,0.08) 34%, rgba(89,171,168,0.08) 100%)",
+                        border: "1px solid rgba(110,163,215,0.18)",
+                        boxShadow: premiumCardShadow,
                       }}
                     >
-                      {boardUsageLabel}
+                      <div
+                        style={{
+                          color: "#0f172a",
+                          fontSize: "14px",
+                          fontWeight: 500,
+                        }}
+                      >
+                        {boardUsageLabel}
+                      </div>
+                      <div
+                        style={{
+                          marginTop: "6px",
+                          color: "#64748b",
+                          fontSize: "12px",
+                          lineHeight: 1.45,
+                        }}
+                      >
+                        Click a card to open it. Click the active board card title to
+                        rename it.
+                      </div>
                     </div>
                     <div
                       style={{
-                        marginTop: "6px",
-                        color: "#64748b",
-                        fontSize: "12px",
-                        lineHeight: 1.45,
+                        padding: "14px 16px",
+                        borderRadius: "14px",
+                        background: "rgba(255,255,255,0.68)",
+                        border: "1px solid rgba(203,213,225,0.7)",
+                        display: "flex",
+                        flexWrap: "wrap",
+                        gap: "12px",
+                        boxShadow: "0 10px 24px rgba(15,23,42,0.045)",
                       }}
                     >
-                      Click a card to open it. Click the active board card title to
-                      rename it.
+                      <Link
+                        href="/privacy"
+                        style={{
+                          color: "#64748b",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          textDecoration: "none",
+                        }}
+                      >
+                        Privacy Policy
+                      </Link>
+                      <Link
+                        href="/terms"
+                        style={{
+                          color: "#64748b",
+                          fontSize: "12px",
+                          fontWeight: 700,
+                          textDecoration: "none",
+                        }}
+                      >
+                        Terms of Service
+                      </Link>
                     </div>
                   </div>
                 </aside>
@@ -7129,6 +7375,7 @@ export default function Page() {
                     minHeight: 0,
                     background:
                       "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+                    ...premiumBodyStyle,
                   }}
                 >
                   <div
@@ -7162,16 +7409,30 @@ export default function Page() {
                         {boardBrowserDescription}
                       </div>
                       {boardBrowserView === "plan" && (
-                        <div
-                          style={{
-                            marginTop: "10px",
-                            color: "#4f46e5",
-                            fontSize: "13px",
-                            fontWeight: 500,
-                          }}
-                        >
-                          {currentWorkspaceStatusMessage}
-                        </div>
+                        <>
+                          <div
+                            style={{
+                              marginTop: "10px",
+                              color: "#4f46e5",
+                              fontSize: "13px",
+                              fontWeight: 500,
+                            }}
+                          >
+                            {currentWorkspaceStatusMessage}
+                          </div>
+                          {currentSubscriptionEndingMessage ? (
+                            <div
+                              style={{
+                                marginTop: "8px",
+                                color: "#b45309",
+                                fontSize: "13px",
+                                fontWeight: 600,
+                              }}
+                            >
+                              {currentSubscriptionEndingMessage}
+                            </div>
+                          ) : null}
+                        </>
                       )}
                     </div>
 
@@ -7180,12 +7441,14 @@ export default function Page() {
                         minWidth: "220px",
                         padding: "12px 14px",
                         borderRadius: "14px",
-                        border: "1px solid rgba(203,213,225,0.78)",
-                        background: "#ffffff",
+                        border: "1px solid rgba(110,163,215,0.22)",
+                        background:
+                          "linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(231,217,122,0.1) 34%, rgba(89,171,168,0.12) 72%, rgba(110,163,215,0.12) 100%)",
                         display: "flex",
                         alignItems: "center",
                         gap: "12px",
-                        boxShadow: "0 10px 24px rgba(15,23,42,0.05)",
+                        boxShadow:
+                          "0 16px 36px rgba(37,99,235,0.08), 0 1px 0 rgba(255,255,255,0.75) inset",
                       }}
                     >
                       <div
@@ -7238,43 +7501,6 @@ export default function Page() {
                     </div>
                   </div>
 
-                  <div
-                    style={{
-                      display: "flex",
-                      flexWrap: "wrap",
-                      gap: "12px",
-                    }}
-                  >
-                    {boardBrowserView !== "plan" && [ 
-                      { label: "Templates", icon: <LayoutGrid size={16} /> },
-                      { label: "Diagram", icon: <LayoutGrid size={16} /> },
-                      { label: "Import", icon: <Upload size={16} /> },
-                    ].map((action) => (
-                      <button
-                        key={action.label}
-                        type="button"
-                        style={{
-                          height: "42px",
-                          padding: "0 16px",
-                          borderRadius: "12px",
-                          border: "1px solid rgba(203,213,225,0.84)",
-                          background: "#ffffff",
-                          color: "#273449",
-                          display: "flex",
-                          alignItems: "center",
-                          gap: "10px",
-                          fontSize: "13px",
-                          fontWeight: 500,
-                          cursor: "default",
-                          boxShadow: "0 2px 0 rgba(15,23,42,0.02)",
-                        }}
-                      >
-                        {action.icon}
-                        {action.label}
-                      </button>
-                    ))}
-                  </div>
-
                   {boardBrowserView !== "plan" && (
                     <div
                       style={{
@@ -7297,6 +7523,8 @@ export default function Page() {
                           display: "flex",
                           alignItems: "center",
                           gap: "10px",
+                          boxShadow:
+                            "0 10px 24px rgba(15,23,42,0.04), 0 1px 0 rgba(255,255,255,0.72) inset",
                         }}
                       >
                         <Search size={16} color="#64748b" />
@@ -7325,8 +7553,15 @@ export default function Page() {
                         style={{
                           display: "flex",
                           alignItems: "center",
-                          gap: "8px",
+                          gap: "4px",
                           flexWrap: "wrap",
+                          padding: "5px 8px",
+                          borderRadius: "18px",
+                          border: "1px solid rgba(205,218,236,0.92)",
+                          background:
+                            "linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(247,251,255,0.97) 100%)",
+                          boxShadow:
+                            "0 14px 30px rgba(15,23,42,0.05), 0 1px 0 rgba(255,255,255,0.82) inset",
                         }}
                       >
                         <button
@@ -7334,17 +7569,17 @@ export default function Page() {
                           onClick={() => goToCalendarMonth(-12)}
                           style={{
                             height: "44px",
-                            padding: "0 14px",
+                            padding: "0 8px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
                             display: "flex",
                             alignItems: "center",
                             gap: "8px",
                             fontSize: "13px",
                             fontWeight: 500,
                             cursor: "pointer",
+                            color: "#52647c",
                           }}
                         >
                           <ChevronLeft size={16} />
@@ -7357,9 +7592,9 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
+                            color: "#52647c",
                             display: "grid",
                             placeItems: "center",
                             cursor: "pointer",
@@ -7370,15 +7605,16 @@ export default function Page() {
                         <div
                           style={{
                             height: "44px",
-                            padding: "0 16px",
+                            padding: "0 8px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
+                            border: "none",
+                            background: "transparent",
                             color: "#0f172a",
                             display: "flex",
                             alignItems: "center",
-                            fontSize: "13px",
-                            fontWeight: 500,
+                            fontSize: "15px",
+                            fontWeight: 700,
+                            letterSpacing: "-0.02em",
                           }}
                         >
                           {calendarMonthLabel}
@@ -7390,9 +7626,9 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
+                            color: "#52647c",
                             display: "grid",
                             placeItems: "center",
                             cursor: "pointer",
@@ -7405,17 +7641,17 @@ export default function Page() {
                           onClick={() => goToCalendarMonth(12)}
                           style={{
                             height: "44px",
-                            padding: "0 14px",
+                            padding: "0 8px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
                             display: "flex",
                             alignItems: "center",
                             gap: "8px",
                             fontSize: "13px",
                             fontWeight: 500,
                             cursor: "pointer",
+                            color: "#52647c",
                           }}
                         >
                           Year
@@ -7428,9 +7664,9 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
+                            color: "#52647c",
                             display: "grid",
                             placeItems: "center",
                             cursor: "pointer",
@@ -7444,15 +7680,18 @@ export default function Page() {
                           onClick={jumpToCalendarToday}
                           style={{
                             height: "44px",
-                            padding: "0 16px",
-                            borderRadius: "12px",
-                            border: "1px solid rgba(96,165,250,0.7)",
-                            background: "#eef6ff",
+                            padding: "0 14px",
+                            borderRadius: "999px",
+                            border: "1px solid rgba(96,165,250,0.18)",
+                            background:
+                              "linear-gradient(90deg, rgba(139,70,255,0.08) 0%, rgba(75,143,255,0.08) 38%, rgba(25,195,188,0.08) 72%, rgba(48,207,104,0.08) 100%)",
                             color: "#1d4ed8",
                             display: "flex",
                             alignItems: "center",
                             fontSize: "13px",
-                            fontWeight: 500,
+                            fontWeight: 600,
+                            boxShadow:
+                              "0 8px 18px rgba(71,127,189,0.08), 0 1px 0 rgba(255,255,255,0.68) inset",
                             cursor: "pointer",
                           }}
                         >
@@ -7465,9 +7704,9 @@ export default function Page() {
                             width: "44px",
                             height: "44px",
                             borderRadius: "12px",
-                            border: "1px solid rgba(203,213,225,0.84)",
-                            background: "#ffffff",
-                            color: "#0f172a",
+                            border: "none",
+                            background: "transparent",
+                            color: "#52647c",
                             display: "grid",
                             placeItems: "center",
                             cursor: "pointer",
@@ -7512,27 +7751,108 @@ export default function Page() {
                           display: "grid",
                           gap: "18px",
                           alignContent: "start",
+                          ...premiumBodyStyle,
                         }}
                       >
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "1.3fr 1fr",
+                            gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                            gap: "14px",
+                          }}
+                        >
+                          {[
+                            {
+                              label: "Current plan",
+                              value: currentWorkspacePlanLabel,
+                              tone:
+                                "linear-gradient(135deg, rgba(217,138,86,0.14) 0%, rgba(239,196,93,0.1) 42%, rgba(110,163,215,0.12) 100%)",
+                            },
+                            {
+                              label: "Board access",
+                              value: hasUnlimitedBoards
+                                ? "Unlimited saved boards"
+                                : `Up to ${currentMaxBoards} saved boards`,
+                              tone:
+                                "linear-gradient(135deg, rgba(231,217,122,0.11) 0%, rgba(140,188,121,0.12) 42%, rgba(89,171,168,0.12) 100%)",
+                            },
+                            {
+                              label: "Subscription status",
+                              value:
+                                currentSubscriptionCancelAtPeriodEnd &&
+                                currentSubscriptionEndLabel
+                                  ? `Ends on ${currentSubscriptionEndLabel}`
+                                  : hasActivePaidSubscription
+                                  ? "Paid plan active"
+                                  : "Free to upgrade anytime",
+                              tone:
+                                "linear-gradient(135deg, rgba(110,163,215,0.12) 0%, rgba(255,255,255,0.88) 46%, rgba(217,138,86,0.12) 100%)",
+                            },
+                          ].map((item) => (
+                            <div
+                              key={item.label}
+                              style={{
+                                minHeight: "86px",
+                                borderRadius: "18px",
+                                border: "1px solid rgba(110,163,215,0.18)",
+                                background: item.tone,
+                                padding: "16px 18px",
+                                display: "grid",
+                                gap: "8px",
+                                alignContent: "start",
+                                boxShadow: "0 14px 30px rgba(15,23,42,0.05)",
+                                ...premiumBodyStyle,
+                              }}
+                            >
+                              <div
+                                style={{
+                                  color: "#64748b",
+                                  fontSize: "11px",
+                                  letterSpacing: "0.12em",
+                                  textTransform: "uppercase",
+                                  fontWeight: 700,
+                                }}
+                              >
+                                {item.label}
+                              </div>
+                              <div
+                                style={{
+                                  color: "#0f172a",
+                                  fontSize: "17px",
+                                  lineHeight: 1.25,
+                                  fontWeight: 700,
+                                  letterSpacing: "-0.02em",
+                                }}
+                              >
+                                {item.value}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                        <div
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns:
+                              "repeat(auto-fit, minmax(280px, 1fr))",
                             gap: "18px",
                           }}
                         >
                           <div
                             style={{
-                              minHeight: "220px",
+                              minHeight: "240px",
                               borderRadius: "20px",
-                              border: "1px solid rgba(59,130,246,0.16)",
-                              background:
-                                "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+                              border: "1px solid rgba(89,171,168,0.2)",
+                              background: signatureIndigoGradient,
                               color: "#ffffff",
-                              padding: "24px",
+                              padding: "28px",
+                              overflow: "hidden",
+                              backgroundClip: "padding-box",
+                              isolation: "isolate",
                               display: "grid",
+                              gap: "20px",
                               alignContent: "space-between",
-                              boxShadow: "0 24px 60px rgba(59,130,246,0.2)",
+                              boxShadow: "0 30px 70px rgba(50,90,183,0.22)",
+                              ...premiumBodyStyle,
                             }}
                           >
                             <div
@@ -7546,10 +7866,11 @@ export default function Page() {
                               <div>
                                 <div
                                   style={{
-                                    fontSize: "13px",
-                                    color: "rgba(255,255,255,0.72)",
-                                    letterSpacing: "0.08em",
+                                    fontSize: "12px",
+                                    color: "rgba(255,255,255,0.76)",
+                                    letterSpacing: "0.12em",
                                     textTransform: "uppercase",
+                                    fontWeight: 700,
                                   }}
                                 >
                                   Upgrade your workspace
@@ -7557,10 +7878,10 @@ export default function Page() {
                                 <div
                                   style={{
                                     marginTop: "10px",
-                                    fontSize: "34px",
-                                    lineHeight: 1.05,
-                                    fontWeight: 600,
-                                    maxWidth: "520px",
+                                    fontSize: "clamp(38px, 4.6vw, 56px)",
+                                    lineHeight: 0.96,
+                                    maxWidth: "560px",
+                                    ...premiumHeadingStyle,
                                   }}
                                 >
                                   Pick the plan that matches your pace.
@@ -7568,13 +7889,10 @@ export default function Page() {
                               </div>
                               <div
                                 style={{
-                                  width: "48px",
-                                  height: "48px",
-                                  borderRadius: "14px",
-                                  background: "rgba(255,255,255,0.12)",
+                                  width: "24px",
+                                  height: "24px",
                                   display: "grid",
                                   placeItems: "center",
-                                  backdropFilter: "blur(10px)",
                                 }}
                               >
                                 <Star size={20} />
@@ -7589,7 +7907,7 @@ export default function Page() {
                               }}
                             >
                               {[
-                                "Faster planning",
+                                "Clean organization",
                                 "Smarter scheduling",
                                 "Better workspace flow",
                               ].map((badge) => (
@@ -7604,10 +7922,45 @@ export default function Page() {
                                     display: "flex",
                                     alignItems: "center",
                                     fontSize: "13px",
-                                    color: "rgba(255,255,255,0.88)",
+                                    color: "rgba(255,255,255,0.92)",
+                                    fontWeight: 600,
+                                    letterSpacing: "-0.01em",
                                   }}
                                 >
                                   {badge}
+                                </div>
+                              ))}
+                            </div>
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "10px",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {[
+                                `Plan: ${currentWorkspacePlanLabel}`,
+                                hasUnlimitedBoards
+                                  ? "Unlimited boards"
+                                  : `${currentMaxBoards} board limit`,
+                              ].map((meta) => (
+                                <div
+                                  key={meta}
+                                  style={{
+                                    height: "32px",
+                                    padding: "0 12px",
+                                    borderRadius: "999px",
+                                    background: "rgba(15,23,42,0.12)",
+                                    border: "1px solid rgba(255,255,255,0.14)",
+                                    display: "flex",
+                                    alignItems: "center",
+                                    fontSize: "12px",
+                                    color: "rgba(255,255,255,0.9)",
+                                    fontWeight: 600,
+                                    letterSpacing: "-0.01em",
+                                  }}
+                                >
+                                  {meta}
                                 </div>
                               ))}
                             </div>
@@ -7615,24 +7968,30 @@ export default function Page() {
 
                           <div
                             style={{
-                              minHeight: "220px",
+                              minHeight: "240px",
                               borderRadius: "20px",
-                              border: "1px solid rgba(34,197,94,0.18)",
+                              border: "1px solid rgba(89,171,168,0.18)",
                               background:
-                                "linear-gradient(180deg, #ffffff 0%, #f0fdf4 100%)",
-                              padding: "22px",
+                                "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,196,93,0.08) 18%, rgba(231,217,122,0.08) 34%, rgba(89,171,168,0.11) 72%, rgba(110,163,215,0.12) 100%)",
+                              padding: "24px",
+                              overflow: "hidden",
+                              backgroundClip: "padding-box",
+                              isolation: "isolate",
                               display: "grid",
                               gap: "16px",
                               alignContent: "start",
-                              boxShadow: "0 18px 40px rgba(34,197,94,0.08)",
+                              boxShadow:
+                                "0 18px 42px rgba(37,99,235,0.08), 0 1px 0 rgba(255,255,255,0.8) inset",
+                              ...premiumBodyStyle,
                             }}
                           >
                             <div
                               style={{
                                 color: "#64748b",
                                 fontSize: "12px",
-                                letterSpacing: "0.08em",
+                                letterSpacing: "0.12em",
                                 textTransform: "uppercase",
+                                fontWeight: 700,
                               }}
                             >
                               Monthly billing
@@ -7640,9 +7999,10 @@ export default function Page() {
                             <div
                               style={{
                                 color: "#0f172a",
-                                fontSize: "28px",
-                                fontWeight: 600,
-                                lineHeight: 1.1,
+                                fontSize: "clamp(30px, 3.6vw, 42px)",
+                                lineHeight: 0.98,
+                                maxWidth: "420px",
+                                ...premiumHeadingStyle,
                               }}
                             >
                               Clear pricing in {billingCurrencyLabel}.
@@ -7650,8 +8010,9 @@ export default function Page() {
                             <div
                               style={{
                                 color: "#64748b",
-                                fontSize: "14px",
-                                lineHeight: 1.6,
+                                fontSize: "15px",
+                                lineHeight: 1.65,
+                                maxWidth: "420px",
                               }}
                             >
                               Start simple, move up when your boards, schedules, and team rhythm need more room.
@@ -7664,12 +8025,16 @@ export default function Page() {
                                 padding: "6px",
                                 width: "fit-content",
                                 borderRadius: "999px",
-                                border: "1px solid rgba(34,197,94,0.16)",
-                                background: "#ffffff",
-                                boxShadow: "0 10px 24px rgba(15,23,42,0.06)",
+                                border: "1px solid rgba(89,171,168,0.18)",
+                                background:
+                                  "linear-gradient(135deg, rgba(255,255,255,0.94) 0%, rgba(231,217,122,0.1) 100%)",
+                                boxShadow:
+                                  "0 14px 30px rgba(37,99,235,0.08), 0 1px 0 rgba(255,255,255,0.72) inset",
+                                overflow: "hidden",
+                                backgroundClip: "padding-box",
                               }}
                             >
-                              {(["pln", "eur"] as const).map((currency) => (
+                              {(["pln"] as const).map((currency) => (
                                 <button
                                   key={currency}
                                   type="button"
@@ -7681,11 +8046,11 @@ export default function Page() {
                                     borderRadius: "999px",
                                     border:
                                       billingCurrency === currency
-                                        ? "1px solid rgba(34,197,94,0.2)"
+                                        ? "1px solid rgba(255,255,255,0.22)"
                                         : "1px solid transparent",
                                     background:
                                       billingCurrency === currency
-                                        ? "linear-gradient(135deg, #22c55e 0%, #3b82f6 100%)"
+                                        ? signatureIndigoButtonGradient
                                         : "transparent",
                                     color:
                                       billingCurrency === currency
@@ -7694,6 +8059,13 @@ export default function Page() {
                                     fontSize: "13px",
                                     fontWeight: 700,
                                     cursor: "pointer",
+                                    overflow: "hidden",
+                                    backgroundClip: "padding-box",
+                                    isolation: "isolate",
+                                    boxShadow:
+                                      billingCurrency === currency
+                                        ? "inset 0 1px 0 rgba(255,255,255,0.18), 0 6px 14px rgba(37,99,235,0.14)"
+                                        : "none",
                                   }}
                                 >
                                   {currency.toUpperCase()}
@@ -7730,7 +8102,8 @@ export default function Page() {
                         <div
                           style={{
                             display: "grid",
-                            gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                            gridTemplateColumns:
+                              "repeat(auto-fit, minmax(260px, 1fr))",
                             gap: "18px",
                           }}
                         >
@@ -7738,77 +8111,97 @@ export default function Page() {
                             <div
                               key={plan.name}
                               style={{
-                                minHeight: "360px",
+                                minHeight: "384px",
                                 borderRadius: "20px",
                                 border: `1px solid ${plan.border}`,
                                 background: plan.accent,
-                                padding: "22px",
+                                padding: "24px",
+                                overflow: "hidden",
+                                backgroundClip: "padding-box",
+                                isolation: "isolate",
                                 display: "grid",
                                 gridTemplateRows: "auto auto 1fr auto",
                                 gap: "18px",
                                 boxShadow: plan.featured
-                                  ? "0 26px 60px rgba(59,130,246,0.22)"
-                                  : "0 16px 34px rgba(15,23,42,0.08)",
+                                  ? premiumFeaturedCardShadow
+                                  : premiumCardShadow,
                                 transform: plan.featured ? "translateY(-6px)" : "none",
+                                ...premiumBodyStyle,
                               }}
                             >
                               <div
                                 style={{
                                   display: "flex",
                                   justifyContent: "space-between",
-                                  alignItems: "center",
+                                  alignItems: "start",
+                                  flexWrap: "wrap",
                                   gap: "12px",
                                 }}
                               >
                                 <div
                                   style={{
                                     color: plan.text,
-                                    fontSize: "22px",
-                                    fontWeight: 600,
+                                    fontSize: "24px",
+                                    ...premiumHeadingStyle,
                                   }}
                                 >
                                   {plan.name}
                                 </div>
-                                {hasActivePaidSubscription &&
-                                  currentAccountPlan === plan.value && (
-                                  <div
-                                    style={{
-                                      height: "28px",
-                                      padding: "0 12px",
-                                      borderRadius: "999px",
-                                      background: plan.featured
-                                        ? "rgba(255,255,255,0.18)"
-                                        : "rgba(124,58,237,0.08)",
-                                      border: plan.featured
-                                        ? "1px solid rgba(255,255,255,0.18)"
-                                        : "1px solid rgba(124,58,237,0.14)",
-                                      color: plan.featured ? "#ffffff" : "#6d28d9",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      fontSize: "12px",
-                                      fontWeight: 700,
-                                    }}
-                                  >
-                                    Current plan
-                                  </div>
-                                )}
-                                {plan.featured && (
-                                  <div
-                                    style={{
-                                      height: "28px",
-                                      padding: "0 12px",
-                                      borderRadius: "999px",
-                                      background: "rgba(255,255,255,0.14)",
-                                      border: "1px solid rgba(255,255,255,0.18)",
-                                      color: "#ffffff",
-                                      display: "flex",
-                                      alignItems: "center",
-                                      fontSize: "12px",
-                                    }}
-                                  >
-                                    Most popular
-                                  </div>
-                                )}
+                                <div
+                                  style={{
+                                    display: "flex",
+                                    gap: "8px",
+                                    flexWrap: "wrap",
+                                    justifyContent: "flex-end",
+                                  }}
+                                >
+                                  {hasActivePaidSubscription &&
+                                    currentAccountPlan === plan.value && (
+                                    <div
+                                      style={{
+                                        height: "28px",
+                                        padding: "0 12px",
+                                        borderRadius: "999px",
+                                        background: plan.featured
+                                          ? topBarFeaturedChipGradient
+                                          : "rgba(217,138,86,0.1)",
+                                        border: plan.featured
+                                          ? "1px solid rgba(255,255,255,0.18)"
+                                          : "1px solid rgba(217,138,86,0.16)",
+                                        color: plan.featured ? "#ffffff" : "#c25c2f",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        fontSize: "12px",
+                                        fontWeight: 700,
+                                        letterSpacing: "-0.01em",
+                                      }}
+                                    >
+                                      {currentSubscriptionCancelAtPeriodEnd &&
+                                      currentSubscriptionEndLabel
+                                        ? `Active until ${currentSubscriptionEndLabel}`
+                                        : "Current plan"}
+                                    </div>
+                                  )}
+                                  {plan.featured && (
+                                    <div
+                                      style={{
+                                        height: "28px",
+                                        padding: "0 12px",
+                                        borderRadius: "999px",
+                                        background: topBarFeaturedChipGradient,
+                                        border: "1px solid rgba(255,255,255,0.18)",
+                                        color: "#ffffff",
+                                        display: "flex",
+                                        alignItems: "center",
+                                        fontSize: "12px",
+                                        fontWeight: 700,
+                                        letterSpacing: "-0.01em",
+                                      }}
+                                    >
+                                      Most popular
+                                    </div>
+                                  )}
+                                </div>
                               </div>
 
                               <div
@@ -7821,9 +8214,9 @@ export default function Page() {
                               >
                                 <span
                                   style={{
-                                    fontSize: "44px",
-                                    lineHeight: 0.95,
-                                    fontWeight: 600,
+                                    fontSize: "50px",
+                                    lineHeight: 0.88,
+                                    ...premiumHeadingStyle,
                                   }}
                                 >
                                   {plan.prices[billingCurrency] === "0"
@@ -7833,9 +8226,11 @@ export default function Page() {
                                 {plan.priceSuffix ? (
                                   <span
                                     style={{
-                                      fontSize: "15px",
+                                      fontSize: "16px",
                                       opacity: plan.featured ? 0.86 : 0.72,
-                                      paddingBottom: "7px",
+                                      paddingBottom: "8px",
+                                      fontWeight: 500,
+                                      letterSpacing: "-0.02em",
                                     }}
                                   >
                                     {plan.priceSuffix}
@@ -7858,7 +8253,10 @@ export default function Page() {
                                       alignItems: "center",
                                       gap: "10px",
                                       color: plan.text,
-                                      fontSize: "14px",
+                                      fontSize: "15px",
+                                      lineHeight: 1.35,
+                                      fontWeight: 500,
+                                      letterSpacing: "-0.015em",
                                       opacity: plan.featured ? 0.95 : 0.82,
                                     }}
                                   >
@@ -7893,11 +8291,17 @@ export default function Page() {
                                   borderRadius: "12px",
                                   border: plan.featured
                                     ? "1px solid rgba(255,255,255,0.18)"
-                                    : "1px solid rgba(59,130,246,0.14)",
-                                  background: plan.buttonBackground,
+                                    : "1px solid rgba(110,163,215,0.18)",
+                                  background: plan.featured
+                                    ? "rgba(255,255,255,0.92)"
+                                    : plan.buttonBackground,
                                   color: plan.buttonText,
-                                  fontSize: "14px",
-                                  fontWeight: 500,
+                                  fontSize: "15px",
+                                  fontWeight: 700,
+                                  letterSpacing: "-0.015em",
+                                  boxShadow: plan.featured
+                                    ? "0 12px 28px rgba(10,11,45,0.18)"
+                                    : "0 10px 24px rgba(89,171,168,0.08)",
                                   cursor:
                                     (hasActivePaidSubscription &&
                                       currentAccountPlan === plan.value) ||
@@ -7912,18 +8316,32 @@ export default function Page() {
                                       : 1,
                                 }}
                               >
-                                {pendingBillingPlan === plan.value
-                                  ? "Opening billing..."
-                                  : hasActivePaidSubscription &&
-                                    currentAccountPlan === plan.value
-                                  ? `${plan.name} active`
-                                  : currentPlanRank === 0
-                                  ? `Subscribe to ${plan.name}`
-                                  : plan.value === "basic"
-                                  ? "Switch to Basic"
-                                  : currentPlanRank < (plan.value === "master" ? 3 : 2)
-                                  ? `Upgrade to ${plan.name}`
-                                  : `Change to ${plan.name}`}
+                                <span
+                                  style={{
+                                    background: topBarPaletteGradient,
+                                    WebkitBackgroundClip: "text",
+                                    backgroundClip: "text",
+                                    WebkitTextFillColor: "transparent",
+                                    color: "transparent",
+                                    display: "inline-block",
+                                  }}
+                                >
+                                  {pendingBillingPlan === plan.value
+                                    ? "Opening billing..."
+                                    : hasActivePaidSubscription &&
+                                      currentAccountPlan === plan.value
+                                    ? currentSubscriptionCancelAtPeriodEnd &&
+                                      currentSubscriptionEndLabel
+                                      ? `${plan.name} active until ${currentSubscriptionEndLabel}`
+                                      : `${plan.name} active`
+                                    : currentPlanRank === 0
+                                    ? `Subscribe to ${plan.name}`
+                                    : plan.value === "basic"
+                                    ? "Switch to Basic"
+                                    : currentPlanRank < (plan.value === "master" ? 3 : 2)
+                                    ? `Upgrade to ${plan.name}`
+                                    : `Change to ${plan.name}`}
+                                </span>
                               </button>
                             </div>
                           ))}
@@ -8255,18 +8673,18 @@ export default function Page() {
                             style={{
                               display: "grid",
                               gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                              gap: "10px",
+                              gap: "12px",
                             }}
                           >
                             {calendarWeekdayLabels.map((label) => (
                               <div
                                 key={label}
                                 style={{
-                                  padding: "0 6px",
-                                  color: "#475569",
+                                  padding: "0 8px",
+                                  color: "#64748b",
                                   fontSize: "11px",
-                                  fontWeight: 500,
-                                  letterSpacing: "0.04em",
+                                  fontWeight: 700,
+                                  letterSpacing: "0.08em",
                                   textTransform: "uppercase",
                                 }}
                               >
@@ -8279,7 +8697,7 @@ export default function Page() {
                             style={{
                               display: "grid",
                               gridTemplateColumns: "repeat(7, minmax(0, 1fr))",
-                              gap: "10px",
+                              gap: "12px",
                               alignContent: "start",
                             }}
                           >
@@ -8287,32 +8705,34 @@ export default function Page() {
                             <div
                               key={day.key}
                               style={{
-                                minHeight: "198px",
-                                borderRadius: "12px",
-                                border: "1px solid rgba(214,224,238,0.95)",
+                                minHeight: "206px",
+                                borderRadius: "16px",
+                                border: "1px solid rgba(208,220,237,0.95)",
                                 background: day.isToday
-                                  ? "linear-gradient(180deg, rgba(59,130,246,0.08) 0%, rgba(255,255,255,1) 62%)"
-                                  : "#ffffff",
+                                  ? "linear-gradient(180deg, rgba(59,130,246,0.1) 0%, rgba(255,255,255,1) 56%)"
+                                  : "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,252,255,0.98) 100%)",
                                 boxShadow: day.isToday
-                                  ? "0 14px 28px rgba(59,130,246,0.1)"
-                                  : "0 10px 22px rgba(15,23,42,0.045)",
-                                padding: "11px",
+                                  ? "0 18px 36px rgba(59,130,246,0.12), 0 1px 0 rgba(255,255,255,0.82) inset"
+                                  : "0 12px 26px rgba(15,23,42,0.045), 0 1px 0 rgba(255,255,255,0.82) inset",
+                                padding: "12px",
                                 display: "grid",
                                 alignContent: "start",
-                                gap: "9px",
+                                gap: "10px",
                                 overflow: "hidden",
+                                ...premiumBodyStyle,
                               }}
                             >
                               <div
                                 style={{
-                                  height: "26px",
+                                  minHeight: "30px",
                                   color: day.isToday ? "#2563eb" : "#111827",
                                   display: "flex",
                                   alignItems: "center",
                                   justifyContent: "space-between",
                                   gap: "6px",
-                                  fontSize: "13px",
-                                  fontWeight: 500,
+                                  fontSize: "15px",
+                                  fontWeight: 600,
+                                  letterSpacing: "-0.02em",
                                   opacity: 1,
                                 }}
                               >
@@ -8325,13 +8745,14 @@ export default function Page() {
                                           padding: "0 9px",
                                           borderRadius: "999px",
                                           background:
-                                            "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                                            signatureIndigoButtonGradient,
                                           color: "#ffffff",
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
                                           boxShadow:
                                             "0 10px 18px rgba(59,130,246,0.22)",
+                                          fontWeight: 700,
                                         }
                                       : undefined
                                   }
@@ -8342,8 +8763,8 @@ export default function Page() {
                                   style={{
                                     color: day.isToday ? "#2563eb" : "#64748b",
                                     fontSize: "10px",
-                                    fontWeight: 500,
-                                    letterSpacing: "0.04em",
+                                    fontWeight: 700,
+                                    letterSpacing: "0.08em",
                                     textTransform: "uppercase",
                                   }}
                                 >
@@ -8380,12 +8801,13 @@ export default function Page() {
                                         style={{
                                           display: "grid",
                                           gap: "6px",
-                                          padding: "6px",
-                                          borderRadius: "10px",
-                                          border: "1px solid rgba(147,197,253,0.82)",
-                                          background: "#ffffff",
+                                          padding: "8px",
+                                          borderRadius: "14px",
+                                          border: "1px solid rgba(190,214,242,0.95)",
+                                          background:
+                                            "linear-gradient(180deg, rgba(255,255,255,0.99) 0%, rgba(247,251,255,0.99) 100%)",
                                           boxShadow:
-                                            "0 8px 20px rgba(37,99,235,0.08)",
+                                            "0 16px 32px rgba(37,99,235,0.08), 0 1px 0 rgba(255,255,255,0.86) inset",
                                         }}
                                       >
                                         <div
@@ -8418,15 +8840,16 @@ export default function Page() {
                                               aria-label="Start time"
                                               style={{
                                                 width: "100%",
-                                                height: "30px",
-                                                padding: "0 6px",
-                                                borderRadius: "8px",
+                                                height: "34px",
+                                                padding: "0 10px",
+                                                borderRadius: "10px",
                                                 border:
-                                                  "1px solid rgba(203,213,225,0.95)",
-                                                background: "#f8fafc",
+                                                  "1px solid rgba(203,213,225,0.9)",
+                                                background:
+                                                  "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(248,250,252,0.98) 100%)",
                                                 color: "#0f172a",
                                                 fontSize: "12px",
-                                                fontWeight: 500,
+                                                fontWeight: 600,
                                                 outline: "none",
                                                 boxSizing: "border-box",
                                               }}
@@ -8475,8 +8898,8 @@ export default function Page() {
                                                   }
                                                   aria-label={`Use ${color} event color`}
                                                   style={{
-                                                    width: "19px",
-                                                    height: "19px",
+                                                    width: "20px",
+                                                    height: "20px",
                                                     borderRadius: "999px",
                                                     border: isSelected
                                                       ? "2px solid #0f172a"
@@ -8494,8 +8917,8 @@ export default function Page() {
                                             <label
                                               style={{
                                                 position: "relative",
-                                                width: "22px",
-                                                height: "22px",
+                                                width: "24px",
+                                                height: "24px",
                                                 borderRadius: "999px",
                                                 border:
                                                   "2px solid rgba(255,255,255,0.98)",
@@ -8552,19 +8975,20 @@ export default function Page() {
                                             }
                                             aria-label="Confirm calendar entry"
                                             style={{
-                                              width: "28px",
-                                              height: "28px",
+                                              width: "32px",
+                                              height: "32px",
                                               flex: "0 0 auto",
-                                              borderRadius: "9px",
+                                              borderRadius: "11px",
                                               border:
                                                 "1px solid rgba(34,197,94,0.32)",
-                                              background: "#15803d",
+                                              background:
+                                                "linear-gradient(135deg, #16c5b8 0%, #34d26b 100%)",
                                               color: "#ffffff",
                                               display: "grid",
                                               placeItems: "center",
                                               cursor: "pointer",
                                               boxShadow:
-                                                "0 8px 18px rgba(22,163,74,0.18)",
+                                                "0 12px 24px rgba(22,163,74,0.18)",
                                               padding: 0,
                                             }}
                                           >
@@ -8595,14 +9019,15 @@ export default function Page() {
                                           style={{
                                             width: "100%",
                                             minWidth: "120px",
-                                            minHeight: "44px",
-                                            padding: "8px",
-                                            borderRadius: "9px",
-                                            border: "1px solid rgba(203,213,225,0.95)",
-                                            background: "#f8fafc",
+                                            minHeight: "52px",
+                                            padding: "10px 11px",
+                                            borderRadius: "12px",
+                                            border: "1px solid rgba(203,213,225,0.9)",
+                                            background:
+                                              "linear-gradient(180deg, rgba(255,255,255,0.99) 0%, rgba(248,250,252,0.99) 100%)",
                                             color: "#0f172a",
                                             fontSize: "12px",
-                                            fontWeight: 400,
+                                            fontWeight: 500,
                                             outline: "none",
                                             resize: "both",
                                             overflow: "auto",
@@ -8625,18 +9050,18 @@ export default function Page() {
                                         }}
                                         style={{
                                           minWidth: 0,
-                                          minHeight: "28px",
-                                          height: "28px",
-                                          padding: "0 9px",
-                                          borderRadius: "7px",
+                                          minHeight: "34px",
+                                          height: "34px",
+                                          padding: "0 11px",
+                                          borderRadius: "11px",
                                           border:
                                             selectedCalendarEntryId === entry.id
-                                              ? "1px solid rgba(15,23,42,0.28)"
-                                              : "1px solid transparent",
+                                              ? "1px solid rgba(15,23,42,0.18)"
+                                              : "1px solid rgba(255,255,255,0.12)",
                                           background: getCalendarEntryColor(entry),
                                           color: "#ffffff",
                                           fontSize: "12px",
-                                          fontWeight: 500,
+                                          fontWeight: 600,
                                           lineHeight: 1,
                                           textAlign: "left",
                                           cursor: canUseCalendar
@@ -8649,16 +9074,17 @@ export default function Page() {
                                           overflow: "hidden",
                                           boxShadow:
                                             selectedCalendarEntryId === entry.id
-                                              ? "0 0 0 2px rgba(37,99,235,0.18)"
-                                              : "0 4px 10px rgba(15,23,42,0.08)",
+                                              ? "0 0 0 2px rgba(37,99,235,0.14), 0 10px 22px rgba(15,23,42,0.12)"
+                                              : "0 10px 22px rgba(15,23,42,0.11), 0 1px 0 rgba(255,255,255,0.12) inset",
                                         }}
                                       >
                                         <span
                                           style={{
                                             flex: "0 0 auto",
-                                            color: "rgba(255,255,255,0.92)",
+                                            color: "rgba(255,255,255,0.84)",
                                             fontSize: "10px",
-                                            fontWeight: 500,
+                                            fontWeight: 700,
+                                            letterSpacing: "0.03em",
                                           }}
                                         >
                                           {getCalendarHourLabel(
@@ -8693,11 +9119,12 @@ export default function Page() {
                                             position: "absolute",
                                             top: "-8px",
                                             right: "-8px",
-                                            width: "28px",
-                                            height: "28px",
+                                            width: "30px",
+                                            height: "30px",
                                             borderRadius: "999px",
                                             border: "1px solid rgba(248,113,113,0.32)",
-                                            background: "#ffffff",
+                                            background:
+                                              "linear-gradient(180deg, rgba(255,255,255,0.99) 0%, rgba(254,242,242,0.99) 100%)",
                                             color: "#dc2626",
                                             display: "grid",
                                             placeItems: "center",
@@ -8721,21 +9148,26 @@ export default function Page() {
                                     )
                                   }
                                   style={{
-                                    height: "28px",
-                                    borderRadius: "7px",
-                                    border: "1px dashed rgba(96,165,250,0.86)",
-                                    background: "rgba(239,246,255,0.68)",
-                                    color: "#1d4ed8",
+                                    height: "34px",
+                                    borderRadius: "11px",
+                                    border: "1px solid rgba(186,205,232,0.95)",
+                                    background: canUseCalendar
+                                      ? "linear-gradient(90deg, rgba(139,70,255,0.08) 0%, rgba(75,143,255,0.08) 38%, rgba(25,195,188,0.08) 72%, rgba(48,207,104,0.08) 100%)"
+                                      : "linear-gradient(180deg, rgba(248,250,252,0.95) 0%, rgba(241,245,249,0.95) 100%)",
+                                    color: canUseCalendar ? "#2563eb" : "#64748b",
                                     display: "flex",
                                     alignItems: "center",
                                     justifyContent: "center",
-                                    gap: "4px",
+                                    gap: "6px",
                                     fontSize: "12px",
-                                    fontWeight: 500,
+                                    fontWeight: 600,
+                                    letterSpacing: "0.01em",
                                     cursor: canUseCalendar
                                       ? "pointer"
                                       : "not-allowed",
                                     opacity: canUseCalendar ? 1 : 0.65,
+                                    boxShadow:
+                                      "0 10px 22px rgba(15,23,42,0.05), 0 1px 0 rgba(255,255,255,0.72) inset",
                                   }}
                                 >
                                   <Plus size={12} />
@@ -9220,14 +9652,13 @@ export default function Page() {
                           </div>
                         </div>
                       )}
-                    </div>
+                  </div>
                     )}
                   </div>
                 </section>
               </div>
             )}
-          </div>
-        )}
+        </div>
 
         {showSettingsMenu && (
           <div
@@ -9888,7 +10319,7 @@ export default function Page() {
                         borderRadius: "10px",
                         border: "none",
                         background:
-                          "linear-gradient(90deg, #7c3aed 0%, #3b82f6 100%)",
+                          signatureIndigoButtonGradient,
                         color: "#ffffff",
                         fontSize: "14px",
                         fontWeight: 650,
@@ -9912,21 +10343,26 @@ export default function Page() {
               top: "50%",
               right: "16px",
               transform: "translateY(-50%)",
-              display: "grid",
-              justifyItems: "end",
-              gap: "10px",
+              display: "block",
             }}
           >
             <button
               type="button"
               onClick={() => setShowProfileMenu((previous) => !previous)}
               style={{
+                width: "28px",
+                height: "28px",
+                borderRadius: "999px",
                 color: "#ffffff",
                 display: "grid",
                 placeItems: "center",
                 background: "transparent",
                 border: "none",
                 padding: 0,
+                lineHeight: 0,
+                outline: "none",
+                boxShadow: "none",
+                appearance: "none",
                 cursor: "pointer",
               }}
               aria-label={`Logged in as ${currentAccountEmail}`}
@@ -9937,44 +10373,96 @@ export default function Page() {
             {showProfileMenu && (
               <div
                 style={{
-                  minWidth: "166px",
-                  padding: "12px",
-                  borderRadius: "16px",
-                  border: "1px solid rgba(255,255,255,0.24)",
-                  background: "rgba(20,24,33,0.92)",
-                  boxShadow: "0 18px 36px rgba(15,23,42,0.28)",
-                  backdropFilter: "blur(16px)",
+                  position: "absolute",
+                  top: "calc(100% + 10px)",
+                  right: 0,
+                  minWidth: "232px",
+                  padding: "16px 16px 18px",
+                  borderRadius: "24px",
+                  border: "1px solid rgba(203,213,225,0.82)",
+                  background:
+                    `linear-gradient(180deg, rgba(255,255,255,0.985) 0%, rgba(249,251,255,0.985) 100%), ${topBarSoftCardGradient}`,
+                  boxShadow:
+                    "0 22px 48px rgba(15,23,42,0.15), 0 1px 0 rgba(255,255,255,0.92) inset",
+                  backdropFilter: "blur(14px)",
+                  overflow: "hidden",
+                  backgroundClip: "padding-box",
                   display: "grid",
-                  gap: "10px",
+                  gap: "13px",
+                  fontFamily: accountPanelFontFamily,
+                  textRendering: "optimizeLegibility",
+                  WebkitFontSmoothing: "antialiased",
+                  MozOsxFontSmoothing: "grayscale",
                 }}
               >
                 <div
                   style={{
-                    color: "rgba(255,255,255,0.7)",
-                    fontSize: "11px",
-                    fontWeight: 500,
-                    letterSpacing: "0.04em",
-                    textTransform: "uppercase",
+                    display: "grid",
+                    gridTemplateColumns: "44px minmax(0, 1fr)",
+                    alignItems: "center",
+                    gap: "11px",
                   }}
                 >
-                  Account
+                  <div
+                    style={{
+                      width: "44px",
+                      height: "44px",
+                      borderRadius: "14px",
+                      border: "1px solid rgba(191,219,254,0.9)",
+                      background:
+                        "linear-gradient(180deg, #eef6ff 0%, #deefff 100%)",
+                      boxShadow:
+                        "0 8px 18px rgba(96,165,250,0.16), 0 1px 0 rgba(255,255,255,0.9) inset",
+                      color: "#2563eb",
+                      display: "grid",
+                      placeItems: "center",
+                    }}
+                  >
+                    <UserRound size={18} />
+                  </div>
+                  <div style={{ display: "grid", gap: "2px", minWidth: 0 }}>
+                    <div
+                      style={{
+                        color: "#6b7a90",
+                        fontSize: "8.5px",
+                        fontWeight: 700,
+                        letterSpacing: "0.24em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Account
+                    </div>
+                    <div
+                      style={{
+                        color: "#0f172a",
+                        fontSize: "15px",
+                        fontWeight: 700,
+                        lineHeight: 1.14,
+                        letterSpacing: "-0.02em",
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                    >
+                      {currentAccountName || currentAccountEmail}
+                    </div>
+                  </div>
                 </div>
                 <div
                   style={{
-                    color: "#ffffff",
-                    fontSize: "14px",
-                    fontWeight: 700,
-                    lineHeight: 1.3,
+                    height: "1px",
+                    background:
+                      "linear-gradient(90deg, rgba(191,219,254,0.95) 0%, rgba(219,234,254,0.8) 100%)",
                   }}
-                >
-                  {currentAccountName || currentAccountEmail}
-                </div>
+                />
                 <div
                   style={{
-                    color: "rgba(255,255,255,0.72)",
-                    fontSize: "12px",
+                    color: "#5f6f84",
+                    fontSize: "10.75px",
                     fontWeight: 500,
-                    lineHeight: 1.3,
+                    lineHeight: 1.36,
+                    letterSpacing: "0.002em",
+                    wordBreak: "break-word",
                   }}
                 >
                   {currentAccountEmail}
@@ -9982,18 +10470,20 @@ export default function Page() {
                 <div
                   style={{
                     justifySelf: "start",
-                    height: "26px",
-                    padding: "0 10px",
+                    height: "31px",
+                    padding: "0 14px",
                     borderRadius: "999px",
-                    border: "1px solid rgba(255,255,255,0.16)",
-                    background: "rgba(255,255,255,0.08)",
-                    color: "#c4b5fd",
+                    border: "1px solid rgba(196,181,253,0.8)",
+                    background:
+                      "linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(237,233,254,0.98) 100%)",
+                    color: "#6d28d9",
                     display: "inline-flex",
                     alignItems: "center",
-                    fontSize: "11px",
+                    fontSize: "10px",
                     fontWeight: 700,
-                    letterSpacing: "0.04em",
+                    letterSpacing: "0.12em",
                     textTransform: "uppercase",
+                    boxShadow: "0 1px 0 rgba(255,255,255,0.82) inset",
                   }}
                 >
                   {currentPlanLabel} plan
@@ -10002,14 +10492,19 @@ export default function Page() {
                   type="button"
                   onClick={signOut}
                   style={{
-                    height: "38px",
+                    marginTop: "2px",
+                    height: "44px",
                     padding: "0 16px",
                     borderRadius: "999px",
-                    border: "1px solid rgba(255,255,255,0.18)",
-                    background: "linear-gradient(90deg, #22c55e 0%, #34d399 100%)",
+                    border: "1px solid rgba(34,197,94,0.16)",
+                    background:
+                      "linear-gradient(90deg, #18c9bf 0%, #30d463 100%)",
                     color: "#ffffff",
-                    fontSize: "14px",
-                    fontWeight: 600,
+                    fontSize: "14.5px",
+                    fontWeight: 650,
+                    letterSpacing: "-0.01em",
+                    boxShadow:
+                      "0 14px 26px rgba(52,211,153,0.24), 0 1px 0 rgba(255,255,255,0.18) inset",
                     cursor: "pointer",
                   }}
                 >
@@ -10142,7 +10637,7 @@ export default function Page() {
                     borderRadius: "12px",
                     border: "none",
                     background:
-                      "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
+                      signatureIndigoGradient,
                     color: "#ffffff",
                     fontSize: "14px",
                     fontWeight: 600,
@@ -10257,88 +10752,172 @@ export default function Page() {
           </div>
         )}
 
-        <button
-          aria-label="Zaloguj się"
-          onClick={() => openAuthModal("login")}
+        <div
           style={{
             position: "absolute",
             top: "50%",
-            right: "153px",
-            transform: "translateY(-50%)",
-            height: "30px",
-            padding: "0 17px",
-            borderRadius: "999px",
-            border: "1.5px solid rgba(255,255,255,0.34)",
-            background: "rgba(255,255,255,0.08)",
-            color: "#ffffff",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
             display: currentAccountEmail ? "none" : "flex",
             alignItems: "center",
             justifyContent: "center",
-            fontFamily: appSansFontFamily,
-            fontSize: "14px",
-            fontWeight: 500,
-            letterSpacing: "0.01em",
-            lineHeight: 1,
-            cursor: "pointer",
-            backdropFilter: "blur(8px)",
-            boxShadow: "inset 0 0 0 1px rgba(255,255,255,0.08)",
-          }}
-        >
-          Zaloguj się
-        </button>
-
-        <button
-          aria-label="Zarejestruj się"
-          onClick={() => openAuthModal("register")}
-          onMouseEnter={() => setIsRegisterHovered(true)}
-          onMouseLeave={() => setIsRegisterHovered(false)}
-          style={{
-            position: "absolute",
-            top: "50%",
-            right: "16px",
-            transform: "translateY(-50%)",
-            height: "30px",
-            padding: "0 17px",
-            borderRadius: "999px",
-            border: "1.5px solid rgba(255,255,255,0.74)",
-            background: isRegisterHovered
-              ? "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)"
-              : "#ffffff",
-            color: isRegisterHovered ? "#ffffff" : "#7c3aed",
-            display: currentAccountEmail ? "none" : "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            fontFamily: appSansFontFamily,
-            fontSize: "14px",
-            fontWeight: 500,
-            letterSpacing: "0.01em",
-            lineHeight: 1,
-            cursor: "pointer",
-            boxShadow: "0 0 0 1px rgba(255,255,255,0.45)",
-            transition: "background 0.2s ease, color 0.2s ease",
+            gap: "18px",
+            maxWidth: "980px",
+            width: "calc(100% - 120px)",
+            padding: "0 24px",
+            zIndex: 2,
           }}
         >
           <span
             style={{
-              backgroundImage: isRegisterHovered
-                ? "none"
-                : "linear-gradient(90deg, #7c3aed 0%, #3b82f6 50%, #22c55e 100%)",
-              backgroundClip: isRegisterHovered ? "border-box" : "text",
-              WebkitBackgroundClip: isRegisterHovered ? "border-box" : "text",
-              WebkitTextFillColor: isRegisterHovered
-                ? "#ffffff"
-                : "transparent",
-              display: "inline-block",
-              lineHeight: 1.25,
-              paddingBottom: "1px",
+              color: "rgba(255,255,255,0.92)",
+              fontFamily: appSansFontFamily,
+              fontSize: "14.5px",
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              flexShrink: 0,
+              textRendering: "optimizeLegibility",
               WebkitFontSmoothing: "antialiased",
               MozOsxFontSmoothing: "grayscale",
-              textRendering: "geometricPrecision",
+              textShadow: "0 1px 10px rgba(15,23,42,0.18)",
             }}
           >
-            Zarejestruj się
+            Jesteś w trybie gościa. Załóż konto i wybierz odpowiedni plan. 🚀
           </span>
-        </button>
+
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: "10px",
+              flexShrink: 0,
+            }}
+          >
+          <button
+            aria-label="Zaloguj się"
+            onClick={() => openAuthModal("login")}
+            style={{
+              minWidth: "124px",
+              height: "34px",
+              padding: "0 18px",
+              borderRadius: "999px",
+              border: "1px solid rgba(255,255,255,0.42)",
+              background: "transparent",
+              color: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: appSansFontFamily,
+              fontSize: "15px",
+              fontWeight: 650,
+              letterSpacing: "-0.02em",
+              lineHeight: 1,
+              cursor: "pointer",
+              boxShadow:
+                "0 8px 18px rgba(15,23,42,0.08), inset 0 1px 0 rgba(255,255,255,0.12)",
+              whiteSpace: "nowrap",
+              textRendering: "optimizeLegibility",
+              WebkitFontSmoothing: "antialiased",
+              MozOsxFontSmoothing: "grayscale",
+              opacity: 0.96,
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                transform: "translateY(-0.5px)",
+                lineHeight: 1,
+                textRendering: "optimizeLegibility",
+                WebkitFontSmoothing: "antialiased",
+                MozOsxFontSmoothing: "grayscale",
+              }}
+            >
+              Zaloguj się
+            </span>
+          </button>
+
+          <span
+            style={{
+              color: "rgba(255,255,255,0.86)",
+              fontFamily: appSansFontFamily,
+              fontSize: "14px",
+              fontWeight: 600,
+              letterSpacing: "-0.01em",
+              lineHeight: 1,
+              whiteSpace: "nowrap",
+              textRendering: "optimizeLegibility",
+              WebkitFontSmoothing: "antialiased",
+              MozOsxFontSmoothing: "grayscale",
+              textShadow: "0 1px 8px rgba(15,23,42,0.14)",
+            }}
+          >
+            Nie masz konta?
+          </span>
+
+          <button
+            aria-label="Zarejestruj się"
+            onClick={() => openAuthModal("register")}
+            onMouseEnter={() => setIsRegisterCtaHovered(true)}
+            onMouseLeave={() => setIsRegisterCtaHovered(false)}
+            style={{
+              minWidth: "148px",
+              height: "34px",
+              padding: "0 18px",
+              borderRadius: "999px",
+              border: isRegisterCtaHovered
+                ? "1px solid rgba(255,255,255,0.74)"
+                : "1px solid rgba(255,255,255,0.58)",
+              background: signatureIndigoGradient,
+              backgroundSize: "145% 145%",
+              backgroundPosition: isRegisterCtaHovered
+                ? "100% 50%"
+                : "0% 50%",
+              color: "#ffffff",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              fontFamily: appSansFontFamily,
+              fontSize: "15px",
+              fontWeight: 700,
+              letterSpacing: "-0.02em",
+              lineHeight: 1,
+              cursor: "pointer",
+              boxShadow:
+                isRegisterCtaHovered
+                  ? "0 14px 28px rgba(15,23,42,0.18), 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.22)"
+                  : "0 8px 20px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.18)",
+              transition:
+                "border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease, filter 0.22s ease, background-position 0.42s ease",
+              whiteSpace: "nowrap",
+              textRendering: "optimizeLegibility",
+              WebkitFontSmoothing: "antialiased",
+              MozOsxFontSmoothing: "grayscale",
+              transform: isRegisterCtaHovered
+                ? "translateY(-1.5px) scale(1.018)"
+                : "translateY(-0.5px)",
+              filter: isRegisterCtaHovered
+                ? "saturate(1.08) brightness(1.05)"
+                : "none",
+            }}
+          >
+            <span
+              style={{
+                display: "inline-block",
+                lineHeight: 1,
+                transform: "translateY(-0.5px)",
+                WebkitFontSmoothing: "antialiased",
+                MozOsxFontSmoothing: "grayscale",
+                textRendering: "optimizeLegibility",
+              }}
+            >
+              Zarejestruj się
+            </span>
+          </button>
+          </div>
+        </div>
 
       </div>
 

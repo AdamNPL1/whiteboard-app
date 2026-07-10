@@ -39,6 +39,53 @@ const getLegacyStripePriceEnvKey = (plan: BillingPlan) => {
   return "STRIPE_PRICE_BASIC_MONTHLY";
 };
 
+const isStripePriceId = (value: string | undefined | null): value is string =>
+  typeof value === "string" && value.trim().startsWith("price_");
+
+const resolveStripePriceId = (
+  plan: BillingPlan,
+  currency: BillingCurrency
+): {
+  priceId?: string;
+  checkedKeys: string[];
+} => {
+  const checkedKeys: string[] = [];
+  const preferredKey = getStripePriceEnvKey(plan, currency);
+  const preferredValue = process.env[preferredKey];
+  checkedKeys.push(preferredKey);
+
+  if (isStripePriceId(preferredValue)) {
+    return {
+      priceId: preferredValue.trim(),
+      checkedKeys,
+    };
+  }
+
+  if (currency === "pln") {
+    const legacyKey = getLegacyStripePriceEnvKey(plan);
+    const legacyValue = process.env[legacyKey];
+    checkedKeys.push(legacyKey);
+
+    if (isStripePriceId(legacyValue)) {
+      return {
+        priceId: legacyValue.trim(),
+        checkedKeys,
+      };
+    }
+  }
+
+  // Temporary production fallback for the live Basic PLN checkout path.
+  // This keeps checkout testable while Vercel env editing is being sorted out.
+  if (plan === "basic" && currency === "pln") {
+    return {
+      priceId: "price_1Tougg2QRL4DVk5CJfDt10TV",
+      checkedKeys,
+    };
+  }
+
+  return { checkedKeys };
+};
+
 const hasActiveSubscriptionStatus = (
   status: "inactive" | "trialing" | "active" | "past_due" | "canceled"
 ) => status === "trialing" || status === "active" || status === "past_due";
@@ -182,18 +229,18 @@ export async function POST(request: NextRequest) {
   }
 
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
-  const stripePriceId =
-    process.env[getStripePriceEnvKey(targetPlan, targetCurrency)] ??
-    (targetCurrency === "pln"
-      ? process.env[getLegacyStripePriceEnvKey(targetPlan)]
-      : undefined);
+  const { priceId: stripePriceId, checkedKeys: checkedStripePriceKeys } =
+    resolveStripePriceId(targetPlan, targetCurrency);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   if (!stripeSecretKey || !stripePriceId || !appUrl) {
+    const missingConfigDetails = !stripePriceId
+      ? ` Checked price variables: ${checkedStripePriceKeys.join(", ")}.`
+      : "";
     const response = NextResponse.json(
       {
         error:
-          "Checkout is not configured yet. Add STRIPE_SECRET_KEY, NEXT_PUBLIC_APP_URL, and the Stripe price IDs for PLN/EUR next.",
+          `Checkout is not configured yet. Add STRIPE_SECRET_KEY, NEXT_PUBLIC_APP_URL, and valid Stripe price IDs.${missingConfigDetails}`,
       },
       { status: 501 }
     );

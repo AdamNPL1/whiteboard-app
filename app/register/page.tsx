@@ -113,6 +113,11 @@ export default function RegisterPage() {
         <p style={footerStyle}>
           Already have an account? <Link href="/custom">Open board</Link>
         </p>
+        <p style={legalStyle}>
+          By creating an account, you agree to our{" "}
+          <Link href="/privacy">Privacy Policy</Link> and{" "}
+          <Link href="/terms">Terms of Service</Link>.
+        </p>
       </form>
     </main>
   );
@@ -201,4 +206,13 @@ const footerStyle: CSSProperties = {
   color: "#64748b",
   fontSize: "13px",
   fontWeight: 700,
+};
+
+const legalStyle: CSSProperties = {
+  margin: 0,
+  textAlign: "center",
+  color: "#64748b",
+  fontSize: "12px",
+  lineHeight: 1.6,
+  fontWeight: 600,
 };

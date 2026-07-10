@@ -6,6 +6,8 @@ create table if not exists public.profiles (
   updated_at timestamptz not null default timezone('utc', now()),
   plan text not null default 'basic',
   subscription_status text not null default 'inactive',
+  subscription_cancel_at_period_end boolean not null default false,
+  subscription_current_period_end timestamptz null,
   stripe_customer_id text null,
   stripe_subscription_id text null,
   onboarding_status text not null default 'new'
@@ -22,6 +24,10 @@ alter table public.profiles
 alter table public.profiles
   add column if not exists subscription_status text not null default 'inactive';
 alter table public.profiles
+  add column if not exists subscription_cancel_at_period_end boolean not null default false;
+alter table public.profiles
+  add column if not exists subscription_current_period_end timestamptz null;
+alter table public.profiles
   add column if not exists stripe_customer_id text null;
 alter table public.profiles
   add column if not exists stripe_subscription_id text null;
@@ -33,7 +39,8 @@ set
     when plan = 'pro' then 'pro'
     else 'basic'
   end,
-  subscription_status = coalesce(subscription_status, 'inactive')
+  subscription_status = coalesce(subscription_status, 'inactive'),
+  subscription_cancel_at_period_end = coalesce(subscription_cancel_at_period_end, false)
 where true;
 
 alter table public.profiles enable row level security;

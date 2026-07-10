@@ -7,6 +7,26 @@ import { getSupabaseServiceRoleClient, createSupabaseServerAuthClient } from "@/
 
 export const runtime = "nodejs";
 
+const getCurrentPeriodEndIso = (subscription: Stripe.Subscription | null) =>
+  typeof subscription?.items.data[0]?.current_period_end === "number"
+    ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
+    : null;
+
+const getScheduledCancelAtIso = (subscription: Stripe.Subscription | null) =>
+  typeof subscription?.cancel_at === "number"
+    ? new Date(subscription.cancel_at * 1000).toISOString()
+    : null;
+
+const getCancellationScheduledFlag = (subscription: Stripe.Subscription | null) =>
+  Boolean(
+    subscription?.cancel_at_period_end ||
+      (typeof subscription?.cancel_at === "number" &&
+        subscription.cancel_at * 1000 > Date.now())
+  );
+
+const getEffectiveSubscriptionEndIso = (subscription: Stripe.Subscription | null) =>
+  getScheduledCancelAtIso(subscription) ?? getCurrentPeriodEndIso(subscription);
+
 const normalizePlan = (value: string | null | undefined) => {
   if (value === "pro" || value === "master") {
     return value;
@@ -147,6 +167,8 @@ export async function POST(request: NextRequest) {
     .update({
       plan: targetPlan,
       subscription_status: subscriptionStatus,
+      subscription_cancel_at_period_end: getCancellationScheduledFlag(subscription),
+      subscription_current_period_end: getEffectiveSubscriptionEndIso(subscription),
       stripe_customer_id: stripeCustomerId,
       stripe_subscription_id: stripeSubscriptionId,
       updated_at: now,

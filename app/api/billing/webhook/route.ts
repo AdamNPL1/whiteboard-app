@@ -43,6 +43,24 @@ const normalizeSubscriptionStatus = (
   return "inactive";
 };
 
+const getCurrentPeriodEndIso = (subscription: Stripe.Subscription) =>
+  typeof subscription.items.data[0]?.current_period_end === "number"
+    ? new Date(subscription.items.data[0].current_period_end * 1000).toISOString()
+    : null;
+
+const getScheduledCancelAtIso = (subscription: Stripe.Subscription) =>
+  typeof subscription.cancel_at === "number"
+    ? new Date(subscription.cancel_at * 1000).toISOString()
+    : null;
+
+const getCancellationScheduledFlag = (subscription: Stripe.Subscription) =>
+  subscription.cancel_at_period_end ||
+  (typeof subscription.cancel_at === "number" &&
+    subscription.cancel_at * 1000 > Date.now());
+
+const getEffectiveSubscriptionEndIso = (subscription: Stripe.Subscription) =>
+  getScheduledCancelAtIso(subscription) ?? getCurrentPeriodEndIso(subscription);
+
 const getUserIdFromSubscription = (subscription: Stripe.Subscription) => {
   const metadataUserId = subscription.metadata.userId?.trim();
 
@@ -64,12 +82,16 @@ const updateProfileBilling = async ({
   stripeSubscriptionId,
   plan,
   subscriptionStatus,
+  subscriptionCancelAtPeriodEnd,
+  subscriptionCurrentPeriodEnd,
 }: {
   userId?: string | null;
   stripeCustomerId?: string | null;
   stripeSubscriptionId?: string | null;
   plan: AppProfilePlan;
   subscriptionStatus: AppProfileSubscriptionStatus;
+  subscriptionCancelAtPeriodEnd?: boolean;
+  subscriptionCurrentPeriodEnd?: string | null;
 }) => {
   const supabase = getSupabaseServiceRoleClient();
   const now = new Date().toISOString();
@@ -77,6 +99,8 @@ const updateProfileBilling = async ({
   let query = supabase.from("profiles").update({
     plan,
     subscription_status: subscriptionStatus,
+    subscription_cancel_at_period_end: subscriptionCancelAtPeriodEnd ?? false,
+    subscription_current_period_end: subscriptionCurrentPeriodEnd ?? null,
     stripe_customer_id: stripeCustomerId ?? null,
     stripe_subscription_id: stripeSubscriptionId ?? null,
     updated_at: now,
@@ -118,6 +142,8 @@ const handleCheckoutCompleted = async (session: Stripe.Checkout.Session) => {
     stripeSubscriptionId,
     plan: targetPlan,
     subscriptionStatus: "active",
+    subscriptionCancelAtPeriodEnd: false,
+    subscriptionCurrentPeriodEnd: null,
   });
 };
 
@@ -135,6 +161,8 @@ const handleSubscriptionUpdated = async (subscription: Stripe.Subscription) => {
     stripeSubscriptionId,
     plan: targetPlan,
     subscriptionStatus,
+    subscriptionCancelAtPeriodEnd: getCancellationScheduledFlag(subscription),
+    subscriptionCurrentPeriodEnd: getEffectiveSubscriptionEndIso(subscription),
   });
 };
 
@@ -149,6 +177,8 @@ const handleSubscriptionDeleted = async (subscription: Stripe.Subscription) => {
     stripeSubscriptionId: subscription.id,
     plan: "basic",
     subscriptionStatus: "canceled",
+    subscriptionCancelAtPeriodEnd: false,
+    subscriptionCurrentPeriodEnd: null,
   });
 };
 
@@ -179,6 +209,8 @@ const handleInvoicePaymentFailed = async (invoice: Stripe.Invoice) => {
     stripeSubscriptionId,
     plan,
     subscriptionStatus: "past_due",
+    subscriptionCancelAtPeriodEnd: false,
+    subscriptionCurrentPeriodEnd: null,
   });
 };
 

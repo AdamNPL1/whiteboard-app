@@ -23,6 +23,8 @@ export type AppProfile = {
   updatedAt: string;
   plan: AppProfilePlan;
   subscriptionStatus: AppProfileSubscriptionStatus;
+  subscriptionCancelAtPeriodEnd: boolean;
+  subscriptionCurrentPeriodEnd: string | null;
   stripeCustomerId: string | null;
   stripeSubscriptionId: string | null;
   onboardingStatus: AppProfileOnboardingStatus;
@@ -36,6 +38,8 @@ type ProfileRow = {
   updated_at: string;
   plan: string | null;
   subscription_status: string | null;
+  subscription_cancel_at_period_end: boolean | null;
+  subscription_current_period_end: string | null;
   stripe_customer_id: string | null;
   stripe_subscription_id: string | null;
   onboarding_status: string | null;
@@ -89,6 +93,8 @@ const mapProfileRow = (row: ProfileRow, user: User): AppProfile => ({
   updatedAt: row.updated_at,
   plan: normalizePlan(row.plan),
   subscriptionStatus: normalizeSubscriptionStatus(row.subscription_status),
+  subscriptionCancelAtPeriodEnd: Boolean(row.subscription_cancel_at_period_end),
+  subscriptionCurrentPeriodEnd: row.subscription_current_period_end,
   stripeCustomerId: row.stripe_customer_id,
   stripeSubscriptionId: row.stripe_subscription_id,
   onboardingStatus: normalizeOnboardingStatus(row.onboarding_status),
@@ -106,6 +112,7 @@ export const ensureProfileForSupabaseUser = async (
     .from("profiles")
     .select(
       "id,email,name,created_at,updated_at,plan,subscription_status,stripe_customer_id,stripe_subscription_id,onboarding_status"
+      + ",subscription_cancel_at_period_end,subscription_current_period_end"
     )
     .eq("id", user.id)
     .maybeSingle();
@@ -114,11 +121,13 @@ export const ensureProfileForSupabaseUser = async (
     throw new Error(`SUPABASE_PROFILE_READ_FAILED:${readError.message}`);
   }
 
+  const existingProfileRow = existingProfile as ProfileRow | null;
+
   const normalizedEmail = user.email.trim().toLowerCase();
   const normalizedName = getUserProfileName(user);
   const now = new Date().toISOString();
 
-  if (!existingProfile) {
+  if (!existingProfileRow) {
     const { data: createdProfile, error: insertError } = await supabase
       .from("profiles")
       .insert({
@@ -129,12 +138,14 @@ export const ensureProfileForSupabaseUser = async (
         updated_at: now,
         plan: "basic",
         subscription_status: "inactive",
+        subscription_cancel_at_period_end: false,
+        subscription_current_period_end: null,
         stripe_customer_id: null,
         stripe_subscription_id: null,
         onboarding_status: "new",
       })
       .select(
-        "id,email,name,created_at,updated_at,plan,subscription_status,stripe_customer_id,stripe_subscription_id,onboarding_status"
+        "id,email,name,created_at,updated_at,plan,subscription_status,subscription_cancel_at_period_end,subscription_current_period_end,stripe_customer_id,stripe_subscription_id,onboarding_status"
       )
       .single();
 
@@ -142,21 +153,21 @@ export const ensureProfileForSupabaseUser = async (
       throw new Error(`SUPABASE_PROFILE_CREATE_FAILED:${insertError.message}`);
     }
 
-    return mapProfileRow(createdProfile as ProfileRow, user);
+    return mapProfileRow(createdProfile as unknown as ProfileRow, user);
   }
 
   const updates: Partial<ProfileRow> = {};
 
-  if (existingProfile.email !== normalizedEmail) {
+  if (existingProfileRow.email !== normalizedEmail) {
     updates.email = normalizedEmail;
   }
 
-  if (existingProfile.name !== normalizedName) {
+  if (existingProfileRow.name !== normalizedName) {
     updates.name = normalizedName;
   }
 
   if (Object.keys(updates).length === 0) {
-    return mapProfileRow(existingProfile as ProfileRow, user);
+    return mapProfileRow(existingProfileRow, user);
   }
 
   const { data: updatedProfile, error: updateError } = await supabase
@@ -168,6 +179,7 @@ export const ensureProfileForSupabaseUser = async (
     .eq("id", user.id)
     .select(
       "id,email,name,created_at,updated_at,plan,subscription_status,stripe_customer_id,stripe_subscription_id,onboarding_status"
+      + ",subscription_cancel_at_period_end,subscription_current_period_end"
     )
     .single();
 
@@ -175,5 +187,5 @@ export const ensureProfileForSupabaseUser = async (
     throw new Error(`SUPABASE_PROFILE_UPDATE_FAILED:${updateError.message}`);
   }
 
-  return mapProfileRow(updatedProfile as ProfileRow, user);
+  return mapProfileRow(updatedProfile as unknown as ProfileRow, user);
 };
