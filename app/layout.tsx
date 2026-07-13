@@ -2,8 +2,17 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Blackboard",
-  description: "Workspace boards, planning, and scheduling in one place.",
+  title: {
+    default: "Scriboo",
+    template: "%s | Scriboo",
+  },
+  description:
+    "A visual workspace for creating boards, organizing ideas, and planning work.",
+  icons: {
+    icon: "/icon.png",
+    shortcut: "/icon.png",
+    apple: "/icon.png",
+  },
 };
 
 export default function RootLayout({
