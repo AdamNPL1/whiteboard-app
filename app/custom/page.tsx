@@ -19,10 +19,12 @@ import {
   Bold,
   CalendarDays,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
   ChevronUp,
+  Download,
   Italic,
   LayoutGrid,
   List,
@@ -30,8 +32,12 @@ import {
   Lock,
   Mail,
   Clock3,
+  History,
+  CloudOff,
+  CircleHelp,
   Monitor,
   Plus,
+  RefreshCw,
   Search,
   Settings,
   Share2,
@@ -39,6 +45,7 @@ import {
   Underline,
   Upload,
   UserRound,
+  AlertTriangle,
   X,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
@@ -136,6 +143,7 @@ type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
 type AuthMode = "login" | "register";
 type SocialAuthProvider = "google" | "apple";
+type BoardSaveState = "saved" | "dirty" | "saving" | "error" | "offline";
 type PublicAccount = {
   id: string;
   name: string;
@@ -161,11 +169,25 @@ type BoardSummary = {
   previewDocument: BoardDocument;
   ownedByUser?: boolean;
   shareCount?: number;
+  sharePermission?: "viewer" | "editor";
 };
 type BoardShareSummary = {
   id: string;
   email: string;
   createdAt: string;
+  status: "pending" | "accepted";
+  permission: "viewer" | "editor";
+  expiresAt?: string;
+  acceptedAt?: string;
+};
+type BoardVersionSummary = {
+  id: string;
+  boardName: string;
+  reason: "automatic" | "before_restore" | "before_trash";
+  sourceUpdatedAt: string;
+  createdAt: string;
+  elementCount: number;
+  calendarEntryCount: number;
 };
 type CalendarEntry = {
   id: string;
@@ -465,6 +487,7 @@ export default function Page() {
     currency: "pln" | "eur";
     estimatedImmediateCharge?: number | null;
     estimatedNextMonthlyCharge?: number | null;
+    changeEffectiveAt?: string | null;
   } | null>(null);
   const [billingCurrency, setBillingCurrency] = useState<"pln" | "eur">("pln");
   const [pendingBillingPlan, setPendingBillingPlan] = useState<
@@ -473,12 +496,29 @@ export default function Page() {
   const [isBillingPortalLoading, setIsBillingPortalLoading] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
+  const [deleteAccountPassword, setDeleteAccountPassword] = useState("");
+  const [deleteAccountConfirmation, setDeleteAccountConfirmation] =
+    useState("");
+  const [deleteAccountError, setDeleteAccountError] = useState("");
+  const [isDeletingAccount, setIsDeletingAccount] = useState(false);
+  const [isExportingAccountData, setIsExportingAccountData] = useState(false);
+  const [accountExportError, setAccountExportError] = useState("");
   const [activeSettingsSection, setActiveSettingsSection] =
     useState<SettingsSection>("background");
   const [showBoardsMenu, setShowBoardsMenu] = useState(false);
   const [boards, setBoards] = useState<BoardSummary[]>([]);
   const [sharingBoard, setSharingBoard] = useState<BoardSummary | null>(null);
   const [boardShares, setBoardShares] = useState<BoardShareSummary[]>([]);
+  const [versionHistoryBoard, setVersionHistoryBoard] =
+    useState<BoardSummary | null>(null);
+  const [boardVersions, setBoardVersions] = useState<BoardVersionSummary[]>([]);
+  const [versionRetentionDays, setVersionRetentionDays] = useState(30);
+  const [isVersionHistoryLoading, setIsVersionHistoryLoading] = useState(false);
+  const [versionHistoryMessage, setVersionHistoryMessage] = useState("");
+  const [exportingBoard, setExportingBoard] = useState<BoardSummary | null>(null);
+  const [boardExportMessage, setBoardExportMessage] = useState("");
+  const [isBoardExporting, setIsBoardExporting] = useState(false);
   const [shareEmailInput, setShareEmailInput] = useState("");
   const [shareLimit, setShareLimit] = useState(1);
   const [sharePanelMessage, setSharePanelMessage] = useState("");
@@ -500,7 +540,12 @@ export default function Page() {
   const [editingCalendarEntryId, setEditingCalendarEntryId] = useState("");
   const [selectedCalendarEntryId, setSelectedCalendarEntryId] = useState("");
   const [isBoardsLoading, setIsBoardsLoading] = useState(false);
+  const [boardSaveState, setBoardSaveState] =
+    useState<BoardSaveState>("saved");
+  const [isOnline, setIsOnline] = useState(true);
   const [isRegisterCtaHovered, setIsRegisterCtaHovered] = useState(false);
+  const [isAuthSubmitHovered, setIsAuthSubmitHovered] = useState(false);
+  const [isNewBoardButtonHovered, setIsNewBoardButtonHovered] = useState(false);
   const [isFloralBackgroundLoaded, setIsFloralBackgroundLoaded] =
     useState(false);
   const [panningCursorPoint, setPanningCursorPoint] = useState<Point | null>(
@@ -555,6 +600,10 @@ export default function Page() {
   const pendingRedrawFrame = useRef<number | null>(null);
   const autosaveBoardTimeoutRef = useRef<number | null>(null);
   const suppressBoardAutosaveUntilRef = useRef(0);
+  const boardChangeVersionRef = useRef(0);
+  const latestSaveAttemptRef = useRef(0);
+  const hasUnsavedBoardChangesRef = useRef(false);
+  const boardSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -1114,6 +1163,103 @@ export default function Page() {
     });
   };
 
+  const closeDeleteAccountModal = () => {
+    if (isDeletingAccount) return;
+    setShowDeleteAccountModal(false);
+    setDeleteAccountPassword("");
+    setDeleteAccountConfirmation("");
+    setDeleteAccountError("");
+  };
+
+  const deleteAccount = async () => {
+    if (isDeletingAccount) return;
+
+    if (!deleteAccountPassword) {
+      setDeleteAccountError("Enter your password.");
+      return;
+    }
+
+    if (deleteAccountConfirmation.trim() !== "DELETE") {
+      setDeleteAccountError('Type "DELETE" exactly to continue.');
+      return;
+    }
+
+    setIsDeletingAccount(true);
+    setDeleteAccountError("");
+
+    try {
+      const response = await fetch("/api/account", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          password: deleteAccountPassword,
+          confirmation: deleteAccountConfirmation.trim(),
+        }),
+      });
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+      };
+
+      if (!response.ok) {
+        setDeleteAccountError(
+          data.error ?? "Could not delete your account. Nothing was changed."
+        );
+        return;
+      }
+
+      window.location.assign("/?account-deleted=true");
+    } catch {
+      setDeleteAccountError(
+        "Could not reach the server. Your account was not deleted."
+      );
+    } finally {
+      setIsDeletingAccount(false);
+    }
+  };
+
+  const downloadAccountData = async () => {
+    if (isExportingAccountData) return;
+
+    setIsExportingAccountData(true);
+    setAccountExportError("");
+
+    try {
+      const response = await fetch("/api/account/export", {
+        method: "GET",
+        cache: "no-store",
+      });
+
+      if (!response.ok) {
+        const data = (await response.json().catch(() => ({}))) as {
+          error?: string;
+        };
+        setAccountExportError(
+          data.error ?? "Could not prepare your data export right now."
+        );
+        return;
+      }
+
+      const blob = await response.blob();
+      const downloadUrl = window.URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const disposition = response.headers.get("content-disposition") ?? "";
+      const fileNameMatch = disposition.match(/filename="([^"]+)"/i);
+
+      link.href = downloadUrl;
+      link.download = fileNameMatch?.[1] ?? "blackboard-data-export.json";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(downloadUrl);
+    } catch {
+      setAccountExportError(
+        "Could not reach the server. Your data export was not created."
+      );
+    } finally {
+      setIsExportingAccountData(false);
+    }
+  };
+
   const loadCurrentAccount = async () => {
     const data = (await fetch("/api/auth/me", {
       cache: "no-store",
@@ -1142,6 +1288,8 @@ export default function Page() {
 
   const applyBoardDocument = (document: BoardDocument) => {
     suppressBoardAutosaveUntilRef.current = Date.now() + 1200;
+    hasUnsavedBoardChangesRef.current = false;
+    setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
     setIsDrawing(false);
     setShapeStart(null);
@@ -1192,42 +1340,93 @@ export default function Page() {
   const persistBoard = async (boardId: string) => {
     if (!currentAccountId || !boardId) return;
 
-    const data = await readBoardResponse(
-      await fetch(`/api/boards/${boardId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          elements,
-          canvasBackground,
-          customCanvasBackground,
-          gridMode,
-          gridOpacity,
-          calendarEntries,
-        }),
-      })
+    if (typeof navigator !== "undefined" && !navigator.onLine) {
+      setIsOnline(false);
+      setBoardSaveState("offline");
+      throw new Error("You are offline. Your changes have not been saved yet.");
+    }
+
+    const version = boardChangeVersionRef.current;
+    const attempt = latestSaveAttemptRef.current + 1;
+    latestSaveAttemptRef.current = attempt;
+    const documentSnapshot = {
+      elements,
+      canvasBackground,
+      customCanvasBackground,
+      gridMode,
+      gridOpacity,
+      calendarEntries,
+    };
+
+    const saveOperation = boardSaveQueueRef.current
+      .catch(() => undefined)
+      .then(async () => {
+        if (typeof navigator !== "undefined" && !navigator.onLine) {
+          throw new Error("OFFLINE");
+        }
+
+        if (attempt === latestSaveAttemptRef.current) {
+          setBoardSaveState("saving");
+        }
+
+        const data = await readBoardResponse(
+          await fetch(`/api/boards/${boardId}`, {
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(documentSnapshot),
+          })
+        );
+
+        if (data.board && typeof data.board.updatedAt === "string") {
+          const savedBoard = data.board as NonNullable<typeof data.board> & {
+            updatedAt: string;
+          };
+          const savedUpdatedAt: string = savedBoard.updatedAt;
+
+          setBoards((previousBoards) =>
+            previousBoards.map<BoardSummary>((board) =>
+              board.id === boardId
+                ? {
+                    ...board,
+                    name: savedBoard.name ?? board.name,
+                    createdAt: savedBoard.createdAt ?? board.createdAt,
+                    updatedAt: savedUpdatedAt,
+                    deletedAt: savedBoard.deletedAt,
+                    starred: savedBoard.starred ?? board.starred,
+                    previewDocument:
+                      savedBoard.document ?? board.previewDocument,
+                  }
+                : board
+            )
+          );
+        }
+      });
+
+    boardSaveQueueRef.current = saveOperation.then(
+      () => undefined,
+      () => undefined
     );
 
-    if (data.board && typeof data.board.updatedAt === "string") {
-      const savedBoard = data.board as NonNullable<typeof data.board> & {
-        updatedAt: string;
-      };
-      const savedUpdatedAt: string = savedBoard.updatedAt;
-
-      setBoards((previousBoards) =>
-        previousBoards.map<BoardSummary>((board) =>
-          board.id === boardId
-            ? {
-                ...board,
-                name: savedBoard.name ?? board.name,
-                createdAt: savedBoard.createdAt ?? board.createdAt,
-                updatedAt: savedUpdatedAt,
-                deletedAt: savedBoard.deletedAt,
-                starred: savedBoard.starred ?? board.starred,
-                previewDocument: savedBoard.document ?? board.previewDocument,
-              }
-            : board
-        )
-      );
+    try {
+      await saveOperation;
+      if (attempt === latestSaveAttemptRef.current) {
+        if (boardChangeVersionRef.current === version) {
+          hasUnsavedBoardChangesRef.current = false;
+          setBoardSaveState("saved");
+        } else {
+          setBoardSaveState("dirty");
+        }
+      }
+    } catch (error) {
+      hasUnsavedBoardChangesRef.current = true;
+      if (attempt === latestSaveAttemptRef.current) {
+        const offline =
+          (error instanceof Error && error.message === "OFFLINE") ||
+          (typeof navigator !== "undefined" && !navigator.onLine);
+        if (offline) setIsOnline(false);
+        setBoardSaveState(offline ? "offline" : "error");
+      }
+      throw error;
     }
   };
 
@@ -1389,7 +1588,7 @@ export default function Page() {
     if (board.deletedAt) return;
 
     const confirmed = window.confirm(
-      `Do you really wanna remove this board?\n\n"${board.name}" will stay in Trash for 30 days.`
+      `Move "${board.name}" to Trash?\n\nYou can restore it for 30 days. After that, Scriboo permanently deletes it.`
     );
 
     if (!confirmed) return;
@@ -1431,6 +1630,530 @@ export default function Page() {
     } finally {
       setIsBoardsLoading(false);
     }
+  };
+
+  const restoreBoardFromTrash = async (board: BoardSummary) => {
+    if (!board.deletedAt || board.ownedByUser === false) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${board.id}/trash`, { method: "POST" })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? board.id);
+      setBoardBrowserView("all");
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      }
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error ? error.message : "Could not restore this board."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const permanentlyDeleteBoard = async (board: BoardSummary) => {
+    if (!board.deletedAt || board.ownedByUser === false) return;
+
+    const confirmed = window.confirm(
+      `Permanently delete "${board.name}"?\n\nThis also deletes its sharing access and version history. This cannot be undone.`
+    );
+    if (!confirmed) return;
+
+    setIsBoardsLoading(true);
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${board.id}/trash`, { method: "DELETE" })
+      );
+
+      setBoards(data.boards ?? []);
+      setActiveBoardId(data.activeBoardId ?? "");
+
+      if (data.board?.document) {
+        applyBoardDocument(data.board.document);
+      }
+    } catch (error) {
+      setAuthMessage(
+        error instanceof Error
+          ? error.message
+          : "Could not permanently delete this board."
+      );
+    } finally {
+      setIsBoardsLoading(false);
+    }
+  };
+
+  const openVersionHistory = async (board: BoardSummary) => {
+    if (board.deletedAt || board.ownedByUser === false) return;
+
+    setVersionHistoryBoard(board);
+    setBoardVersions([]);
+    setVersionHistoryMessage("");
+    setIsVersionHistoryLoading(true);
+
+    try {
+      if (board.id === activeBoardId && hasUnsavedBoardChangesRef.current) {
+        await persistBoard(board.id);
+      }
+
+      const response = await fetch(`/api/boards/${board.id}/versions`);
+      const data = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        versions?: BoardVersionSummary[];
+        retentionDays?: number;
+      };
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not load version history.");
+      }
+
+      setBoardVersions(data.versions ?? []);
+      setVersionRetentionDays(data.retentionDays ?? 30);
+    } catch (error) {
+      setVersionHistoryMessage(
+        error instanceof Error ? error.message : "Could not load version history."
+      );
+    } finally {
+      setIsVersionHistoryLoading(false);
+    }
+  };
+
+  const restoreBoardVersion = async (version: BoardVersionSummary) => {
+    if (!versionHistoryBoard || isVersionHistoryLoading) return;
+
+    const confirmed = window.confirm(
+      `Restore this version of "${versionHistoryBoard.name}"?\n\nScriboo will save the current board as another recovery version first.`
+    );
+    if (!confirmed) return;
+
+    setIsVersionHistoryLoading(true);
+    setVersionHistoryMessage("");
+
+    try {
+      const data = await readBoardResponse(
+        await fetch(`/api/boards/${versionHistoryBoard.id}/versions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ versionId: version.id }),
+        })
+      );
+
+      if (data.board) {
+        const restoredBoard = data.board;
+        setBoards((previous) =>
+          previous.map((board) =>
+            board.id === restoredBoard.id
+              ? {
+                  ...board,
+                  name: restoredBoard.name,
+                  updatedAt: restoredBoard.updatedAt ?? board.updatedAt,
+                  previewDocument:
+                    restoredBoard.previewDocument ?? restoredBoard.document,
+                }
+              : board
+          )
+        );
+        setActiveBoardId(restoredBoard.id);
+        applyBoardDocument(restoredBoard.document);
+      }
+
+      setVersionHistoryBoard(null);
+      setBoardVersions([]);
+      setShowBoardsMenu(false);
+    } catch (error) {
+      setVersionHistoryMessage(
+        error instanceof Error ? error.message : "Could not restore this version."
+      );
+    } finally {
+      setIsVersionHistoryLoading(false);
+    }
+  };
+
+  const getBoardDocumentForExport = (board: BoardSummary): BoardDocument =>
+    board.id === activeBoardId
+      ? {
+          elements,
+          canvasBackground,
+          customCanvasBackground,
+          gridMode,
+          gridOpacity,
+          calendarEntries,
+        }
+      : board.previewDocument;
+
+  const getSafeExportFileName = (boardName: string) => {
+    const safeName = boardName
+      .trim()
+      .replace(/[^a-zA-Z0-9\-_ ]+/g, "")
+      .replace(/\s+/g, "-")
+      .replace(/-+/g, "-")
+      .slice(0, 60);
+    return safeName || "scriboo-board";
+  };
+
+  const downloadBoardBlob = (blob: Blob, fileName: string) => {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 500);
+  };
+
+  const getExportElementBounds = (element: CanvasElement): Bounds | null => {
+    if (element.kind === "stroke") {
+      if (!element.points.length) return null;
+      const padding = element.width + 8;
+      const xs = element.points.map((point) => point.x);
+      const ys = element.points.map((point) => point.y);
+      const minX = Math.min(...xs);
+      const minY = Math.min(...ys);
+      const maxX = Math.max(...xs);
+      const maxY = Math.max(...ys);
+      return {
+        x: minX - padding,
+        y: minY - padding,
+        width: Math.max(1, maxX - minX + padding * 2),
+        height: Math.max(1, maxY - minY + padding * 2),
+      };
+    }
+
+    if (element.kind === "text") {
+      return {
+        x: element.point.x - 4,
+        y: element.point.y - 4,
+        width: Math.max(1, getTextLengthInCanvas(element, element.width) + 8),
+        height: Math.max(1, getTextLengthInCanvas(element, element.height) + 8),
+      };
+    }
+
+    const padding = element.width + 12;
+    if (element.tool === "circle") {
+      const radius = Math.hypot(
+        element.end.x - element.start.x,
+        element.end.y - element.start.y
+      );
+      return {
+        x: element.start.x - radius - padding,
+        y: element.start.y - radius - padding,
+        width: Math.max(1, radius * 2 + padding * 2),
+        height: Math.max(1, radius * 2 + padding * 2),
+      };
+    }
+
+    const minX = Math.min(element.start.x, element.end.x);
+    const minY = Math.min(element.start.y, element.end.y);
+    const maxX = Math.max(element.start.x, element.end.x);
+    const maxY = Math.max(element.start.y, element.end.y);
+    const arrowPadding = element.tool === "arrow" ? Math.max(22, element.width * 5) : 0;
+    return {
+      x: minX - padding - arrowPadding,
+      y: minY - padding - arrowPadding,
+      width: Math.max(1, maxX - minX + (padding + arrowPadding) * 2),
+      height: Math.max(1, maxY - minY + (padding + arrowPadding) * 2),
+    };
+  };
+
+  const createBoardExportCanvas = (board: BoardSummary) => {
+    const documentToExport = getBoardDocumentForExport(board);
+    const elementBounds = documentToExport.elements
+      .map(getExportElementBounds)
+      .filter((bounds): bounds is Bounds => Boolean(bounds));
+    const padding = 64;
+    const contentBounds = elementBounds.length
+      ? {
+          x: Math.min(...elementBounds.map((bounds) => bounds.x)) - padding,
+          y: Math.min(...elementBounds.map((bounds) => bounds.y)) - padding,
+          width:
+            Math.max(...elementBounds.map((bounds) => bounds.x + bounds.width)) -
+            Math.min(...elementBounds.map((bounds) => bounds.x)) +
+            padding * 2,
+          height:
+            Math.max(...elementBounds.map((bounds) => bounds.y + bounds.height)) -
+            Math.min(...elementBounds.map((bounds) => bounds.y)) +
+            padding * 2,
+        }
+      : { x: 0, y: 0, width: 1600, height: 900 };
+    const renderScale = Math.min(
+      2,
+      4096 / Math.max(1, contentBounds.width),
+      4096 / Math.max(1, contentBounds.height)
+    );
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = Math.max(1, Math.round(contentBounds.width * renderScale));
+    exportCanvas.height = Math.max(1, Math.round(contentBounds.height * renderScale));
+    const context = exportCanvas.getContext("2d");
+    if (!context) throw new Error("Your browser could not create the export image.");
+
+    const background =
+      documentToExport.canvasBackground === floralCanvasBackground
+        ? lightCanvasColor
+        : documentToExport.canvasBackground || lightCanvasColor;
+    context.fillStyle = background;
+    context.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    context.save();
+    context.scale(renderScale, renderScale);
+    context.translate(-contentBounds.x, -contentBounds.y);
+
+    if (
+      documentToExport.canvasBackground === floralCanvasBackground &&
+      floralBackgroundRef.current?.complete
+    ) {
+      const floralImage = floralBackgroundRef.current;
+      const { width: tileWidth, height: tileHeight } = floralBackgroundTile;
+      const startX = Math.floor(contentBounds.x / tileWidth) * tileWidth;
+      const startY = Math.floor(contentBounds.y / tileHeight) * tileHeight;
+      for (
+        let x = startX;
+        x < contentBounds.x + contentBounds.width;
+        x += tileWidth
+      ) {
+        for (
+          let y = startY;
+          y < contentBounds.y + contentBounds.height;
+          y += tileHeight
+        ) {
+          context.drawImage(floralImage, x, y, tileWidth, tileHeight);
+        }
+      }
+    }
+
+    if (documentToExport.gridMode !== "none" && documentToExport.gridOpacity > 0) {
+      const spacing =
+        documentToExport.gridMode === "small"
+          ? 24
+          : documentToExport.gridMode === "large"
+          ? 72
+          : 40;
+      const lightGrid = background === darkCanvasColor || background === greyCanvasColor;
+      context.beginPath();
+      context.lineWidth = 1;
+      context.strokeStyle = lightGrid
+        ? `rgba(255,255,255,${documentToExport.gridOpacity / 100})`
+        : `rgba(15,23,42,${documentToExport.gridOpacity / 100})`;
+      const startX = Math.floor(contentBounds.x / spacing) * spacing;
+      const startY = Math.floor(contentBounds.y / spacing) * spacing;
+      for (let x = startX; x <= contentBounds.x + contentBounds.width; x += spacing) {
+        context.moveTo(x, contentBounds.y);
+        context.lineTo(x, contentBounds.y + contentBounds.height);
+      }
+      for (let y = startY; y <= contentBounds.y + contentBounds.height; y += spacing) {
+        context.moveTo(contentBounds.x, y);
+        context.lineTo(contentBounds.x + contentBounds.width, y);
+      }
+      context.stroke();
+    }
+
+    documentToExport.elements.forEach((element) => {
+      if (element.kind === "stroke") {
+        context.strokeStyle = element.color ?? "#111827";
+        context.fillStyle = element.color ?? "#111827";
+        drawStrokePath(context, element.points, element.width, element.style);
+      } else if (element.kind === "shape") {
+        drawShape(
+          context,
+          element.tool,
+          element.start.x,
+          element.start.y,
+          element.end.x,
+          element.end.y,
+          element.width,
+          element.color,
+          element.style
+        );
+      } else {
+        drawTextElement(context, element);
+      }
+    });
+    context.restore();
+    return exportCanvas;
+  };
+
+  const exportBoardAsPng = async (board: BoardSummary) => {
+    setIsBoardExporting(true);
+    setBoardExportMessage("");
+    try {
+      const exportCanvas = createBoardExportCanvas(board);
+      const blob = await new Promise<Blob>((resolve, reject) =>
+        exportCanvas.toBlob(
+          (result) =>
+            result ? resolve(result) : reject(new Error("PNG creation failed.")),
+          "image/png"
+        )
+      );
+      downloadBoardBlob(blob, `${getSafeExportFileName(board.name)}.png`);
+      setBoardExportMessage("PNG downloaded.");
+    } catch (error) {
+      setBoardExportMessage(
+        error instanceof Error ? error.message : "Could not export this PNG."
+      );
+    } finally {
+      setIsBoardExporting(false);
+    }
+  };
+
+  const createPdfFromJpeg = (
+    jpegBytes: Uint8Array,
+    imageWidth: number,
+    imageHeight: number
+  ) => {
+    const encoder = new TextEncoder();
+    const landscape = imageWidth >= imageHeight;
+    const pageWidth = landscape ? 842 : 595;
+    const pageHeight = landscape ? 595 : 842;
+    const margin = 24;
+    const fitScale = Math.min(
+      (pageWidth - margin * 2) / imageWidth,
+      (pageHeight - margin * 2) / imageHeight
+    );
+    const drawWidth = imageWidth * fitScale;
+    const drawHeight = imageHeight * fitScale;
+    const drawX = (pageWidth - drawWidth) / 2;
+    const drawY = (pageHeight - drawHeight) / 2;
+    const content = `q ${drawWidth.toFixed(2)} 0 0 ${drawHeight.toFixed(
+      2
+    )} ${drawX.toFixed(2)} ${drawY.toFixed(2)} cm /Im0 Do Q`;
+    const chunks: BlobPart[] = [];
+    const offsets = [0];
+    let byteLength = 0;
+    const append = (chunk: string | ArrayBuffer) => {
+      chunks.push(chunk);
+      byteLength +=
+        typeof chunk === "string" ? encoder.encode(chunk).length : chunk.byteLength;
+    };
+    const object = (id: number, body: string, suffix = "") => {
+      offsets[id] = byteLength;
+      append(`${id} 0 obj\n`);
+      append(body);
+      append(`${suffix}\nendobj\n`);
+    };
+
+    append("%PDF-1.4\n%Scriboo\n");
+    object(1, "<< /Type /Catalog /Pages 2 0 R >>");
+    object(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+    object(
+      3,
+      `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${pageWidth} ${pageHeight}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`
+    );
+    offsets[4] = byteLength;
+    append("4 0 obj\n");
+    append(
+      `<< /Type /XObject /Subtype /Image /Width ${imageWidth} /Height ${imageHeight} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpegBytes.byteLength} >>\nstream\n`
+    );
+    const jpegBuffer = new ArrayBuffer(jpegBytes.byteLength);
+    new Uint8Array(jpegBuffer).set(jpegBytes);
+    append(jpegBuffer);
+    append("\nendstream\nendobj\n");
+    object(5, `<< /Length ${encoder.encode(content).length} >>\nstream\n${content}\nendstream`);
+    const xrefOffset = byteLength;
+    append("xref\n0 6\n0000000000 65535 f \n");
+    for (let id = 1; id <= 5; id += 1) {
+      append(`${String(offsets[id]).padStart(10, "0")} 00000 n \n`);
+    }
+    append(`trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF`);
+    return new Blob(chunks, { type: "application/pdf" });
+  };
+
+  const exportBoardAsPdf = async (board: BoardSummary) => {
+    setIsBoardExporting(true);
+    setBoardExportMessage("");
+    try {
+      const exportCanvas = createBoardExportCanvas(board);
+      const dataUrl = exportCanvas.toDataURL("image/jpeg", 0.94);
+      const binary = window.atob(dataUrl.split(",")[1] ?? "");
+      const jpegBytes = Uint8Array.from(binary, (character) =>
+        character.charCodeAt(0)
+      );
+      const pdf = createPdfFromJpeg(
+        jpegBytes,
+        exportCanvas.width,
+        exportCanvas.height
+      );
+      downloadBoardBlob(pdf, `${getSafeExportFileName(board.name)}.pdf`);
+      setBoardExportMessage("PDF downloaded.");
+    } catch (error) {
+      setBoardExportMessage(
+        error instanceof Error ? error.message : "Could not export this PDF."
+      );
+    } finally {
+      setIsBoardExporting(false);
+    }
+  };
+
+  const exportBoardAsJson = (board: BoardSummary) => {
+    setBoardExportMessage("");
+    const payload = {
+      format: "scriboo-board",
+      formatVersion: 1,
+      exportedAt: new Date().toISOString(),
+      board: {
+        id: board.id,
+        name: board.name,
+        createdAt: board.createdAt,
+        updatedAt: board.updatedAt,
+        document: getBoardDocumentForExport(board),
+      },
+    };
+    downloadBoardBlob(
+      new Blob([JSON.stringify(payload, null, 2)], {
+        type: "application/json;charset=utf-8",
+      }),
+      `${getSafeExportFileName(board.name)}.scriboo.json`
+    );
+    setBoardExportMessage("Editable JSON backup downloaded.");
+  };
+
+  const escapeCalendarText = (value: string) =>
+    value
+      .replace(/\\/g, "\\\\")
+      .replace(/;/g, "\\;")
+      .replace(/,/g, "\\,")
+      .replace(/\r?\n/g, "\\n");
+
+  const exportBoardCalendar = (board: BoardSummary) => {
+    const entries = getBoardDocumentForExport(board).calendarEntries;
+    if (!entries.length) {
+      setBoardExportMessage("This board has no calendar entries to export.");
+      return;
+    }
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
+    const lines = [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//Scriboo//Board Calendar//EN",
+      "CALSCALE:GREGORIAN",
+      `X-WR-CALNAME:${escapeCalendarText(board.name)}`,
+      ...entries.flatMap((entry) => {
+        const date = entry.date.replace(/-/g, "");
+        const start = entry.startHour.replace(":", "").padEnd(4, "0");
+        const end = entry.endHour.replace(":", "").padEnd(4, "0");
+        return [
+          "BEGIN:VEVENT",
+          `UID:${entry.id}@scribooapp.com`,
+          `DTSTAMP:${stamp}`,
+          `DTSTART:${date}T${start}00`,
+          `DTEND:${date}T${end}00`,
+          `SUMMARY:${escapeCalendarText(entry.title)}`,
+          "END:VEVENT",
+        ];
+      }),
+      "END:VCALENDAR",
+      "",
+    ];
+    downloadBoardBlob(
+      new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" }),
+      `${getSafeExportFileName(board.name)}-calendar.ics`
+    );
+    setBoardExportMessage("Calendar file downloaded.");
   };
 
   const startRenamingBoard = (board: BoardSummary) => {
@@ -1868,6 +2591,7 @@ export default function Page() {
       currency?: "pln" | "eur";
       estimatedImmediateCharge?: number | null;
       estimatedNextMonthlyCharge?: number | null;
+      changeEffectiveAt?: string | null;
     };
 
     if (!response.ok) {
@@ -1908,6 +2632,7 @@ export default function Page() {
         currency: data.currency ?? billingCurrency,
         estimatedImmediateCharge: data.estimatedImmediateCharge,
         estimatedNextMonthlyCharge: data.estimatedNextMonthlyCharge,
+        changeEffectiveAt: data.changeEffectiveAt,
       });
       return;
     }
@@ -2101,8 +2826,7 @@ export default function Page() {
     "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,226,114,0.1) 24%, rgba(66,179,182,0.12) 68%, rgba(104,168,239,0.15) 100%)";
   const topBarFeaturedChipGradient =
     "linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)";
-  const topBarGradient =
-    `linear-gradient(154deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 9.5%, rgba(255,255,255,0.14) 10.2%, rgba(255,255,255,0.1) 10.7%, rgba(255,255,255,0.02) 12.6%, rgba(255,255,255,0) 14.3%), linear-gradient(26deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 33%, rgba(255,255,255,0.12) 33.7%, rgba(255,255,255,0.09) 34.15%, rgba(255,255,255,0.02) 35.8%, rgba(255,255,255,0) 37.5%), linear-gradient(154deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 58%, rgba(255,255,255,0.14) 58.7%, rgba(255,255,255,0.1) 59.15%, rgba(255,255,255,0.02) 60.8%, rgba(255,255,255,0) 62.4%), linear-gradient(166deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 18%, rgba(255,255,255,0.08) 19%, rgba(255,255,255,0.045) 29%, rgba(255,255,255,0.008) 40%, rgba(255,255,255,0) 46%), linear-gradient(14deg, rgba(255,255,255,0) 0%, rgba(255,255,255,0) 36%, rgba(255,255,255,0.1) 37%, rgba(255,255,255,0.05) 50%, rgba(255,255,255,0.01) 60%, rgba(255,255,255,0) 67%), ${topBarPaletteGradient}`;
+  const topBarGradient = topBarPaletteGradient;
   const premiumHeadingStyle = {
     letterSpacing: "-0.045em",
     fontWeight: 650,
@@ -2763,6 +3487,16 @@ export default function Page() {
 
   const persistBoardEffect = useEffectEvent((boardId: string) => {
     persistBoard(boardId).catch(() => null);
+  });
+
+  const retryUnsavedBoardEffect = useEffectEvent(() => {
+    if (
+      currentAccountId &&
+      activeBoardId &&
+      hasUnsavedBoardChangesRef.current
+    ) {
+      persistBoard(activeBoardId).catch(() => null);
+    }
   });
 
   const applyTextBoxOpacity = (opacity: number) => {
@@ -4118,12 +4852,58 @@ export default function Page() {
   ]);
 
   useEffect(() => {
+    const handleOnline = () => {
+      setIsOnline(true);
+      if (hasUnsavedBoardChangesRef.current) {
+        setBoardSaveState("dirty");
+        window.setTimeout(() => retryUnsavedBoardEffect(), 0);
+      } else {
+        setBoardSaveState("saved");
+      }
+    };
+    const handleOffline = () => {
+      setIsOnline(false);
+      setBoardSaveState("offline");
+    };
+
+    setIsOnline(navigator.onLine);
+    if (!navigator.onLine) setBoardSaveState("offline");
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("offline", handleOffline);
+    return () => {
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("offline", handleOffline);
+    };
+  }, []);
+
+  useEffect(() => {
+    const warnAboutUnsavedChanges = (event: BeforeUnloadEvent) => {
+      if (!hasUnsavedBoardChangesRef.current) return;
+      event.preventDefault();
+      event.returnValue = "";
+    };
+
+    window.addEventListener("beforeunload", warnAboutUnsavedChanges);
+    return () =>
+      window.removeEventListener("beforeunload", warnAboutUnsavedChanges);
+  }, []);
+
+  useEffect(() => {
     if (!currentAccountId || !activeBoardId) return;
     if (Date.now() < suppressBoardAutosaveUntilRef.current) return;
+
+    boardChangeVersionRef.current += 1;
+    hasUnsavedBoardChangesRef.current = true;
+
+    const browserIsOnline = navigator.onLine;
+    setIsOnline(browserIsOnline);
+    setBoardSaveState(browserIsOnline ? "dirty" : "offline");
 
     if (autosaveBoardTimeoutRef.current !== null) {
       window.clearTimeout(autosaveBoardTimeoutRef.current);
     }
+
+    if (!browserIsOnline) return;
 
     autosaveBoardTimeoutRef.current = window.setTimeout(() => {
       persistBoardEffect(activeBoardId);
@@ -6923,20 +7703,41 @@ export default function Page() {
             <button
               type="submit"
               disabled={isAuthSubmitting}
+              onMouseEnter={() => {
+                if (!isAuthSubmitting) setIsAuthSubmitHovered(true);
+              }}
+              onMouseLeave={() => setIsAuthSubmitHovered(false)}
               style={{
                 width: "100%",
                 height: "48px",
                 borderRadius: "16px",
-                border: "none",
-                background:
-                  signatureIndigoButtonGradient,
+                border: isAuthSubmitHovered
+                  ? "1px solid rgba(255,255,255,0.74)"
+                  : "1px solid rgba(255,255,255,0.58)",
+                background: signatureIndigoGradient,
+                backgroundSize: "145% 145%",
+                backgroundPosition: isAuthSubmitHovered
+                  ? "100% 50%"
+                  : "0% 50%",
                 color: "#ffffff",
                 fontSize: 0,
                 fontWeight: 800,
                 cursor: isAuthSubmitting ? "default" : "pointer",
                 opacity: isAuthSubmitting ? 0.72 : 1,
-                boxShadow: "0 16px 36px rgba(79,70,229,0.22), inset 0 1px 0 rgba(255,255,255,0.18)",
-                transition: "transform 0.2s ease, box-shadow 0.2s ease, filter 0.2s ease",
+                boxShadow:
+                  isAuthSubmitHovered && !isAuthSubmitting
+                    ? "0 14px 28px rgba(15,23,42,0.18), 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.22)"
+                    : "0 8px 20px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.18)",
+                transition:
+                  "border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease, filter 0.22s ease, background-position 0.42s ease",
+                transform:
+                  isAuthSubmitHovered && !isAuthSubmitting
+                    ? "translateY(-1.5px) scale(1.018)"
+                    : "translateY(-0.5px)",
+                filter:
+                  isAuthSubmitHovered && !isAuthSubmitting
+                    ? "saturate(1.08) brightness(1.05)"
+                    : "none",
               }}
             >
               <span style={{ fontSize: "16px", letterSpacing: "-0.02em" }}>
@@ -7151,13 +7952,30 @@ export default function Page() {
                       aria-label="Create board"
                       onClick={createBoard}
                       disabled={isBoardsLoading || liveBoardsCount >= currentMaxBoards}
+                      onMouseEnter={() => {
+                        if (!isBoardsLoading && liveBoardsCount < currentMaxBoards) {
+                          setIsNewBoardButtonHovered(true);
+                        }
+                      }}
+                      onMouseLeave={() => setIsNewBoardButtonHovered(false)}
                       style={{
                       minHeight: "46px",
                       width: "100%",
                       borderRadius: "12px",
-                      border: "none",
-                      background:
-                        signatureIndigoButtonGradient,
+                      border:
+                        isNewBoardButtonHovered &&
+                        !isBoardsLoading &&
+                        liveBoardsCount < currentMaxBoards
+                          ? "1px solid rgba(255,255,255,0.74)"
+                          : "1px solid rgba(255,255,255,0.58)",
+                      background: signatureIndigoGradient,
+                      backgroundSize: "145% 145%",
+                      backgroundPosition:
+                        isNewBoardButtonHovered &&
+                        !isBoardsLoading &&
+                        liveBoardsCount < currentMaxBoards
+                          ? "100% 50%"
+                          : "0% 50%",
                       color: "#ffffff",
                       display: "flex",
                       alignItems: "center",
@@ -7171,9 +7989,27 @@ export default function Page() {
                           : "pointer",
                       opacity: liveBoardsCount >= currentMaxBoards ? 0.55 : 1,
                       boxShadow:
-                        "0 16px 34px rgba(42,108,165,0.18), 0 1px 0 rgba(255,255,255,0.2) inset",
+                        isNewBoardButtonHovered &&
+                        !isBoardsLoading &&
+                        liveBoardsCount < currentMaxBoards
+                          ? "0 14px 28px rgba(15,23,42,0.18), 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.22)"
+                          : "0 8px 20px rgba(15,23,42,0.12), inset 0 1px 0 rgba(255,255,255,0.18)",
                       fontSize: "14px",
                       fontWeight: 600,
+                      transition:
+                        "border-color 0.22s ease, box-shadow 0.22s ease, transform 0.22s ease, filter 0.22s ease, background-position 0.42s ease",
+                      transform:
+                        isNewBoardButtonHovered &&
+                        !isBoardsLoading &&
+                        liveBoardsCount < currentMaxBoards
+                          ? "translateY(-1.5px) scale(1.018)"
+                          : "translateY(-0.5px)",
+                      filter:
+                        isNewBoardButtonHovered &&
+                        !isBoardsLoading &&
+                        liveBoardsCount < currentMaxBoards
+                          ? "saturate(1.08) brightness(1.05)"
+                          : "none",
                     }}
                     title={
                       liveBoardsCount >= currentMaxBoards
@@ -7317,14 +8153,14 @@ export default function Page() {
                     </div>
                     <div
                       style={{
-                        padding: "14px 16px",
-                        borderRadius: "14px",
-                        background: "rgba(255,255,255,0.68)",
-                        border: "1px solid rgba(203,213,225,0.7)",
+                        padding: "4px 2px",
+                        borderRadius: "0",
+                        background: "transparent",
+                        border: "none",
                         display: "flex",
                         flexWrap: "wrap",
                         gap: "12px",
-                        boxShadow: "0 10px 24px rgba(15,23,42,0.045)",
+                        boxShadow: "none",
                       }}
                     >
                       <Link
@@ -7426,31 +8262,29 @@ export default function Page() {
 
                     <div
                       style={{
-                        minWidth: "220px",
-                        padding: "12px 14px",
-                        borderRadius: "14px",
-                        border: "1px solid rgba(110,163,215,0.22)",
-                        background:
-                          "linear-gradient(135deg, rgba(255,255,255,0.96) 0%, rgba(231,217,122,0.1) 34%, rgba(89,171,168,0.12) 72%, rgba(110,163,215,0.12) 100%)",
+                        minWidth: "180px",
+                        padding: "8px 0",
+                        borderRadius: "0",
+                        border: "none",
+                        background: "transparent",
                         display: "flex",
                         alignItems: "center",
                         gap: "12px",
-                        boxShadow:
-                          "0 16px 36px rgba(37,99,235,0.08), 0 1px 0 rgba(255,255,255,0.75) inset",
+                        boxShadow: "none",
                       }}
                     >
                       <div
                         style={{
                           width: "40px",
                           height: "40px",
-                          borderRadius: "12px",
+                          borderRadius: "999px",
                           background:
                             "linear-gradient(135deg, #22c55e 0%, #14b8a6 100%)",
                           color: "#ffffff",
                           display: "grid",
                           placeItems: "center",
                           flex: "0 0 auto",
-                          boxShadow: "0 10px 24px rgba(34,197,94,0.24)",
+                          boxShadow: "0 8px 18px rgba(34,197,94,0.2)",
                         }}
                       >
                         <UserRound size={18} />
@@ -7505,14 +8339,14 @@ export default function Page() {
                           minWidth: "240px",
                           height: "44px",
                           padding: "0 15px",
-                          borderRadius: "12px",
-                          border: "1px solid rgba(203,213,225,0.84)",
-                          background: "#ffffff",
+                          borderRadius: "0",
+                          border: "none",
+                          borderBottom: "1px solid rgba(203,213,225,0.9)",
+                          background: "transparent",
                           display: "flex",
                           alignItems: "center",
                           gap: "10px",
-                          boxShadow:
-                            "0 10px 24px rgba(15,23,42,0.04), 0 1px 0 rgba(255,255,255,0.72) inset",
+                          boxShadow: "none",
                         }}
                       >
                         <Search size={16} color="#64748b" />
@@ -7543,13 +8377,11 @@ export default function Page() {
                           alignItems: "center",
                           gap: "4px",
                           flexWrap: "wrap",
-                          padding: "5px 8px",
-                          borderRadius: "18px",
-                          border: "1px solid rgba(205,218,236,0.92)",
-                          background:
-                            "linear-gradient(180deg, rgba(255,255,255,0.97) 0%, rgba(247,251,255,0.97) 100%)",
-                          boxShadow:
-                            "0 14px 30px rgba(15,23,42,0.05), 0 1px 0 rgba(255,255,255,0.82) inset",
+                          padding: "0",
+                          borderRadius: "0",
+                          border: "none",
+                          background: "transparent",
+                          boxShadow: "none",
                         }}
                       >
                         <button
@@ -7670,7 +8502,7 @@ export default function Page() {
                             height: "44px",
                             padding: "0 14px",
                             borderRadius: "999px",
-                            border: "1px solid rgba(96,165,250,0.18)",
+                            border: "none",
                             background:
                               "linear-gradient(90deg, rgba(139,70,255,0.08) 0%, rgba(75,143,255,0.08) 38%, rgba(25,195,188,0.08) 72%, rgba(48,207,104,0.08) 100%)",
                             color: "#1d4ed8",
@@ -7678,8 +8510,7 @@ export default function Page() {
                             alignItems: "center",
                             fontSize: "13px",
                             fontWeight: 600,
-                            boxShadow:
-                              "0 8px 18px rgba(71,127,189,0.08), 0 1px 0 rgba(255,255,255,0.68) inset",
+                            boxShadow: "none",
                             cursor: "pointer",
                           }}
                         >
@@ -7708,10 +8539,10 @@ export default function Page() {
                       <div
                         style={{
                           height: "46px",
-                          padding: "0 16px",
-                          borderRadius: "15px",
-                          border: "1px solid rgba(203,213,225,0.95)",
-                          background: "#ffffff",
+                          padding: "0 4px",
+                          borderRadius: "0",
+                          border: "none",
+                          background: "transparent",
                           color: "#475569",
                           display: "flex",
                           alignItems: "center",
@@ -7753,16 +8584,12 @@ export default function Page() {
                             {
                               label: "Current plan",
                               value: currentWorkspacePlanLabel,
-                              tone:
-                                "linear-gradient(135deg, rgba(217,138,86,0.14) 0%, rgba(239,196,93,0.1) 42%, rgba(110,163,215,0.12) 100%)",
                             },
                             {
                               label: "Board access",
                               value: hasUnlimitedBoards
                                 ? "Unlimited saved boards"
                                 : `Up to ${currentMaxBoards} saved boards`,
-                              tone:
-                                "linear-gradient(135deg, rgba(231,217,122,0.11) 0%, rgba(140,188,121,0.12) 42%, rgba(89,171,168,0.12) 100%)",
                             },
                             {
                               label: "Subscription status",
@@ -7773,22 +8600,21 @@ export default function Page() {
                                   : hasActivePaidSubscription
                                   ? "Paid plan active"
                                   : "Free to upgrade anytime",
-                              tone:
-                                "linear-gradient(135deg, rgba(110,163,215,0.12) 0%, rgba(255,255,255,0.88) 46%, rgba(217,138,86,0.12) 100%)",
                             },
                           ].map((item) => (
                             <div
                               key={item.label}
                               style={{
-                                minHeight: "86px",
-                                borderRadius: "18px",
-                                border: "1px solid rgba(110,163,215,0.18)",
-                                background: item.tone,
-                                padding: "16px 18px",
+                                minHeight: "70px",
+                                borderRadius: "0",
+                                border: "none",
+                                borderLeft: "1px solid rgba(148,163,184,0.28)",
+                                background: "transparent",
+                                padding: "4px 18px",
                                 display: "grid",
                                 gap: "8px",
                                 alignContent: "start",
-                                boxShadow: "0 14px 30px rgba(15,23,42,0.05)",
+                                boxShadow: "none",
                                 ...premiumBodyStyle,
                               }}
                             >
@@ -8323,7 +9149,7 @@ export default function Page() {
                                       ? `${plan.name} active until ${currentSubscriptionEndLabel}`
                                       : `${plan.name} active`
                                     : currentPlanRank === 0
-                                    ? `Subscribe to ${plan.name}`
+                                    ? `Subscribe — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/month`
                                     : plan.value === "basic"
                                     ? "Switch to Basic"
                                     : currentPlanRank < (plan.value === "master" ? 3 : 2)
@@ -8333,6 +9159,40 @@ export default function Page() {
                               </button>
                             </div>
                           ))}
+                        </div>
+                        <div
+                          style={{
+                            marginTop: "16px",
+                            padding: "14px 16px",
+                            border: "1px solid rgba(148,163,184,0.28)",
+                            borderRadius: "10px",
+                            background: "rgba(248,250,252,0.82)",
+                            color: "#475569",
+                            fontSize: "12px",
+                            lineHeight: 1.6,
+                            fontWeight: 600,
+                          }}
+                        >
+                          Paid plans are monthly subscriptions that renew
+                          automatically until cancelled. The selected price and
+                          any charge due now will be shown again before payment.
+                          You can cancel through Manage subscription; access
+                          continues until the end of the paid billing period.
+                          By subscribing, you agree to the{" "}
+                          <Link
+                            href="/terms"
+                            style={{ color: "#2563eb", fontWeight: 800 }}
+                          >
+                            Terms of Service
+                          </Link>{" "}
+                          and acknowledge the{" "}
+                          <Link
+                            href="/privacy"
+                            style={{ color: "#2563eb", fontWeight: 800 }}
+                          >
+                            Privacy Policy
+                          </Link>
+                          .
                         </div>
                         {billingMessage && (
                           <div
@@ -8386,7 +9246,15 @@ export default function Page() {
                             >
                               {billingChangeRequest ? (
                                 (() => {
+                                  const isUpgrade =
+                                    getBillingPlanRank(
+                                      billingChangeRequest.targetPlan
+                                    ) >
+                                    getBillingPlanRank(
+                                      billingChangeRequest.currentPlan
+                                    );
                                   const isFreeUpgradeNow =
+                                    isUpgrade &&
                                     billingChangeRequest.estimatedImmediateCharge === 0;
                                   const nextMonthlyPrice =
                                     formatBillingAmount(
@@ -8466,9 +9334,7 @@ export default function Page() {
                                       }}
                                     >
                                       <span>
-                                        {isFreeUpgradeNow
-                                          ? "Next renewal price"
-                                          : "Next monthly price"}
+                                        Next renewal price
                                       </span>
                                       <strong style={{ color: "#0f172a" }}>
                                         {nextMonthlyPrice}
@@ -8482,9 +9348,15 @@ export default function Page() {
                                       lineHeight: 1.55,
                                     }}
                                   >
-                                    {isFreeUpgradeNow
+                                    {isUpgrade
                                       ? "Your upgrade starts right away. You keep the higher plan for the rest of this billing cycle at no extra cost, then Stripe charges the normal monthly price on your next renewal date."
-                                      : "Stripe may prorate the remaining days in your current billing period automatically."}
+                                      : `You keep your current plan until${
+                                          billingChangeRequest.changeEffectiveAt
+                                            ? ` ${new Date(
+                                                billingChangeRequest.changeEffectiveAt
+                                              ).toLocaleDateString()}`
+                                            : " your next renewal date"
+                                        }. The lower plan and its full monthly price begin then. There is no charge or credit today.`}
                                   </div>
                                   <div
                                     style={{
@@ -8606,11 +9478,11 @@ export default function Page() {
                           <div
                             style={{
                               marginBottom: "16px",
-                              borderRadius: "18px",
-                              border: "1px solid rgba(59,130,246,0.18)",
-                              background:
-                                "linear-gradient(135deg, rgba(239,246,255,0.96) 0%, rgba(240,253,244,0.94) 100%)",
-                              padding: "16px 18px",
+                              borderRadius: "0",
+                              border: "none",
+                              borderLeft: "3px solid rgba(34,197,94,0.45)",
+                              background: "transparent",
+                              padding: "4px 0 4px 14px",
                               display: "grid",
                               gap: "6px",
                             }}
@@ -8694,14 +9566,14 @@ export default function Page() {
                               key={day.key}
                               style={{
                                 minHeight: "206px",
-                                borderRadius: "16px",
-                                border: "1px solid rgba(208,220,237,0.95)",
+                                borderRadius: "8px",
+                                border: "1px solid rgba(208,220,237,0.72)",
                                 background: day.isToday
                                   ? "linear-gradient(180deg, rgba(59,130,246,0.1) 0%, rgba(255,255,255,1) 56%)"
                                   : "linear-gradient(180deg, rgba(255,255,255,0.98) 0%, rgba(250,252,255,0.98) 100%)",
                                 boxShadow: day.isToday
-                                  ? "0 18px 36px rgba(59,130,246,0.12), 0 1px 0 rgba(255,255,255,0.82) inset"
-                                  : "0 12px 26px rgba(15,23,42,0.045), 0 1px 0 rgba(255,255,255,0.82) inset",
+                                  ? "0 10px 24px rgba(59,130,246,0.09)"
+                                  : "0 4px 12px rgba(15,23,42,0.025)",
                                 padding: "12px",
                                 display: "grid",
                                 alignContent: "start",
@@ -9138,10 +10010,10 @@ export default function Page() {
                                   style={{
                                     height: "34px",
                                     borderRadius: "11px",
-                                    border: "1px solid rgba(186,205,232,0.95)",
+                                    border: "none",
                                     background: canUseCalendar
-                                      ? "linear-gradient(90deg, rgba(139,70,255,0.08) 0%, rgba(75,143,255,0.08) 38%, rgba(25,195,188,0.08) 72%, rgba(48,207,104,0.08) 100%)"
-                                      : "linear-gradient(180deg, rgba(248,250,252,0.95) 0%, rgba(241,245,249,0.95) 100%)",
+                                      ? "rgba(37,99,235,0.08)"
+                                      : "transparent",
                                     color: canUseCalendar ? "#2563eb" : "#64748b",
                                     display: "flex",
                                     alignItems: "center",
@@ -9154,8 +10026,7 @@ export default function Page() {
                                       ? "pointer"
                                       : "not-allowed",
                                     opacity: canUseCalendar ? 1 : 0.65,
-                                    boxShadow:
-                                      "0 10px 22px rgba(15,23,42,0.05), 0 1px 0 rgba(255,255,255,0.72) inset",
+                                    boxShadow: "none",
                                   }}
                                 >
                                   <Plus size={12} />
@@ -9171,10 +10042,9 @@ export default function Page() {
                           <div
                             style={{
                               minHeight: "260px",
-                              borderRadius: "24px",
-                              border: "1px dashed rgba(203,213,225,0.95)",
-                              background:
-                                "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+                              borderRadius: "0",
+                              border: "none",
+                              background: "transparent",
                               display: "grid",
                               placeItems: "center",
                               padding: "28px",
@@ -9426,7 +10296,7 @@ export default function Page() {
                                             fontWeight: 600,
                                           }}
                                         >
-                                          Shared with you
+                                          Shared with you · {board.sharePermission === "editor" ? "Can edit" : "View only"}
                                         </div>
                                       )}
                                       {isOwnedBoard &&
@@ -9463,8 +10333,59 @@ export default function Page() {
                                         flex: "0 0 auto",
                                       }}
                                     >
+                                      <button
+                                        type="button"
+                                        aria-label={`Export ${board.name}`}
+                                        title="Export board"
+                                        disabled={isBoardsLoading}
+                                        onClick={(event) => {
+                                          event.stopPropagation();
+                                          setExportingBoard(board);
+                                          setBoardExportMessage("");
+                                        }}
+                                        style={{
+                                          width: "32px",
+                                          height: "32px",
+                                          borderRadius: "10px",
+                                          border: "1px solid rgba(16,185,129,0.18)",
+                                          background: "#ffffff",
+                                          color: "#059669",
+                                          display: "grid",
+                                          placeItems: "center",
+                                          cursor: isBoardsLoading ? "default" : "pointer",
+                                          padding: 0,
+                                        }}
+                                      >
+                                        <Download size={15} />
+                                      </button>
                                       {isOwnedBoard && (
                                         <>
+                                          <button
+                                            type="button"
+                                            aria-label={`Version history for ${board.name}`}
+                                            title="Version history"
+                                            disabled={isBoardsLoading}
+                                            onClick={(e) => {
+                                              e.stopPropagation();
+                                              openVersionHistory(board).catch(() => null);
+                                            }}
+                                            style={{
+                                              width: "32px",
+                                              height: "32px",
+                                              borderRadius: "10px",
+                                              border:
+                                                "1px solid rgba(14,165,233,0.18)",
+                                              background: "#ffffff",
+                                              color: "#0284c7",
+                                              display: "grid",
+                                              placeItems: "center",
+                                              cursor:
+                                                isBoardsLoading ? "default" : "pointer",
+                                              padding: 0,
+                                            }}
+                                          >
+                                            <History size={15} />
+                                          </button>
                                           <button
                                             type="button"
                                             aria-label={`Share ${board.name}`}
@@ -9557,6 +10478,69 @@ export default function Page() {
                                 </div>
                               )}
 
+                              {isInTrash && isOwnedBoard && (
+                                <div
+                                  style={{
+                                    display: "grid",
+                                    gridTemplateColumns: "1fr 1fr",
+                                    gap: "8px",
+                                  }}
+                                >
+                                  <button
+                                    type="button"
+                                    disabled={isBoardsLoading}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      restoreBoardFromTrash(board).catch(() => null);
+                                    }}
+                                    style={{
+                                      height: "36px",
+                                      borderRadius: "11px",
+                                      border: "1px solid rgba(16,185,129,0.22)",
+                                      background: "rgba(236,253,245,0.9)",
+                                      color: "#047857",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      gap: "7px",
+                                      fontFamily: appSansFontFamily,
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      cursor: isBoardsLoading ? "default" : "pointer",
+                                    }}
+                                  >
+                                    <RefreshCw size={14} />
+                                    Restore
+                                  </button>
+                                  <button
+                                    type="button"
+                                    disabled={isBoardsLoading}
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      permanentlyDeleteBoard(board).catch(() => null);
+                                    }}
+                                    style={{
+                                      height: "36px",
+                                      borderRadius: "11px",
+                                      border: "1px solid rgba(239,68,68,0.2)",
+                                      background: "rgba(254,242,242,0.9)",
+                                      color: "#b91c1c",
+                                      display: "inline-flex",
+                                      alignItems: "center",
+                                      justifyContent: "center",
+                                      gap: "7px",
+                                      fontFamily: appSansFontFamily,
+                                      fontSize: "12px",
+                                      fontWeight: 700,
+                                      cursor: isBoardsLoading ? "default" : "pointer",
+                                    }}
+                                  >
+                                    <Trash2 size={14} />
+                                    Delete forever
+                                  </button>
+                                </div>
+                              )}
+
                               <div
                                 style={{
                                   display: "flex",
@@ -9606,10 +10590,9 @@ export default function Page() {
                           style={{
                             gridColumn: "1 / -1",
                             minHeight: "260px",
-                            borderRadius: "24px",
-                            border: "1px dashed rgba(203,213,225,0.95)",
-                            background:
-                              "linear-gradient(180deg, #f8fafc 0%, #ffffff 100%)",
+                            borderRadius: "0",
+                            border: "none",
+                            background: "transparent",
                             display: "grid",
                             placeItems: "center",
                             padding: "28px",
@@ -10278,6 +11261,73 @@ export default function Page() {
                           </div>
                         </div>
                         <button
+                          type="button"
+                          onClick={() => window.location.assign("/account-settings")}
+                          style={{
+                            width: "220px",
+                            height: "42px",
+                            borderRadius: "10px",
+                            border: `1px solid ${panelBorderColor}`,
+                            background: controlBackground,
+                            color: panelTextColor,
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            cursor: "pointer",
+                          }}
+                        >
+                          Account &amp; security
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void downloadAccountData()}
+                          disabled={isExportingAccountData}
+                          style={{
+                            width: "220px",
+                            height: "42px",
+                            borderRadius: "10px",
+                            border: `1px solid ${panelBorderColor}`,
+                            background: controlBackground,
+                            color: panelTextColor,
+                            fontSize: "14px",
+                            fontWeight: 700,
+                            cursor: isExportingAccountData ? "default" : "pointer",
+                            opacity: isExportingAccountData ? 0.72 : 1,
+                          }}
+                        >
+                          {isExportingAccountData
+                            ? "Preparing export..."
+                            : "Download my data"}
+                        </button>
+                        <div
+                          style={{
+                            color: "#64748b",
+                            fontSize: "12px",
+                            lineHeight: 1.5,
+                            maxWidth: "320px",
+                          }}
+                        >
+                          Download a JSON export with your account details,
+                          owned boards and board content, calendar entries,
+                          sharing records, and subscription information.
+                        </div>
+                        {accountExportError && (
+                          <div
+                            role="alert"
+                            style={{
+                              padding: "10px 12px",
+                              borderRadius: "10px",
+                              background: "#fef2f2",
+                              color: "#b91c1c",
+                              fontSize: "13px",
+                              fontWeight: 700,
+                              lineHeight: 1.45,
+                              maxWidth: "320px",
+                            }}
+                          >
+                            {accountExportError}
+                          </div>
+                        )}
+                        <button
                           onClick={signOut}
                           style={{
                             width: "220px",
@@ -10293,6 +11343,55 @@ export default function Page() {
                         >
                           Log out
                         </button>
+                        <div
+                          style={{
+                            marginTop: "10px",
+                            paddingTop: "18px",
+                            borderTop: "1px solid rgba(239,68,68,0.2)",
+                            display: "grid",
+                            gap: "10px",
+                          }}
+                        >
+                          <div
+                            style={{
+                              color: "#991b1b",
+                              fontSize: "14px",
+                              fontWeight: 800,
+                            }}
+                          >
+                            Danger zone
+                          </div>
+                          <div
+                            style={{
+                              color: "#64748b",
+                              fontSize: "12px",
+                              lineHeight: 1.5,
+                            }}
+                          >
+                            Permanently delete your account, boards, calendar
+                            entries, and sharing access.
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setDeleteAccountError("");
+                              setShowDeleteAccountModal(true);
+                            }}
+                            style={{
+                              width: "220px",
+                              height: "42px",
+                              borderRadius: "10px",
+                              border: "1px solid rgba(220,38,38,0.35)",
+                              background: "rgba(254,242,242,0.9)",
+                              color: "#b91c1c",
+                              fontSize: "14px",
+                              fontWeight: 750,
+                              cursor: "pointer",
+                            }}
+                          >
+                            Delete account
+                          </button>
+                        </div>
                       </div>
                     )}
                     <button
@@ -10322,6 +11421,389 @@ export default function Page() {
             </div>
           </div>
         )}
+
+        {showDeleteAccountModal && (
+          <div
+            role="presentation"
+            onMouseDown={(event) => {
+              if (event.target === event.currentTarget) {
+                closeDeleteAccountModal();
+              }
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              zIndex: 180,
+              display: "grid",
+              placeItems: "center",
+              padding: "20px",
+              background: "rgba(15,23,42,0.56)",
+              backdropFilter: "blur(10px)",
+            }}
+          >
+            <div
+              role="dialog"
+              aria-modal="true"
+              aria-labelledby="delete-account-title"
+              onMouseDown={(event) => event.stopPropagation()}
+              style={{
+                width: "min(480px, calc(100vw - 32px))",
+                padding: "24px",
+                borderRadius: "18px",
+                border: "1px solid rgba(239,68,68,0.22)",
+                background: "#ffffff",
+                color: "#0f172a",
+                boxShadow: "0 30px 90px rgba(15,23,42,0.32)",
+                display: "grid",
+                gap: "16px",
+                fontFamily: appSansFontFamily,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                }}
+              >
+                <div>
+                  <div
+                    id="delete-account-title"
+                    style={{
+                      color: "#991b1b",
+                      fontSize: "22px",
+                      fontWeight: 800,
+                    }}
+                  >
+                    Permanently delete account?
+                  </div>
+                  <div
+                    style={{
+                      marginTop: "7px",
+                      color: "#64748b",
+                      fontSize: "13px",
+                      lineHeight: 1.55,
+                    }}
+                  >
+                    This action cannot be undone.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close account deletion confirmation"
+                  onClick={closeDeleteAccountModal}
+                  disabled={isDeletingAccount}
+                  style={{
+                    width: "34px",
+                    height: "34px",
+                    borderRadius: "10px",
+                    border: "1px solid #e2e8f0",
+                    background: "#ffffff",
+                    color: "#334155",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: isDeletingAccount ? "default" : "pointer",
+                  }}
+                >
+                  <X size={17} />
+                </button>
+              </div>
+
+              <div
+                style={{
+                  padding: "14px 16px",
+                  borderRadius: "12px",
+                  border: "1px solid rgba(239,68,68,0.2)",
+                  background: "#fef2f2",
+                  color: "#7f1d1d",
+                  fontSize: "13px",
+                  lineHeight: 1.6,
+                }}
+              >
+                <strong>This will permanently remove:</strong>
+                <ul style={{ margin: "8px 0 0", paddingLeft: "20px" }}>
+                  <li>Your profile and sign-in access</li>
+                  <li>All boards and calendar entries</li>
+                  <li>All board invitations and sharing access</li>
+                  <li>Your active subscription, which will be cancelled now</li>
+                </ul>
+                <div style={{ marginTop: "9px" }}>
+                  Required billing records may remain with Stripe for accounting
+                  and legal compliance. A confirmation will be emailed to{" "}
+                  <strong>{currentAccountEmail}</strong>.
+                </div>
+              </div>
+
+              <label
+                style={{
+                  display: "grid",
+                  gap: "7px",
+                  color: "#334155",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                }}
+              >
+                Password
+                <input
+                  type="password"
+                  autoComplete="current-password"
+                  value={deleteAccountPassword}
+                  onChange={(event) =>
+                    setDeleteAccountPassword(event.currentTarget.value)
+                  }
+                  disabled={isDeletingAccount}
+                  style={{
+                    height: "44px",
+                    padding: "0 12px",
+                    borderRadius: "10px",
+                    border: "1px solid #cbd5e1",
+                    color: "#0f172a",
+                    fontSize: "15px",
+                    outlineColor: "#dc2626",
+                  }}
+                />
+              </label>
+
+              <label
+                style={{
+                  display: "grid",
+                  gap: "7px",
+                  color: "#334155",
+                  fontSize: "13px",
+                  fontWeight: 700,
+                }}
+              >
+                Type DELETE to confirm
+                <input
+                  type="text"
+                  autoComplete="off"
+                  value={deleteAccountConfirmation}
+                  onChange={(event) =>
+                    setDeleteAccountConfirmation(event.currentTarget.value)
+                  }
+                  disabled={isDeletingAccount}
+                  style={{
+                    height: "44px",
+                    padding: "0 12px",
+                    borderRadius: "10px",
+                    border: "1px solid #cbd5e1",
+                    color: "#0f172a",
+                    fontSize: "15px",
+                    fontWeight: 700,
+                    outlineColor: "#dc2626",
+                  }}
+                />
+              </label>
+
+              {deleteAccountError && (
+                <div
+                  role="alert"
+                  style={{
+                    padding: "10px 12px",
+                    borderRadius: "10px",
+                    background: "#fef2f2",
+                    color: "#b91c1c",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    lineHeight: 1.45,
+                  }}
+                >
+                  {deleteAccountError}
+                </div>
+              )}
+
+              <div
+                style={{
+                  display: "flex",
+                  justifyContent: "flex-end",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={closeDeleteAccountModal}
+                  disabled={isDeletingAccount}
+                  style={{
+                    height: "42px",
+                    padding: "0 16px",
+                    borderRadius: "10px",
+                    border: "1px solid #cbd5e1",
+                    background: "#ffffff",
+                    color: "#334155",
+                    fontSize: "14px",
+                    fontWeight: 700,
+                    cursor: isDeletingAccount ? "default" : "pointer",
+                  }}
+                >
+                  Keep my account
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void deleteAccount()}
+                  disabled={
+                    isDeletingAccount ||
+                    !deleteAccountPassword ||
+                    deleteAccountConfirmation.trim() !== "DELETE"
+                  }
+                  style={{
+                    height: "42px",
+                    padding: "0 16px",
+                    borderRadius: "10px",
+                    border: "none",
+                    background: "#dc2626",
+                    color: "#ffffff",
+                    fontSize: "14px",
+                    fontWeight: 800,
+                    cursor:
+                      isDeletingAccount ||
+                      !deleteAccountPassword ||
+                      deleteAccountConfirmation.trim() !== "DELETE"
+                        ? "default"
+                        : "pointer",
+                    opacity:
+                      isDeletingAccount ||
+                      !deleteAccountPassword ||
+                      deleteAccountConfirmation.trim() !== "DELETE"
+                        ? 0.55
+                        : 1,
+                  }}
+                >
+                  {isDeletingAccount
+                    ? "Deleting account..."
+                    : "Permanently delete account"}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {currentAccountEmail && activeBoardId && (
+          <div
+            aria-live="polite"
+            aria-label={
+              boardSaveState === "offline" || !isOnline
+                ? "Offline. Changes will save after reconnecting."
+                : boardSaveState === "error"
+                  ? "Save failed. Retry saving."
+                  : boardSaveState === "saving"
+                    ? "Saving board."
+                    : boardSaveState === "dirty"
+                      ? "Board has unsaved changes."
+                      : "Board saved."
+            }
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "112px",
+              transform: "translateY(-50%)",
+              minHeight: "30px",
+              padding: "0 10px",
+              borderRadius: "999px",
+              border:
+                boardSaveState === "error"
+                  ? "1px solid rgba(254,202,202,0.74)"
+                  : boardSaveState === "offline" || !isOnline
+                    ? "1px solid rgba(253,230,138,0.78)"
+                    : "1px solid rgba(255,255,255,0.3)",
+              background:
+                boardSaveState === "error"
+                  ? "rgba(153,27,27,0.34)"
+                  : boardSaveState === "offline" || !isOnline
+                    ? "rgba(146,64,14,0.34)"
+                    : "rgba(255,255,255,0.12)",
+              color: "#ffffff",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: "7px",
+              fontSize: "12px",
+              fontWeight: 700,
+              backdropFilter: "blur(8px)",
+              boxShadow: "0 4px 14px rgba(15,23,42,0.08)",
+            }}
+          >
+            {boardSaveState === "offline" || !isOnline ? (
+              <CloudOff size={14} />
+            ) : boardSaveState === "error" ? (
+              <AlertTriangle size={14} />
+            ) : boardSaveState === "saving" ? (
+              <RefreshCw size={14} />
+            ) : boardSaveState === "saved" ? (
+              <CheckCircle2 size={14} />
+            ) : (
+              <Clock3 size={14} />
+            )}
+
+            <span style={{ whiteSpace: "nowrap" }}>
+              {boardSaveState === "offline" || !isOnline
+                ? "Offline — changes not saved"
+                : boardSaveState === "error"
+                  ? "Save failed"
+                  : boardSaveState === "saving"
+                    ? "Saving…"
+                    : boardSaveState === "dirty"
+                      ? "Waiting to save…"
+                      : "Saved"}
+            </span>
+
+            {(boardSaveState === "error" ||
+              boardSaveState === "offline" ||
+              !isOnline) && (
+              <button
+                type="button"
+                disabled={!isOnline}
+                onClick={() => persistBoard(activeBoardId).catch(() => null)}
+                style={{
+                  height: "22px",
+                  padding: "0 8px",
+                  borderRadius: "999px",
+                  border: "1px solid rgba(255,255,255,0.44)",
+                  background: "rgba(255,255,255,0.14)",
+                  color: "#ffffff",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "4px",
+                  fontSize: "11px",
+                  fontWeight: 800,
+                  cursor: isOnline ? "pointer" : "default",
+                  opacity: isOnline ? 1 : 0.62,
+                }}
+              >
+                <RefreshCw size={11} />
+                Retry
+              </button>
+            )}
+          </div>
+        )}
+
+        <Link
+          href="/support"
+          aria-label="Help and Support"
+          title="Help & Support"
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: currentAccountEmail ? "56px" : "16px",
+            transform: "translateY(-50%)",
+            height: "32px",
+            padding: "0 12px",
+            borderRadius: "999px",
+            border: "1px solid rgba(255,255,255,0.42)",
+            background: "rgba(255,255,255,0.12)",
+            color: "#ffffff",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "7px",
+            textDecoration: "none",
+            fontSize: "12px",
+            fontWeight: 750,
+            backdropFilter: "blur(8px)",
+          }}
+        >
+          <CircleHelp size={16} />
+          Help &amp; Support
+        </Link>
 
         {currentAccountEmail && (
           <div
@@ -10500,6 +11982,384 @@ export default function Page() {
                 </button>
               </div>
             )}
+          </div>
+        )}
+
+        {exportingBoard && (
+          <div
+            onClick={() => {
+              if (isBoardExporting) return;
+              setExportingBoard(null);
+              setBoardExportMessage("");
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.4)",
+              display: "grid",
+              placeItems: "center",
+              padding: "20px",
+              zIndex: 175,
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: "min(620px, 100%)",
+                borderRadius: "24px",
+                border: "1px solid rgba(203,213,225,0.9)",
+                background: "#ffffff",
+                boxShadow: "0 30px 90px rgba(15,23,42,0.24)",
+                padding: "24px",
+                display: "grid",
+                gap: "18px",
+                fontFamily: appSansFontFamily,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                }}
+              >
+                <div style={{ display: "grid", gap: "7px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      color: "#0f172a",
+                      fontSize: "22px",
+                      fontWeight: 780,
+                    }}
+                  >
+                    <Download size={22} color="#059669" />
+                    Export board
+                  </div>
+                  <div style={{ color: "#475569", fontSize: "13px", lineHeight: 1.5 }}>
+                    Download <strong>{exportingBoard.name}</strong> in the format you
+                    need. Your original board stays unchanged.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close board export"
+                  disabled={isBoardExporting}
+                  onClick={() => {
+                    setExportingBoard(null);
+                    setBoardExportMessage("");
+                  }}
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(203,213,225,0.9)",
+                    background: "#ffffff",
+                    color: "#334155",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: isBoardExporting ? "default" : "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                  gap: "10px",
+                }}
+              >
+                {[
+                  {
+                    title: "PNG image",
+                    description: "Share the board as a clear image.",
+                    accent: "#2563eb",
+                    action: () => exportBoardAsPng(exportingBoard),
+                  },
+                  {
+                    title: "PDF document",
+                    description: "Print it or use it in a presentation.",
+                    accent: "#7c3aed",
+                    action: () => exportBoardAsPdf(exportingBoard),
+                  },
+                  {
+                    title: "Scriboo JSON",
+                    description: "A machine-readable, editable board backup.",
+                    accent: "#0891b2",
+                    action: () => exportBoardAsJson(exportingBoard),
+                  },
+                  {
+                    title: "Calendar (.ics)",
+                    description: "Open entries in Google, Apple or Outlook Calendar.",
+                    accent: "#059669",
+                    action: () => exportBoardCalendar(exportingBoard),
+                  },
+                ].map((option) => (
+                  <button
+                    key={option.title}
+                    type="button"
+                    disabled={isBoardExporting}
+                    onClick={() => option.action()}
+                    style={{
+                      minHeight: "112px",
+                      borderRadius: "16px",
+                      border: `1px solid ${option.accent}2e`,
+                      background: `${option.accent}0d`,
+                      color: "#0f172a",
+                      padding: "16px",
+                      display: "grid",
+                      alignContent: "center",
+                      gap: "7px",
+                      textAlign: "left",
+                      fontFamily: appSansFontFamily,
+                      cursor: isBoardExporting ? "default" : "pointer",
+                      opacity: isBoardExporting ? 0.62 : 1,
+                    }}
+                  >
+                    <span style={{ color: option.accent, fontSize: "14px", fontWeight: 760 }}>
+                      {option.title}
+                    </span>
+                    <span style={{ color: "#64748b", fontSize: "12px", lineHeight: 1.45 }}>
+                      {option.description}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              {boardExportMessage && (
+                <div
+                  style={{
+                    borderRadius: "12px",
+                    border: "1px solid rgba(16,185,129,0.16)",
+                    background: "rgba(236,253,245,0.86)",
+                    color: "#047857",
+                    padding: "11px 13px",
+                    fontSize: "13px",
+                    fontWeight: 650,
+                  }}
+                >
+                  {boardExportMessage}
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {versionHistoryBoard && (
+          <div
+            onClick={() => {
+              if (isVersionHistoryLoading) return;
+              setVersionHistoryBoard(null);
+              setBoardVersions([]);
+              setVersionHistoryMessage("");
+            }}
+            style={{
+              position: "fixed",
+              inset: 0,
+              background: "rgba(15,23,42,0.4)",
+              display: "grid",
+              placeItems: "center",
+              padding: "20px",
+              zIndex: 170,
+            }}
+          >
+            <div
+              onClick={(event) => event.stopPropagation()}
+              style={{
+                width: "min(590px, 100%)",
+                maxHeight: "min(720px, calc(100vh - 40px))",
+                overflow: "auto",
+                borderRadius: "24px",
+                border: "1px solid rgba(203,213,225,0.9)",
+                background: "#ffffff",
+                boxShadow: "0 30px 90px rgba(15,23,42,0.24)",
+                padding: "24px",
+                display: "grid",
+                gap: "18px",
+                fontFamily: appSansFontFamily,
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  justifyContent: "space-between",
+                  gap: "16px",
+                }}
+              >
+                <div style={{ display: "grid", gap: "7px" }}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      color: "#0f172a",
+                      fontSize: "22px",
+                      fontWeight: 780,
+                    }}
+                  >
+                    <History size={22} color="#0284c7" />
+                    Version history
+                  </div>
+                  <div style={{ color: "#475569", fontSize: "13px", lineHeight: 1.5 }}>
+                    Earlier versions of <strong>{versionHistoryBoard.name}</strong>.
+                    Scriboo keeps up to 50 recent snapshots for {versionRetentionDays} days.
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  aria-label="Close version history"
+                  disabled={isVersionHistoryLoading}
+                  onClick={() => {
+                    setVersionHistoryBoard(null);
+                    setBoardVersions([]);
+                    setVersionHistoryMessage("");
+                  }}
+                  style={{
+                    width: "36px",
+                    height: "36px",
+                    borderRadius: "12px",
+                    border: "1px solid rgba(203,213,225,0.9)",
+                    background: "#ffffff",
+                    color: "#334155",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: isVersionHistoryLoading ? "default" : "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={18} />
+                </button>
+              </div>
+
+              <div
+                style={{
+                  borderRadius: "14px",
+                  border: "1px solid rgba(14,165,233,0.16)",
+                  background: "rgba(240,249,255,0.78)",
+                  color: "#075985",
+                  padding: "12px 14px",
+                  fontSize: "12px",
+                  lineHeight: 1.5,
+                }}
+              >
+                Restoring does not destroy your current work. Scriboo saves the current
+                board as a recovery version first.
+              </div>
+
+              {versionHistoryMessage && (
+                <div
+                  style={{
+                    borderRadius: "12px",
+                    background: "#fef2f2",
+                    color: "#b91c1c",
+                    padding: "11px 13px",
+                    fontSize: "13px",
+                    fontWeight: 650,
+                  }}
+                >
+                  {versionHistoryMessage}
+                </div>
+              )}
+
+              {isVersionHistoryLoading && boardVersions.length === 0 ? (
+                <div
+                  style={{
+                    minHeight: "120px",
+                    display: "grid",
+                    placeItems: "center",
+                    color: "#64748b",
+                    fontSize: "13px",
+                    fontWeight: 650,
+                  }}
+                >
+                  Loading recovery versions…
+                </div>
+              ) : boardVersions.length === 0 && !versionHistoryMessage ? (
+                <div
+                  style={{
+                    borderRadius: "16px",
+                    border: "1px dashed rgba(148,163,184,0.48)",
+                    padding: "28px 18px",
+                    textAlign: "center",
+                    color: "#64748b",
+                    fontSize: "13px",
+                    lineHeight: 1.55,
+                  }}
+                >
+                  No earlier versions yet. Scriboo creates snapshots automatically as
+                  you continue editing this board.
+                </div>
+              ) : (
+                <div style={{ display: "grid", gap: "10px" }}>
+                  {boardVersions.map((version) => {
+                    const reasonLabel =
+                      version.reason === "before_restore"
+                        ? "Before a previous recovery"
+                        : version.reason === "before_trash"
+                        ? "Before moving to Trash"
+                        : "Automatic snapshot";
+
+                    return (
+                      <div
+                        key={version.id}
+                        style={{
+                          borderRadius: "15px",
+                          border: "1px solid rgba(226,232,240,0.95)",
+                          background: "#ffffff",
+                          padding: "14px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "space-between",
+                          gap: "14px",
+                          boxShadow: "0 5px 16px rgba(15,23,42,0.04)",
+                        }}
+                      >
+                        <div style={{ minWidth: 0, display: "grid", gap: "5px" }}>
+                          <div style={{ color: "#0f172a", fontSize: "14px", fontWeight: 720 }}>
+                            {reasonLabel}
+                          </div>
+                          <div style={{ color: "#64748b", fontSize: "12px" }}>
+                            {formatBoardDate(version.createdAt)} · {version.elementCount}{" "}
+                            items · {version.calendarEntryCount} calendar entries
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          disabled={isVersionHistoryLoading}
+                          onClick={() => restoreBoardVersion(version).catch(() => null)}
+                          style={{
+                            height: "36px",
+                            padding: "0 13px",
+                            borderRadius: "11px",
+                            border: "1px solid rgba(14,165,233,0.2)",
+                            background: "rgba(240,249,255,0.9)",
+                            color: "#0369a1",
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "7px",
+                            flex: "0 0 auto",
+                            fontFamily: appSansFontFamily,
+                            fontSize: "12px",
+                            fontWeight: 720,
+                            cursor: isVersionHistoryLoading ? "default" : "pointer",
+                          }}
+                        >
+                          <RefreshCw size={14} />
+                          Restore
+                        </button>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -10704,6 +12564,8 @@ export default function Page() {
                       >
                         <div
                           style={{
+                            display: "grid",
+                            gap: "3px",
                             color: "#0f172a",
                             fontSize: "14px",
                             fontWeight: 500,
@@ -10711,7 +12573,12 @@ export default function Page() {
                             textOverflow: "ellipsis",
                           }}
                         >
-                          {share.email}
+                          <span>{share.email}</span>
+                          <span style={{ color: share.status === "accepted" ? "#047857" : "#b45309", fontSize: "11px", fontWeight: 700 }}>
+                            {share.status === "accepted"
+                              ? share.permission === "editor" ? "Accepted · Can edit" : "Accepted · View only"
+                              : `Pending · expires ${share.expiresAt ? new Date(share.expiresAt).toLocaleDateString() : "in 7 days"}`}
+                          </span>
                         </div>
                         <button
                           type="button"

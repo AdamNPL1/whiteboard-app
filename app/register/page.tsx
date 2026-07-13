@@ -115,8 +115,8 @@ export default function RegisterPage() {
         </p>
         <p style={legalStyle}>
           By creating an account, you agree to our{" "}
-          <Link href="/privacy">Privacy Policy</Link> and{" "}
-          <Link href="/terms">Terms of Service</Link>.
+          <Link href="/terms">Terms of Service</Link> and acknowledge that you
+          have read our <Link href="/privacy">Privacy Policy</Link>.
         </p>
       </form>
     </main>

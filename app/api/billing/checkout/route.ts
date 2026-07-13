@@ -2,7 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 
 import { getWorkspaceAccess } from "@/lib/board-store";
+import { sendSubscriptionLifecycleEmail } from "@/lib/email";
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import {
   createSupabaseServerAuthClient,
   getSupabaseServiceRoleClient,
@@ -175,6 +177,14 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
 
+  const rateLimit = await enforceRateLimit(request, {
+    action: "billing-checkout",
+    limit: 10,
+    windowSeconds: 10 * 60,
+    identifiers: [user.id],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+
   const profile = await ensureProfileForSupabaseUser(supabase, user);
 
   if (!profile) {
@@ -249,6 +259,29 @@ export async function POST(request: NextRequest) {
 
   try {
     if (profile.stripeCustomerId) {
+      const existingCustomer = await stripe.customers.retrieve(
+        profile.stripeCustomerId
+      );
+
+      if (!existingCustomer.deleted) {
+        const customerEmail = existingCustomer.email?.trim() ?? "";
+        const customerName = existingCustomer.name?.trim() ?? "";
+
+        if (
+          customerEmail.toLowerCase() !== profile.email.toLowerCase() ||
+          customerName !== profile.name
+        ) {
+          await stripe.customers.update(profile.stripeCustomerId, {
+            email: profile.email,
+            name: profile.name || undefined,
+            metadata: {
+              ...existingCustomer.metadata,
+              userId: profile.id,
+            },
+          });
+        }
+      }
+
       const subscriptions = await stripe.subscriptions.list({
         customer: profile.stripeCustomerId,
         status: "all",
@@ -299,36 +332,12 @@ export async function POST(request: NextRequest) {
           );
         }
 
-        let estimatedImmediateCharge: number | null = null;
-        let estimatedNextMonthlyCharge: number | null = null;
-
-        if (upgradingPlan) {
-          const targetPrice = await stripe.prices.retrieve(stripePriceId);
-          estimatedImmediateCharge = 0;
-          estimatedNextMonthlyCharge = targetPrice.unit_amount;
-        } else {
-          const upcomingInvoice = await stripe.invoices.createPreview({
-            customer: profile.stripeCustomerId,
-            subscription: existingActiveSubscription.id,
-            subscription_details: {
-              items: [
-                {
-                  id: existingSubscriptionItem.id,
-                  price: stripePriceId,
-                },
-              ],
-              proration_behavior: "create_prorations",
-            },
-          });
-          estimatedImmediateCharge = upcomingInvoice.amount_due;
-          estimatedNextMonthlyCharge =
-            upcomingInvoice.lines.data.find(
-              (line) =>
-                line.parent?.type === "subscription_item_details" &&
-                typeof line.pricing?.price_details?.price === "string" &&
-                line.pricing.price_details.price === stripePriceId
-            )?.amount ?? null;
-        }
+        const targetPrice = await stripe.prices.retrieve(stripePriceId);
+        const estimatedImmediateCharge = 0;
+        const estimatedNextMonthlyCharge = targetPrice.unit_amount;
+        const changeEffectiveAt = new Date(
+          existingSubscriptionItem.current_period_end * 1000
+        ).toISOString();
 
         if (!upgradingPlan && !confirmSubscriptionChange) {
           const response = NextResponse.json(
@@ -338,6 +347,119 @@ export async function POST(request: NextRequest) {
               currentPlan: activePlan,
               targetPlan,
               currency: targetCurrency,
+              estimatedImmediateCharge,
+              estimatedNextMonthlyCharge,
+              changeEffectiveAt,
+            },
+            { status: 200 }
+          );
+
+          responseCookies.forEach(({ name, value, options }) => {
+            response.cookies.set(name, value, options);
+          });
+
+          return response;
+        }
+
+        if (!upgradingPlan) {
+          const scheduleReference = existingActiveSubscription.schedule;
+
+          if (scheduleReference) {
+            const scheduleId =
+              typeof scheduleReference === "string"
+                ? scheduleReference
+                : scheduleReference.id;
+            const existingSchedule =
+              await stripe.subscriptionSchedules.retrieve(scheduleId);
+
+            if (
+              existingSchedule.metadata?.scribooChange !== "downgrade"
+            ) {
+              throw new Error(
+                "This subscription already has another scheduled change. Open billing support before scheduling a downgrade."
+              );
+            }
+
+            await stripe.subscriptionSchedules.release(scheduleId);
+          }
+
+          const schedule = await stripe.subscriptionSchedules.create({
+            from_subscription: existingActiveSubscription.id,
+            metadata: {
+              scribooChange: "downgrade",
+              userId: profile.id,
+              fromPlan: activePlan,
+              targetPlan,
+            },
+          });
+
+          await stripe.subscriptionSchedules.update(schedule.id, {
+            end_behavior: "release",
+            proration_behavior: "none",
+            phases: [
+              {
+                start_date: existingSubscriptionItem.current_period_start,
+                end_date: existingSubscriptionItem.current_period_end,
+                items: [
+                  {
+                    price: existingSubscriptionItem.price.id,
+                    quantity: existingSubscriptionItem.quantity ?? 1,
+                  },
+                ],
+                proration_behavior: "none",
+                metadata: {
+                  ...existingActiveSubscription.metadata,
+                  targetPlan: activePlan,
+                  userId: profile.id,
+                  pendingPlan: targetPlan,
+                },
+              },
+              {
+                start_date: existingSubscriptionItem.current_period_end,
+                duration: { interval: "month", interval_count: 1 },
+                items: [{ price: stripePriceId, quantity: 1 }],
+                proration_behavior: "none",
+                metadata: {
+                  ...existingActiveSubscription.metadata,
+                  targetPlan,
+                  userId: profile.id,
+                  pendingPlan: "",
+                },
+              },
+            ],
+          });
+
+          try {
+            await sendSubscriptionLifecycleEmail({
+              recipientEmail: profile.email,
+              subject: `Your ${targetPlan} plan is scheduled`,
+              heading: "Your plan change is scheduled",
+              message: `You keep ${activePlan} until your next renewal. There is no charge or credit today.`,
+              details: [
+                { label: "Current plan", value: activePlan },
+                { label: "Next plan", value: targetPlan },
+                {
+                  label: "Change date",
+                  value: new Date(changeEffectiveAt).toLocaleDateString("en-GB"),
+                },
+              ],
+            });
+          } catch (emailError) {
+            console.error("Scheduled downgrade email failed", emailError);
+          }
+
+          const access = getWorkspaceAccess(activePlan, "active");
+          const response = NextResponse.json(
+            {
+              ok: true,
+              message: `Your ${targetPlan} plan is scheduled to begin on your next renewal date. You keep ${activePlan} until then, and there is no charge today.`,
+              plan: activePlan,
+              pendingPlan: targetPlan,
+              changeEffectiveAt,
+              subscriptionStatus: "active",
+              maxBoards: Number.isFinite(access.maxBoards)
+                ? access.maxBoards
+                : null,
               estimatedImmediateCharge,
               estimatedNextMonthlyCharge,
             },
@@ -360,13 +482,12 @@ export async function POST(request: NextRequest) {
                 price: stripePriceId,
               },
             ],
-            proration_behavior: upgradingPlan
-              ? "none"
-              : "create_prorations",
+            proration_behavior: "none",
             metadata: {
               ...existingActiveSubscription.metadata,
               targetPlan,
               userId: profile.id,
+              pendingPlan: "",
             },
           }
         );
@@ -389,13 +510,30 @@ export async function POST(request: NextRequest) {
           stripeSubscriptionId: updatedSubscription.id,
         });
 
+        try {
+          await sendSubscriptionLifecycleEmail({
+            recipientEmail: profile.email,
+            subject: `Your Scriboo plan was upgraded to ${targetPlan}`,
+            heading: "Your upgrade is active",
+            message: `Your ${targetPlan} features are available now. There is no charge today; the full ${targetPlan} price starts on your next renewal date.`,
+            details: [
+              { label: "Previous plan", value: activePlan },
+              { label: "Current plan", value: targetPlan },
+              {
+                label: "Next renewal",
+                value: new Date(changeEffectiveAt).toLocaleDateString("en-GB"),
+              },
+            ],
+          });
+        } catch (emailError) {
+          console.error("Upgrade confirmation email failed", emailError);
+        }
+
         const access = getWorkspaceAccess(targetPlan, nextSubscriptionStatus);
         const response = NextResponse.json(
           {
             ok: true,
-            message: upgradingPlan
-              ? `Your workspace is now on ${targetPlan}. You will be charged the ${targetPlan} price on your next renewal date.`
-              : `Your subscription has been updated to ${targetPlan}.`,
+            message: `Your workspace is now on ${targetPlan}. There is no charge today; Stripe will charge the full ${targetPlan} price on your next renewal date.`,
             plan: targetPlan,
             subscriptionStatus: nextSubscriptionStatus,
             maxBoards: Number.isFinite(access.maxBoards) ? access.maxBoards : null,

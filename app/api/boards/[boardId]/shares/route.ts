@@ -5,6 +5,8 @@ import {
 } from "@/lib/board-store";
 import { sendBoardShareInviteEmail } from "@/lib/email";
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { reportOperationalError } from "@/lib/monitoring";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
@@ -87,6 +89,14 @@ export async function POST(
       }
     | null;
 
+  const rateLimit = await enforceRateLimit(request, {
+    action: "board-invitation",
+    limit: 10,
+    windowSeconds: 60 * 60,
+    identifiers: [user.id, body?.email ?? ""],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
+
   try {
     const result = await shareBoardWithUserForPlan(
       supabase,
@@ -106,16 +116,22 @@ export async function POST(
         appOrigin: request.nextUrl.origin,
         ownerEmail: user.email,
         recipientEmail: result.share.email,
+        invitationToken: result.invitationToken,
+        expiresAt: result.share.expiresAt ?? "in 7 days",
       });
       inviteEmailSent = true;
     } catch (error) {
+      reportOperationalError(error, { area: "email", operation: "board-invitation" });
       inviteEmailError =
         error instanceof Error ? error.message : "Could not send invite email.";
     }
 
     return NextResponse.json(
       {
-        ...result,
+        ok: result.ok,
+        share: result.share,
+        shareCount: result.shareCount,
+        shareLimit: result.shareLimit,
         inviteEmailSent,
         inviteEmailError,
       }

@@ -4,6 +4,7 @@ import { normalizeEmail } from "@/lib/auth-utils";
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { mapSupabaseUserToAppUser } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -22,6 +23,14 @@ export async function POST(request: NextRequest) {
   const email = normalizeEmail(body?.email ?? "");
   const password = body?.password ?? "";
   const confirmPassword = body?.confirmPassword ?? "";
+
+  const rateLimit = await enforceRateLimit(request, {
+    action: "auth-register",
+    limit: 5,
+    windowSeconds: 60 * 60,
+    identifiers: [email],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   if (name.length < 2) {
     return NextResponse.json(

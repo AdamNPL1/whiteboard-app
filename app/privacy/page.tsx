@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
-const contactEmail = "nowakowskia43@gmail.com";
-const effectiveDate = "July 2, 2026";
+const contactEmail = "support@scribooapp.com";
+const effectiveDate = "July 12, 2026";
 
 export default function PrivacyPolicyPage() {
   return (
@@ -12,7 +12,7 @@ export default function PrivacyPolicyPage() {
           <p style={eyebrowStyle}>Legal</p>
           <h1 style={titleStyle}>Privacy Policy</h1>
           <p style={subtitleStyle}>
-            This Privacy Policy explains how Blackboard collects, uses, and
+            This Privacy Policy explains how Scriboo collects, uses, and
             protects personal information when people use the app.
           </p>
           <p style={metaStyle}>Effective date: {effectiveDate}</p>
@@ -46,7 +46,18 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>3. Payments and Billing</h2>
+          <h2 style={headingStyle}>3. Legal Bases</h2>
+          <p style={paragraphStyle}>Depending on the processing, we rely on:</p>
+          <ul style={listStyle}>
+            <li>performance of a contract to provide accounts, boards, sharing, subscriptions, and support</li>
+            <li>legal obligations for accounting, tax, fraud-prevention, and regulatory records</li>
+            <li>legitimate interests in securing, maintaining, troubleshooting, and improving Scriboo</li>
+            <li>consent where the law requires it, which may be withdrawn at any time</li>
+          </ul>
+        </section>
+
+        <section style={sectionStyle}>
+          <h2 style={headingStyle}>4. Payments and Billing</h2>
           <p style={paragraphStyle}>
             Payments are processed by Stripe. We do not store full payment card
             numbers on our own servers. Billing-related information may be
@@ -56,16 +67,20 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>4. Authentication and Data Storage</h2>
+          <h2 style={headingStyle}>5. Service Providers</h2>
           <p style={paragraphStyle}>
-            Account authentication and app data storage may be handled using
-            third-party infrastructure providers, including Supabase, to store
-            account records, workspace data, and access credentials securely.
+            We use service providers only as needed to operate Scriboo. Current
+            categories and principal providers include Supabase for authentication
+            and database storage, Stripe for payments and subscription management,
+            Vercel for website hosting and delivery, and configured email/SMTP
+            providers for transactional and support messages. These providers
+            process data under their own terms and applicable data-processing
+            commitments.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>5. Sharing of Information</h2>
+          <h2 style={headingStyle}>6. Sharing of Information</h2>
           <p style={paragraphStyle}>
             We do not sell personal information. We may share information only
             when needed to operate the service, process payments, comply with
@@ -75,16 +90,33 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>6. Data Retention</h2>
+          <h2 style={headingStyle}>7. Data Retention</h2>
           <p style={paragraphStyle}>
-            We keep personal information for as long as needed to provide the
-            service, maintain legitimate business records, resolve disputes,
-            enforce agreements, and comply with legal obligations.
+            Active account, board, calendar, and sharing data is kept while the
+            account is open. When an account is deleted, Scriboo deletes or
+            anonymizes app data without undue delay, subject to backups, security
+            logs, unresolved disputes, and records that must be retained by law.
+            Support correspondence is generally kept for up to 24 months after a
+            request is closed. Security and operational logs are generally kept
+            for up to 12 months. Stripe and other providers may retain billing,
+            fraud-prevention, and accounting records for the periods required by
+            applicable law and their policies.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>7. Security</h2>
+          <h2 style={headingStyle}>8. International Transfers</h2>
+          <p style={paragraphStyle}>
+            Some providers may process data outside Poland or the European
+            Economic Area. Where required, transfers are protected through an
+            adequacy decision, Standard Contractual Clauses, or another lawful
+            transfer mechanism. Provider documentation contains further details
+            about locations and safeguards.
+          </p>
+        </section>
+
+        <section style={sectionStyle}>
+          <h2 style={headingStyle}>9. Security</h2>
           <p style={paragraphStyle}>
             We use reasonable technical and organizational measures to protect
             personal information. However, no internet-based service can be
@@ -93,16 +125,20 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>8. Your Rights</h2>
+          <h2 style={headingStyle}>10. Your Rights</h2>
           <p style={paragraphStyle}>
-            Depending on where you live, you may have rights to access, correct,
-            delete, or restrict the use of your personal information. To make a
+            Depending on applicable law, you may have rights to access, correct,
+            delete, restrict, object to processing, and receive portable data.
+            Where processing relies on consent, you may withdraw it. To make a
             request, contact us at <a href={`mailto:${contactEmail}`} style={linkStyle}>{contactEmail}</a>.
+            You may also lodge a complaint with the President of the Polish
+            Personal Data Protection Office (Prezes Urzędu Ochrony Danych
+            Osobowych, UODO) at <a href="https://uodo.gov.pl" style={linkStyle}>uodo.gov.pl</a>.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>9. Children&apos;s Privacy</h2>
+          <h2 style={headingStyle}>11. Children&apos;s Privacy</h2>
           <p style={paragraphStyle}>
             The service is not intended for children under 13, and we do not
             knowingly collect personal information from children under 13.
@@ -110,7 +146,7 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>10. Changes to This Policy</h2>
+          <h2 style={headingStyle}>12. Changes to This Policy</h2>
           <p style={paragraphStyle}>
             We may update this Privacy Policy from time to time. When we do, we
             will post the updated version on this page and revise the effective
@@ -119,12 +155,12 @@ export default function PrivacyPolicyPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>11. Contact</h2>
+          <h2 style={headingStyle}>13. Contact and Data Requests</h2>
           <p style={paragraphStyle}>
             If you have questions about this Privacy Policy, contact:
           </p>
           <p style={contactStyle}>
-            Blackboard
+            Scriboo
             <br />
             <a href={`mailto:${contactEmail}`} style={linkStyle}>
               {contactEmail}

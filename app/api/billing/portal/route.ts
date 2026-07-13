@@ -92,6 +92,27 @@ export async function POST(request: NextRequest) {
       if (error) {
         throw new Error(`SUPABASE_BILLING_UPDATE_FAILED:${error.message}`);
       }
+    } else {
+      const customer = await stripe.customers.retrieve(stripeCustomerId);
+
+      if (!customer.deleted) {
+        const customerEmail = customer.email?.trim() ?? "";
+        const customerName = customer.name?.trim() ?? "";
+
+        if (
+          customerEmail.toLowerCase() !== profile.email.toLowerCase() ||
+          customerName !== profile.name
+        ) {
+          await stripe.customers.update(stripeCustomerId, {
+            email: profile.email,
+            name: profile.name || undefined,
+            metadata: {
+              ...customer.metadata,
+              userId: profile.id,
+            },
+          });
+        }
+      }
     }
 
     const portalSession = await stripe.billingPortal.sessions.create({

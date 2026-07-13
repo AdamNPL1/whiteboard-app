@@ -1,4 +1,4 @@
-import { randomBytes } from "crypto";
+import { createHash, randomBytes } from "crypto";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import type {
   AppProfilePlan,
@@ -8,6 +8,9 @@ import { normalizeEmail } from "@/lib/auth-utils";
 import { getSupabaseServiceRoleClient } from "@/lib/supabase-server";
 
 const trashRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const versionRetentionMs = 30 * 24 * 60 * 60 * 1000;
+const automaticSnapshotIntervalMs = 5 * 60 * 1000;
+const maximumVersionsPerBoard = 50;
 const isValidCalendarEntryColor = (
   color: string | undefined
 ): color is string => typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color);
@@ -34,6 +37,20 @@ export type BoardShareSummary = {
   id: string;
   email: string;
   createdAt: string;
+  status: "pending" | "accepted";
+  permission: "viewer" | "editor";
+  expiresAt?: string;
+  acceptedAt?: string;
+};
+
+export type BoardVersionSummary = {
+  id: string;
+  boardName: string;
+  reason: "automatic" | "before_restore" | "before_trash";
+  sourceUpdatedAt: string;
+  createdAt: string;
+  elementCount: number;
+  calendarEntryCount: number;
 };
 
 export type BoardSummary = {
@@ -46,6 +63,7 @@ export type BoardSummary = {
   previewDocument: BoardDocument;
   ownedByUser?: boolean;
   shareCount?: number;
+  sharePermission?: "viewer" | "editor";
 };
 
 export type WorkspaceAccess = {
@@ -60,6 +78,7 @@ type StoredBoard = BoardSummary & {
   ownerUserId: string;
   ownedByUser: boolean;
   shareCount: number;
+  sharePermission?: "viewer" | "editor";
 };
 
 type UserBoardCollection = {
@@ -89,8 +108,25 @@ type BoardShareRow = {
   board_id: string;
   owner_user_id: string;
   shared_with_email: string;
+  recipient_user_id: string | null;
+  permission: "viewer" | "editor";
+  status: "pending" | "accepted";
+  invite_token_hash: string | null;
+  invite_expires_at: string | null;
+  accepted_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type BoardVersionRow = {
+  id: string;
+  board_id: string;
+  owner_user_id: string;
+  board_name: string;
+  document: Partial<BoardDocument> | null;
+  reason: "automatic" | "before_restore" | "before_trash";
+  source_updated_at: string;
+  created_at: string;
 };
 
 export const hasActivePaidSubscription = (
@@ -247,6 +283,7 @@ const mapBoardRowToStoredBoard = (
   options?: {
     ownedByUser?: boolean;
     shareCount?: number;
+    sharePermission?: "viewer" | "editor";
   }
 ): StoredBoard => {
   const document = normalizeBoardDocument(board.document);
@@ -256,6 +293,7 @@ const mapBoardRowToStoredBoard = (
     ownerUserId: board.user_id,
     ownedByUser: options?.ownedByUser ?? true,
     shareCount: options?.shareCount ?? 0,
+    sharePermission: options?.sharePermission,
     name:
       typeof board.name === "string" && board.name.trim().length > 0
         ? board.name
@@ -279,6 +317,7 @@ const summarizeBoard = (board: StoredBoard): BoardSummary => ({
   previewDocument: board.document,
   ownedByUser: board.ownedByUser,
   shareCount: board.shareCount,
+  sharePermission: board.sharePermission,
 });
 
 const sanitizeStoredBoardForAccess = (
@@ -321,6 +360,7 @@ const serializeUserBoards = (
           document: activeBoard.document,
           ownedByUser: activeBoard.ownedByUser,
           shareCount: activeBoard.shareCount,
+          sharePermission: activeBoard.sharePermission,
         }
       : null,
     maxBoards: Number.isFinite(maxBoards) ? maxBoards : null,
@@ -350,7 +390,7 @@ const loadBoardShareRowsForOwner = async (
 ) => {
   const { data, error } = await supabase
     .from("board_shares")
-    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
+    .select("id,board_id,owner_user_id,shared_with_email,recipient_user_id,permission,status,invite_token_hash,invite_expires_at,accepted_at,created_at,updated_at")
     .eq("owner_user_id", userId);
 
   if (error) {
@@ -362,17 +402,13 @@ const loadBoardShareRowsForOwner = async (
 
 const loadBoardShareRowsForRecipient = async (
   supabase: SupabaseClient,
-  email: string
+  userId: string
 ) => {
-  const normalizedEmail = normalizeEmail(email);
-  if (!normalizedEmail) {
-    return [] as BoardShareRow[];
-  }
-
   const { data, error } = await supabase
     .from("board_shares")
-    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
-    .eq("shared_with_email", normalizedEmail);
+    .select("id,board_id,owner_user_id,shared_with_email,recipient_user_id,permission,status,invite_token_hash,invite_expires_at,accepted_at,created_at,updated_at")
+    .eq("recipient_user_id", userId)
+    .eq("status", "accepted");
 
   if (error) {
     throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${error.message}`);
@@ -476,7 +512,7 @@ const loadUserBoardCollection = async (
       loadOwnedBoardRows(supabase, userId),
       loadUserBoardState(supabase, userId),
       loadBoardShareRowsForOwner(supabase, userId),
-      userEmail ? loadBoardShareRowsForRecipient(supabase, userEmail) : [],
+      loadBoardShareRowsForRecipient(getSupabaseServiceRoleClient(), userId),
     ]);
 
   const ownerShareCountByBoardId = ownerShareRows.reduce<Record<string, number>>(
@@ -487,7 +523,28 @@ const loadUserBoardCollection = async (
     {}
   );
 
-  let boards = ownedBoardRows
+  const expiredBoardIds = ownedBoardRows
+    .filter((board) => Boolean(board.deleted_at))
+    .filter((board) => !isWithinTrashRetention(board.deleted_at ?? undefined))
+    .map((board) => board.id);
+
+  if (expiredBoardIds.length > 0) {
+    const { error } = await supabase
+      .from("boards")
+      .delete()
+      .eq("user_id", userId)
+      .in("id", expiredBoardIds);
+
+    if (error) {
+      throw new Error(`SUPABASE_TRASH_PURGE_FAILED:${error.message}`);
+    }
+  }
+
+  const retainedOwnedBoardRows = ownedBoardRows.filter(
+    (board) => !expiredBoardIds.includes(board.id)
+  );
+
+  let boards = retainedOwnedBoardRows
     .map((board, index) =>
       mapBoardRowToStoredBoard(board, index, {
         ownedByUser: true,
@@ -503,7 +560,13 @@ const loadUserBoardCollection = async (
   }
 
   const sharedBoardIds = [...new Set(recipientShareRows.map((share) => share.board_id))];
-  const sharedBoardRows = await loadBoardRowsByIds(supabase, sharedBoardIds);
+  const sharedBoardRows = await loadBoardRowsByIds(
+    getSupabaseServiceRoleClient(),
+    sharedBoardIds
+  );
+  const recipientShareByBoardId = new Map(
+    recipientShareRows.map((share) => [share.board_id, share])
+  );
   const sharedBoards = sharedBoardRows
     .filter((board) => board.user_id !== userId)
     .filter((board) => !board.deleted_at)
@@ -511,6 +574,8 @@ const loadUserBoardCollection = async (
       mapBoardRowToStoredBoard(board, boards.length + index, {
         ownedByUser: false,
         shareCount: 0,
+        sharePermission:
+          recipientShareByBoardId.get(board.id)?.permission ?? "viewer",
       })
     );
 
@@ -550,6 +615,22 @@ const getAccessibleBoardOrThrow = (
 
 const getOwnedBoardOrThrow = (entry: UserBoardCollection, boardId: string) => {
   const board = getAccessibleBoardOrThrow(entry, boardId);
+  if (!board.ownedByUser) {
+    throw new Error("BOARD_FORBIDDEN");
+  }
+
+  return board;
+};
+
+const getOwnedBoardIncludingTrashOrThrow = (
+  entry: UserBoardCollection,
+  boardId: string
+) => {
+  const board = entry.boards.find((item) => item.id === boardId);
+
+  if (!board) {
+    throw new Error("BOARD_NOT_FOUND");
+  }
 
   if (!board.ownedByUser) {
     throw new Error("BOARD_FORBIDDEN");
@@ -574,6 +655,97 @@ const updateBoardRow = async (
   if (error) {
     throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
   }
+};
+
+const deleteExpiredBoardVersions = async (
+  client: SupabaseClient,
+  boardId: string
+) => {
+  const cutoff = new Date(Date.now() - versionRetentionMs).toISOString();
+  const { error: expiredError } = await client
+    .from("board_versions")
+    .delete()
+    .eq("board_id", boardId)
+    .lt("created_at", cutoff);
+
+  if (expiredError) {
+    throw new Error(`SUPABASE_BOARD_VERSION_PURGE_FAILED:${expiredError.message}`);
+  }
+
+  const { data: overflowRows, error: overflowReadError } = await client
+    .from("board_versions")
+    .select("id")
+    .eq("board_id", boardId)
+    .order("created_at", { ascending: false })
+    .range(maximumVersionsPerBoard, maximumVersionsPerBoard + 199);
+
+  if (overflowReadError) {
+    throw new Error(
+      `SUPABASE_BOARD_VERSION_READ_FAILED:${overflowReadError.message}`
+    );
+  }
+
+  const overflowIds = (overflowRows ?? []).map((row) => String(row.id));
+  if (overflowIds.length > 0) {
+    const { error: overflowDeleteError } = await client
+      .from("board_versions")
+      .delete()
+      .in("id", overflowIds);
+
+    if (overflowDeleteError) {
+      throw new Error(
+        `SUPABASE_BOARD_VERSION_PURGE_FAILED:${overflowDeleteError.message}`
+      );
+    }
+  }
+};
+
+const createBoardSnapshot = async (
+  board: StoredBoard,
+  reason: BoardVersionRow["reason"] = "automatic",
+  force = false
+) => {
+  const client = getSupabaseServiceRoleClient();
+
+  if (!force) {
+    const { data: latest, error: latestError } = await client
+      .from("board_versions")
+      .select("created_at")
+      .eq("board_id", board.id)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (latestError) {
+      throw new Error(`SUPABASE_BOARD_VERSION_READ_FAILED:${latestError.message}`);
+    }
+
+    if (
+      latest?.created_at &&
+      new Date(latest.created_at).getTime() + automaticSnapshotIntervalMs >
+        Date.now()
+    ) {
+      return;
+    }
+  }
+
+  const createdAt = new Date().toISOString();
+  const { error } = await client.from("board_versions").insert({
+    id: randomBytes(16).toString("hex"),
+    board_id: board.id,
+    owner_user_id: board.ownerUserId,
+    board_name: board.name,
+    document: board.document,
+    reason,
+    source_updated_at: board.updatedAt,
+    created_at: createdAt,
+  });
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_VERSION_CREATE_FAILED:${error.message}`);
+  }
+
+  await deleteExpiredBoardVersions(client, board.id);
 };
 
 export const getUserBoards = async (
@@ -664,6 +836,9 @@ export const saveBoardForUser = async (
   const access = getWorkspaceAccess(plan, subscriptionStatus);
   const entry = await loadUserBoardCollection(client, userId, userEmail);
   const board = getAccessibleBoardOrThrow(entry, boardId);
+  if (!board.ownedByUser && board.sharePermission !== "editor") {
+    throw new Error("BOARD_FORBIDDEN");
+  }
   const normalizedDocument = normalizeBoardDocument(document);
   const documentToStore = access.canUseCalendar
     ? normalizedDocument
@@ -673,10 +848,15 @@ export const saveBoardForUser = async (
       };
   const updatedAt = new Date().toISOString();
 
-  await updateBoardRow(client, board.id, {
+  await createBoardSnapshot(board);
+  await updateBoardRow(
+    board.ownedByUser ? client : getSupabaseServiceRoleClient(),
+    board.id,
+    {
     document: documentToStore,
     updated_at: updatedAt,
-  });
+    }
+  );
 
   return {
     ok: true,
@@ -693,6 +873,7 @@ export const saveBoardForUser = async (
       ),
       ownedByUser: board.ownedByUser,
       shareCount: board.shareCount,
+      sharePermission: board.sharePermission,
     },
   };
 };
@@ -803,6 +984,7 @@ export const moveBoardToTrashForUser = async (
       ? nextBoards.find((item) => item.id !== boardId && !item.deletedAt)?.id ?? ""
       : entry.activeBoardId;
 
+  await createBoardSnapshot(board, "before_trash", true);
   await Promise.all([
     updateBoardRow(client, board.id, {
       deleted_at: deletedAt,
@@ -819,6 +1001,208 @@ export const moveBoardToTrashForUser = async (
     }, access.canUseCalendar),
     access.maxBoards
   );
+};
+
+export const restoreBoardFromTrashForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardIncludingTrashOrThrow(entry, boardId);
+
+  if (!board.deletedAt) {
+    throw new Error("BOARD_NOT_IN_TRASH");
+  }
+
+  const availableBoardCount = entry.boards.filter(
+    (item) => item.ownedByUser && !item.deletedAt
+  ).length;
+  if (availableBoardCount >= access.maxBoards) {
+    throw new Error("BOARD_LIMIT_REACHED");
+  }
+
+  const updatedAt = new Date().toISOString();
+  await updateBoardRow(client, board.id, {
+    deleted_at: null,
+    updated_at: updatedAt,
+  });
+  await persistActiveBoardId(client, userId, board.id);
+
+  const nextBoards = entry.boards.map((item) =>
+    item.id === board.id
+      ? { ...item, deletedAt: undefined, updatedAt }
+      : item
+  );
+
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess(
+      {
+        ...entry,
+        activeBoardId: board.id,
+        boards: nextBoards,
+      },
+      access.canUseCalendar
+    ),
+    access.maxBoards
+  );
+};
+
+export const permanentlyDeleteBoardForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardIncludingTrashOrThrow(entry, boardId);
+
+  if (!board.deletedAt) {
+    throw new Error("BOARD_NOT_IN_TRASH");
+  }
+
+  const { error } = await client
+    .from("boards")
+    .delete()
+    .eq("id", board.id)
+    .eq("user_id", userId);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_DELETE_FAILED:${error.message}`);
+  }
+
+  const nextBoards = entry.boards.filter((item) => item.id !== board.id);
+  const nextActiveBoard = nextBoards.find((item) => !item.deletedAt)?.id ?? "";
+  await persistActiveBoardId(client, userId, nextActiveBoard);
+
+  return serializeUserBoards(
+    sanitizeUserBoardCollectionForAccess(
+      {
+        ...entry,
+        activeBoardId: nextActiveBoard,
+        boards: nextBoards,
+      },
+      access.canUseCalendar
+    ),
+    access.maxBoards
+  );
+};
+
+export const getBoardVersionsForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string
+) => {
+  const entry = await loadUserBoardCollection(
+    getBoardStoreClient(supabase),
+    userId,
+    userEmail
+  );
+  getOwnedBoardOrThrow(entry, boardId);
+
+  const client = getSupabaseServiceRoleClient();
+  await deleteExpiredBoardVersions(client, boardId);
+  const { data, error } = await client
+    .from("board_versions")
+    .select(
+      "id,board_id,owner_user_id,board_name,document,reason,source_updated_at,created_at"
+    )
+    .eq("board_id", boardId)
+    .eq("owner_user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(maximumVersionsPerBoard);
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_VERSION_READ_FAILED:${error.message}`);
+  }
+
+  return {
+    retentionDays: 30,
+    versions: ((data ?? []) as BoardVersionRow[]).map<BoardVersionSummary>(
+      (version) => {
+        const document = normalizeBoardDocument(version.document);
+        return {
+          id: version.id,
+          boardName: version.board_name,
+          reason: version.reason,
+          sourceUpdatedAt: version.source_updated_at,
+          createdAt: version.created_at,
+          elementCount: document.elements.length,
+          calendarEntryCount: document.calendarEntries.length,
+        };
+      }
+    ),
+  };
+};
+
+export const restoreBoardVersionForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  boardId: string,
+  versionId: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus
+) => {
+  const client = getBoardStoreClient(supabase);
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const board = getOwnedBoardOrThrow(entry, boardId);
+  const versionClient = getSupabaseServiceRoleClient();
+  const { data, error } = await versionClient
+    .from("board_versions")
+    .select(
+      "id,board_id,owner_user_id,board_name,document,reason,source_updated_at,created_at"
+    )
+    .eq("id", versionId)
+    .eq("board_id", boardId)
+    .eq("owner_user_id", userId)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_VERSION_READ_FAILED:${error.message}`);
+  }
+  if (!data) {
+    throw new Error("BOARD_VERSION_NOT_FOUND");
+  }
+
+  const version = data as BoardVersionRow;
+  const restoredDocument = normalizeBoardDocument(version.document);
+  const updatedAt = new Date().toISOString();
+
+  await createBoardSnapshot(board, "before_restore", true);
+  await updateBoardRow(client, board.id, {
+    name: version.board_name.trim().slice(0, 40) || board.name,
+    document: restoredDocument,
+    updated_at: updatedAt,
+  });
+
+  return {
+    ok: true,
+    board: {
+      id: board.id,
+      name: version.board_name.trim().slice(0, 40) || board.name,
+      createdAt: board.createdAt,
+      updatedAt,
+      starred: board.starred,
+      document: applyCalendarAccessToDocument(
+        restoredDocument,
+        access.canUseCalendar
+      ),
+      ownedByUser: true,
+      shareCount: board.shareCount,
+    },
+  };
 };
 
 export const getBoardSharesForUser = async (
@@ -842,6 +1226,10 @@ export const getBoardSharesForUser = async (
       id: share.id,
       email: share.shared_with_email,
       createdAt: share.created_at,
+      status: share.status,
+      permission: share.permission,
+      expiresAt: share.invite_expires_at ?? undefined,
+      acceptedAt: share.accepted_at ?? undefined,
     }));
 
   return {
@@ -877,28 +1265,44 @@ export const shareBoardWithUserForPlan = async (
     (share) => share.board_id === boardId
   );
 
-  if (existingShares.some((share) => share.shared_with_email === normalizedEmail)) {
+  const existingShare = existingShares.find(
+    (share) => share.shared_with_email === normalizedEmail
+  );
+  if (existingShare?.status === "accepted") {
     throw new Error("BOARD_SHARE_EXISTS");
   }
 
-  if (existingShares.length >= access.maxShares) {
+  if (!existingShare && existingShares.length >= access.maxShares) {
     throw new Error("BOARD_SHARE_LIMIT_REACHED");
   }
 
   const now = new Date().toISOString();
+  const invitationToken = randomBytes(32).toString("base64url");
+  const invitationTokenHash = createHash("sha256")
+    .update(invitationToken)
+    .digest("hex");
+  const inviteExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
   const row = {
-    id: randomBytes(16).toString("hex"),
+    id: existingShare?.id ?? randomBytes(16).toString("hex"),
     board_id: boardId,
     owner_user_id: userId,
     shared_with_email: normalizedEmail,
+    recipient_user_id: null,
+    permission: "editor" as const,
+    status: "pending" as const,
+    invite_token_hash: invitationTokenHash,
+    invite_expires_at: inviteExpiresAt,
+    accepted_at: null,
     created_at: now,
     updated_at: now,
   };
 
-  const { data, error } = await client
+  const query = getSupabaseServiceRoleClient()
     .from("board_shares")
-    .insert(row)
-    .select("id,board_id,owner_user_id,shared_with_email,created_at,updated_at")
+  const { data, error } = await (existingShare
+    ? query.update(row).eq("id", existingShare.id)
+    : query.insert(row))
+    .select("id,board_id,owner_user_id,shared_with_email,recipient_user_id,permission,status,invite_token_hash,invite_expires_at,accepted_at,created_at,updated_at")
     .single();
 
   if (error) {
@@ -911,8 +1315,12 @@ export const shareBoardWithUserForPlan = async (
       id: (data as BoardShareRow).id,
       email: (data as BoardShareRow).shared_with_email,
       createdAt: (data as BoardShareRow).created_at,
+      status: (data as BoardShareRow).status,
+      permission: (data as BoardShareRow).permission,
+      expiresAt: (data as BoardShareRow).invite_expires_at ?? undefined,
     } satisfies BoardShareSummary,
-    shareCount: existingShares.length + 1,
+    invitationToken,
+    shareCount: existingShare ? existingShares.length : existingShares.length + 1,
     shareLimit: access.maxShares,
   };
 };
@@ -951,4 +1359,65 @@ export const removeBoardShareForUser = async (
     shareCount: remainingShares.length,
     shareLimit: access.maxShares,
   };
+};
+
+export const acceptBoardInvitationForUser = async (
+  userId: string,
+  userEmail: string,
+  invitationToken: string
+) => {
+  const token = invitationToken.trim();
+  if (!token || token.length > 512) {
+    throw new Error("BOARD_INVITATION_INVALID");
+  }
+
+  const tokenHash = createHash("sha256").update(token).digest("hex");
+  const client = getSupabaseServiceRoleClient();
+  const { data, error } = await client
+    .from("board_shares")
+    .select("id,board_id,owner_user_id,shared_with_email,recipient_user_id,permission,status,invite_token_hash,invite_expires_at,accepted_at,created_at,updated_at")
+    .eq("invite_token_hash", tokenHash)
+    .maybeSingle();
+
+  if (error) {
+    throw new Error(`SUPABASE_BOARD_INVITATION_READ_FAILED:${error.message}`);
+  }
+  if (!data) {
+    throw new Error("BOARD_INVITATION_INVALID");
+  }
+
+  const invitation = data as BoardShareRow;
+  if (invitation.status !== "pending") {
+    throw new Error("BOARD_INVITATION_USED");
+  }
+  if (
+    !invitation.invite_expires_at ||
+    new Date(invitation.invite_expires_at).getTime() <= Date.now()
+  ) {
+    throw new Error("BOARD_INVITATION_EXPIRED");
+  }
+  if (normalizeEmail(invitation.shared_with_email) !== normalizeEmail(userEmail)) {
+    throw new Error("BOARD_INVITATION_EMAIL_MISMATCH");
+  }
+
+  const acceptedAt = new Date().toISOString();
+  const { error: updateError } = await client
+    .from("board_shares")
+    .update({
+      recipient_user_id: userId,
+      status: "accepted",
+      accepted_at: acceptedAt,
+      invite_token_hash: null,
+      invite_expires_at: null,
+      updated_at: acceptedAt,
+    })
+    .eq("id", invitation.id)
+    .eq("status", "pending")
+    .eq("invite_token_hash", tokenHash);
+
+  if (updateError) {
+    throw new Error(`SUPABASE_BOARD_INVITATION_ACCEPT_FAILED:${updateError.message}`);
+  }
+
+  return { ok: true, boardId: invitation.board_id };
 };

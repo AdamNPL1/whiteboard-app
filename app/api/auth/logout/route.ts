@@ -5,6 +5,7 @@ import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest) {
+  const body = (await request.json().catch(() => null)) as { allDevices?: boolean } | null;
   const responseCookies: Array<{
     name: string;
     value: string;
@@ -19,7 +20,7 @@ export async function POST(request: NextRequest) {
     },
   });
 
-  await supabase.auth.signOut();
+  await supabase.auth.signOut({ scope: body?.allDevices ? "global" : "local" });
 
   const response = NextResponse.json({ ok: true });
 

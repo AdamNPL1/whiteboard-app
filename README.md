@@ -27,6 +27,10 @@ SMTP_SECURE=
 SMTP_USER=
 SMTP_PASS=
 SMTP_FROM=
+SMTP_FROM_ACCOUNTS=
+SMTP_FROM_BILLING=
+SMTP_FROM_SUPPORT=
+SUPPORT_EMAIL=
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_ANON_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
@@ -40,7 +44,48 @@ STRIPE_PRICE_BASIC_MONTHLY_EUR=
 STRIPE_PRICE_PRO_MONTHLY_EUR=
 STRIPE_PRICE_MASTER_MONTHLY_EUR=
 SITE_CLOSED=false
+NEXT_PUBLIC_SENTRY_DSN=
+SENTRY_DSN=
 ```
+
+## Automated tests
+
+Run the complete safe, mocked test suite with:
+
+```bash
+npm test
+```
+
+Use `npm run test:watch` while developing. Supabase, Stripe, and email delivery
+are mocked, so tests do not create real users, charge cards, delete production
+data, or send real messages.
+
+## Monitoring
+
+Sentry monitoring is privacy-restricted: default PII is disabled and request
+bodies, cookies, query strings, authorization headers, IP forwarding headers,
+and user identity are removed before events are sent. Set the Sentry DSN in
+Vercel to activate reporting. Source-map upload additionally uses the private
+`SENTRY_AUTH_TOKEN`, `SENTRY_ORG`, and `SENTRY_PROJECT` build variables.
+
+The public `/api/health` endpoint verifies both the Next.js application and a
+minimal Supabase query without returning database contents. Use that URL with
+an external uptime monitor. A non-200 response should trigger an alert.
+
+## Production email
+
+The application supports separate authenticated senders for account, billing,
+and support messages. `SMTP_FROM` remains a fallback while migrating providers.
+
+For Resend SMTP use `smtp.resend.com`, port `465`, `SMTP_SECURE=true`, username
+`resend`, and a Resend API key as the password. Verify `scribooapp.com` in the
+provider and publish the exact SPF and DKIM records it supplies. Start DMARC in
+monitoring mode and strengthen the policy only after delivery has been tested.
+
+Supabase sends registration confirmation and password-reset messages itself.
+Configure the same authenticated domain separately in **Supabase Dashboard →
+Authentication → SMTP Settings**; Vercel SMTP variables do not configure
+Supabase Auth emails.
 
 ## Maintenance Mode
 
@@ -49,6 +94,10 @@ instead of the app. Set `SITE_CLOSED=false` and redeploy to reopen the app.
 
 While maintenance mode is on, `/privacy`, `/terms`, and static assets stay
 public, app pages redirect to `/maintenance`, and app API routes return `503`.
+
+For private testing while maintenance mode is enabled, set a strong
+`TESTER_ACCESS_PASSWORD` environment variable and send the trusted tester to
+`/tester-access`. Successful access is remembered in that browser for 14 days.
 
 3. Run the Supabase SQL in this order:
 

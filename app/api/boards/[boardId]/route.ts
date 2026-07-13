@@ -8,6 +8,7 @@ import {
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { reportOperationalError, reportOperationalMessage } from "@/lib/monitoring";
 
 export const runtime = "nodejs";
 
@@ -15,6 +16,7 @@ export async function PUT(
   request: NextRequest,
   context: { params: Promise<{ boardId: string }> }
 ) {
+  const saveStartedAt = Date.now();
   const user = await getSupabaseUserFromRequest(request);
   const supabase = createSupabaseServerAuthClient({
     getAll: () => request.cookies.getAll(),
@@ -50,8 +52,7 @@ export async function PUT(
     : null;
 
   try {
-    return NextResponse.json(
-      await saveBoardForUser(
+    const savedBoard = await saveBoardForUser(
         supabase,
         user.id,
         user.email,
@@ -66,12 +67,35 @@ export async function PUT(
           gridOpacity: body?.gridOpacity,
           calendarEntries: body?.calendarEntries,
         }
-      )
-    );
+      );
+    const durationMs = Date.now() - saveStartedAt;
+    if (durationMs >= 2_000) {
+      reportOperationalMessage("Slow board save", {
+        area: "boards",
+        operation: "save",
+        durationMs,
+        level: "warning",
+      });
+    }
+    return NextResponse.json(savedBoard);
   } catch (error) {
     if (error instanceof Error && error.message === "BOARD_NOT_FOUND") {
       return NextResponse.json({ error: "Board not found." }, { status: 404 });
     }
+
+    if (error instanceof Error && error.message === "BOARD_FORBIDDEN") {
+      return NextResponse.json(
+        { error: "You do not have permission to edit this board." },
+        { status: 403 }
+      );
+    }
+
+    reportOperationalError(error, {
+      area: "database",
+      operation: "board-save",
+      durationMs: Date.now() - saveStartedAt,
+      statusCode: 500,
+    });
 
     return NextResponse.json(
       { error: "Could not save this board." },

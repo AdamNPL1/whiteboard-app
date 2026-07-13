@@ -1,19 +1,28 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeEmail } from "@/lib/auth-utils";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
 const isValidEmail = (email: string) => /^\S+@\S+\.\S+$/.test(email);
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         email?: string;
       }
     | null;
   const email = normalizeEmail(body?.email ?? "");
+
+  const rateLimit = await enforceRateLimit(request, {
+    action: "auth-resend-confirmation",
+    limit: 3,
+    windowSeconds: 15 * 60,
+    identifiers: [email],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   if (!isValidEmail(email)) {
     return NextResponse.json(

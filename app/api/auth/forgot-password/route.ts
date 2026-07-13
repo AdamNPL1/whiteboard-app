@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeEmail } from "@/lib/auth-utils";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -14,6 +15,14 @@ export async function POST(request: NextRequest) {
       }
     | null;
   const email = normalizeEmail(body?.email ?? "");
+
+  const rateLimit = await enforceRateLimit(request, {
+    action: "auth-forgot-password",
+    limit: 3,
+    windowSeconds: 15 * 60,
+    identifiers: [email],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   if (!isValidEmail(email)) {
     return NextResponse.json(

@@ -1,8 +1,8 @@
 import Link from "next/link";
 import type { CSSProperties } from "react";
 
-const contactEmail = "nowakowskia43@gmail.com";
-const effectiveDate = "July 6, 2026";
+const contactEmail = "support@scribooapp.com";
+const effectiveDate = "July 12, 2026";
 
 export default function TermsPage() {
   return (
@@ -12,7 +12,7 @@ export default function TermsPage() {
           <p style={eyebrowStyle}>Legal</p>
           <h1 style={titleStyle}>Terms of Service</h1>
           <p style={subtitleStyle}>
-            These Terms of Service govern access to and use of Blackboard.
+            These Terms of Service govern access to and use of Scriboo.
           </p>
           <p style={metaStyle}>Effective date: {effectiveDate}</p>
         </div>
@@ -20,7 +20,7 @@ export default function TermsPage() {
         <section style={sectionStyle}>
           <h2 style={headingStyle}>1. Acceptance of Terms</h2>
           <p style={paragraphStyle}>
-            By creating an account, accessing, or using Blackboard, you agree
+            By creating an account, accessing, or using Scriboo, you agree
             to these Terms of Service. If you do not agree, do not use the
             service.
           </p>
@@ -29,7 +29,7 @@ export default function TermsPage() {
         <section style={sectionStyle}>
           <h2 style={headingStyle}>2. The Service</h2>
           <p style={paragraphStyle}>
-            Blackboard provides digital whiteboard, planning, scheduling, and
+            Scriboo provides digital whiteboard, planning, scheduling, and
             collaboration features. We may improve, modify, or discontinue
             parts of the service at any time.
           </p>
@@ -75,47 +75,79 @@ export default function TermsPage() {
           </p>
           <p style={paragraphStyle}>
             We may change pricing, plan structure, or included features in the
-            future. If we do, updated pricing will apply prospectively as
-            described in the app, at checkout, or in your billing settings.
+            future. Material price changes will be communicated before they
+            apply and will take effect prospectively from a stated renewal date.
+            Customers may cancel before a new recurring price takes effect.
           </p>
         </section>
 
         <section style={sectionStyle}>
           <h2 style={headingStyle}>6. Cancellation and Changes</h2>
           <p style={paragraphStyle}>
-            You may cancel your subscription through the available billing
-            tools. If you cancel, your paid access may remain active until the
-            end of the current billing period, depending on your billing
-            settings and Stripe subscription state.
+            You may cancel through the available billing tools. Unless clearly
+            stated otherwise, cancellation stops renewal and paid access remains
+            available until the end of the already-paid billing period.
           </p>
           <p style={paragraphStyle}>
-            Except where required by law, subscription payments are generally
-            non-refundable once a billing period has started.
+            Upgrades take effect immediately without an extra charge for the
+            remainder of the current period; the full upgraded price starts at
+            the next renewal. Downgrades take effect at the next renewal. No
+            partial-period credits or proration calculations are applied.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>7. Intellectual Property</h2>
+          <h2 style={headingStyle}>7. Withdrawal, Refunds, and Complaints</h2>
+          <p style={paragraphStyle}>
+            Consumers may have a statutory 14-day right to withdraw from a
+            distance contract. Where a consumer expressly requests immediate
+            performance during that period, the consequences of withdrawal and
+            any amount payable for service already supplied are governed by
+            applicable consumer law. Nothing in these Terms removes mandatory
+            consumer rights.
+          </p>
+          <p style={paragraphStyle}>
+            Refund, billing, and service complaints may be submitted through the
+            Help &amp; Support form or to <a href={`mailto:${contactEmail}`} style={linkStyle}>{contactEmail}</a>.
+            Include the account email, relevant date, and a description of the
+            issue. We aim to acknowledge requests promptly and respond within 14
+            days where Polish consumer law requires that deadline. Approved
+            refunds are returned through the original payment method.
+          </p>
+          <p style={paragraphStyle}>
+            To submit a withdrawal or refund request electronically, use the{" "}
+            <Link href="/withdrawal" style={linkStyle}>withdrawal and refund form</Link>.
+            No special wording is required: clearly identify the account and state
+            that you wish to withdraw or request a refund. We send an electronic
+            confirmation with a reference number and receipt time. Submitting a
+            request does not automatically cancel future renewals, so customers
+            should also cancel the subscription through the billing portal unless
+            the request asks us to do so.
+          </p>
+        </section>
+
+        <section style={sectionStyle}>
+          <h2 style={headingStyle}>8. Intellectual Property</h2>
           <p style={paragraphStyle}>
             The service, branding, interface, and software are owned by
-            Blackboard or its licensors. You retain rights to the content you
+            Scriboo or its licensors. You retain rights to the content you
             create, subject to the rights needed for us to host and operate the
             service.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>8. User Content</h2>
+          <h2 style={headingStyle}>9. User Content</h2>
           <p style={paragraphStyle}>
             You are responsible for the content you create, upload, share, or
-            store through Blackboard. You confirm that you have the rights
+            store through Scriboo. You confirm that you have the rights
             needed to use that content and to allow us to host it as part of
             operating the service.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>9. Availability and Disclaimers</h2>
+          <h2 style={headingStyle}>10. Availability and Disclaimers</h2>
           <p style={paragraphStyle}>
             The service is provided on an &quot;as is&quot; and &quot;as
             available&quot; basis. We do not guarantee uninterrupted
@@ -125,16 +157,16 @@ export default function TermsPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>10. Limitation of Liability</h2>
+          <h2 style={headingStyle}>11. Limitation of Liability</h2>
           <p style={paragraphStyle}>
-            To the maximum extent allowed by law, Blackboard will not be liable
+            To the maximum extent allowed by law, Scriboo will not be liable
             for indirect, incidental, special, consequential, or punitive
             damages arising from use of or inability to use the service.
           </p>
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>11. Termination</h2>
+          <h2 style={headingStyle}>12. Termination</h2>
           <p style={paragraphStyle}>
             We may suspend or terminate access if these terms are violated, if
             misuse is detected, or if needed to protect the service, users, or
@@ -143,7 +175,18 @@ export default function TermsPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>12. Changes to These Terms</h2>
+          <h2 style={headingStyle}>13. Governing Law</h2>
+          <p style={paragraphStyle}>
+            These Terms are governed by Polish law. This choice does not remove
+            mandatory protections available to consumers under the law of their
+            country of residence. Disputes should first be submitted through the
+            complaint process above; consumers may also use available courts and
+            public consumer-advice or alternative-dispute-resolution channels.
+          </p>
+        </section>
+
+        <section style={sectionStyle}>
+          <h2 style={headingStyle}>14. Changes to These Terms</h2>
           <p style={paragraphStyle}>
             We may update these Terms of Service from time to time. Updated
             terms become effective when posted unless stated otherwise.
@@ -151,12 +194,12 @@ export default function TermsPage() {
         </section>
 
         <section style={sectionStyle}>
-          <h2 style={headingStyle}>13. Contact</h2>
+          <h2 style={headingStyle}>15. Contact</h2>
           <p style={paragraphStyle}>
             If you have questions about these Terms of Service, contact:
           </p>
           <p style={contactStyle}>
-            Blackboard
+            Scriboo
             <br />
             <a href={`mailto:${contactEmail}`} style={linkStyle}>
               {contactEmail}
