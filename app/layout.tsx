@@ -9,8 +9,11 @@ export const metadata: Metadata = {
   description:
     "A visual workspace for creating boards, organizing ideas, and planning work.",
   icons: {
-    icon: "/icon.png",
-    shortcut: "/icon.png",
+    icon: [
+      { url: "/favicon.ico", sizes: "any" },
+      { url: "/icon.png", type: "image/png" },
+    ],
+    shortcut: "/favicon.ico",
     apple: "/icon.png",
   },
 };
