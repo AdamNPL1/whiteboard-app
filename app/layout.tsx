@@ -2,12 +2,16 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
+  metadataBase: new URL("https://scribooapp.com"),
   title: {
     default: "Scriboo",
     template: "%s | Scriboo",
   },
   description:
     "A visual workspace for creating boards, organizing ideas, and planning work.",
+  alternates: {
+    canonical: "/",
+  },
   icons: {
     icon: [
       { url: "/favicon.ico", sizes: "any" },
