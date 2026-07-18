@@ -17,6 +17,7 @@ const publicPathsWhenClosed = new Set([
   "/tester-access",
   "/api/tester-access",
   "/api/health",
+  "/robots.txt",
   // Stripe must be able to deliver signed billing events even while the
   // customer-facing site is in private maintenance/testing mode.
   "/api/billing/webhook",
@@ -61,6 +62,14 @@ export async function proxy(request: NextRequest) {
   const maintenanceUrl = request.nextUrl.clone();
   maintenanceUrl.pathname = "/maintenance";
   maintenanceUrl.search = "";
+
+  // Keep the public homepage crawlable while the application is closed.
+  // A rewrite serves the maintenance page at `/` with a 200 response instead
+  // of redirecting crawlers away from the hostname's homepage.
+  if (pathname === "/") {
+    return NextResponse.rewrite(maintenanceUrl);
+  }
+
   return NextResponse.redirect(maintenanceUrl);
 }
 
