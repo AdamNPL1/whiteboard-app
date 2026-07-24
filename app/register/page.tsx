@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
 import { useState } from "react";
+import { useLanguage } from "@/lib/i18n";
 
 export default function RegisterPage() {
+  const { text: t } = useLanguage();
   const router = useRouter();
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
@@ -36,7 +38,7 @@ export default function RegisterPage() {
       };
 
       if (!response.ok) {
-        setMessage(data.error ?? "Could not create your account.");
+        setMessage(data.error ?? t("Could not create your account.", "Nie udało się utworzyć konta."));
         return;
       }
 
@@ -46,7 +48,7 @@ export default function RegisterPage() {
       }
 
       setIsSuccess(true);
-      setMessage(data.message ?? "Check your email to confirm your account.");
+      setMessage(data.message ?? t("Check your email to confirm your account.", "Sprawdź pocztę, aby potwierdzić konto."));
     } finally {
       setIsSubmitting(false);
     }
@@ -56,12 +58,12 @@ export default function RegisterPage() {
     <main style={pageStyle}>
       <form onSubmit={register} style={cardStyle}>
         <div>
-          <h1 style={titleStyle}>Create account</h1>
-          <p style={subtitleStyle}>We will email you a confirmation link.</p>
+          <h1 style={titleStyle}>{t("Create account", "Utwórz konto")}</h1>
+          <p style={subtitleStyle}>{t("We will email you a confirmation link.", "Wyślemy Ci e-mail z linkiem potwierdzającym.")}</p>
         </div>
 
         <label style={labelStyle}>
-          Name
+          {t("Name", "Imię")}
           <input
             type="text"
             autoComplete="name"
@@ -72,7 +74,7 @@ export default function RegisterPage() {
         </label>
 
         <label style={labelStyle}>
-          Email
+          {t("Email", "E-mail")}
           <input
             type="email"
             autoComplete="email"
@@ -83,7 +85,7 @@ export default function RegisterPage() {
         </label>
 
         <label style={labelStyle}>
-          Password
+          {t("Password", "Hasło")}
           <input
             type="password"
             autoComplete="new-password"
@@ -94,7 +96,7 @@ export default function RegisterPage() {
         </label>
 
         <label style={labelStyle}>
-          Confirm password
+          {t("Confirm password", "Potwierdź hasło")}
           <input
             type="password"
             autoComplete="new-password"
@@ -107,16 +109,15 @@ export default function RegisterPage() {
         {message && <div style={isSuccess ? successStyle : errorStyle}>{message}</div>}
 
         <button disabled={isSubmitting} type="submit" style={buttonStyle}>
-          {isSubmitting ? "Creating account..." : "Create account"}
+          {isSubmitting ? t("Creating account...", "Tworzenie konta...") : t("Create account", "Utwórz konto")}
         </button>
 
         <p style={footerStyle}>
-          Already have an account? <Link href="/custom">Open board</Link>
+          {t("Already have an account?", "Masz już konto?")} <Link href="/custom">{t("Open board", "Otwórz tablicę")}</Link>
         </p>
         <p style={legalStyle}>
-          By creating an account, you agree to our{" "}
-          <Link href="/terms">Terms of Service</Link> and acknowledge that you
-          have read our <Link href="/privacy">Privacy Policy</Link>.
+          {t("By creating an account, you agree to our", "Tworząc konto, akceptujesz nasz")} {" "}
+          <Link href="/terms">{t("Terms of Service", "Regulamin")}</Link> {t("and acknowledge that you have read our", "i potwierdzasz zapoznanie się z naszą")} <Link href="/privacy">{t("Privacy Policy", "Polityką prywatności")}</Link>.
         </p>
       </form>
     </main>

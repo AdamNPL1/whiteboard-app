@@ -27,6 +27,7 @@ import {
   Download,
   Italic,
   LayoutGrid,
+  Languages,
   List,
   ListOrdered,
   Lock,
@@ -49,10 +50,15 @@ import {
   X,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
+import { useLanguage } from "@/lib/i18n";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
+
+const BLACK_CROSSHAIR_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22white%22 stroke-width=%224%22/%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22black%22 stroke-width=%222%22/%3E%3C/svg%3E") 12 12, crosshair';
+
 type Stroke = {
   kind: "stroke";
   points: Point[];
@@ -100,7 +106,16 @@ type TextElement = {
   measurementZoom?: number;
   backgroundColor?: string;
 };
-type CanvasElement = Stroke | Shape | TextElement;
+type ImageElement = {
+  kind: "image";
+  point: Point;
+  width: number;
+  height: number;
+  src: string;
+  name: string;
+  rotation?: number;
+};
+type CanvasElement = Stroke | Shape | TextElement | ImageElement;
 type ActiveText = {
   point: Point;
   screenPoint: Point;
@@ -137,7 +152,7 @@ type TextSelection = {
   start: number;
   end: number;
 };
-type SettingsSection = "background" | "tools" | "account";
+type SettingsSection = "background" | "tools" | "language" | "account";
 type GridMode = "none" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
@@ -215,6 +230,7 @@ type BoardBrowserView =
   | "plan";
 
 export default function Page() {
+  const { language, setLanguage, text: t } = useLanguage();
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -406,6 +422,16 @@ export default function Page() {
     });
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
+  const importedImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const imageTransformRef = useRef<{
+    mode: "move" | "resize" | "rotate";
+    pointerId: number;
+    index: number;
+    startClient: Point;
+    startImage: ImageElement;
+    startDistance?: number;
+    startAngle?: number;
+  } | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -592,6 +618,7 @@ export default function Page() {
   const pendingPenCursorPoint = useRef<Point | null>(null);
 
   const [elements, setElements] = useState<CanvasElement[]>([]);
+  const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
 
   const currentStroke = useRef<Stroke | null>(null);
   const isDrawingRef = useRef(false);
@@ -1024,7 +1051,7 @@ export default function Page() {
     const confirmPassword = authConfirmPassword;
 
     if (!email) {
-      setAuthMessage("Enter your email address.");
+      setAuthMessage(t("Enter your email address.", "Wprowadź adres e-mail."));
       return;
     }
 
@@ -1034,7 +1061,7 @@ export default function Page() {
 
     try {
       if (!password) {
-        setAuthMessage("Enter your password.");
+      setAuthMessage(t("Enter your password.", "Wprowadź hasło."));
         return;
       }
 
@@ -1175,12 +1202,12 @@ export default function Page() {
     if (isDeletingAccount) return;
 
     if (!deleteAccountPassword) {
-      setDeleteAccountError("Enter your password.");
+      setDeleteAccountError(t("Enter your password.", "Wprowadź hasło."));
       return;
     }
 
     if (deleteAccountConfirmation.trim() !== "DELETE") {
-      setDeleteAccountError('Type "DELETE" exactly to continue.');
+      setDeleteAccountError(t('Type "DELETE" exactly to continue.', 'Wpisz dokładnie "DELETE", aby kontynuować.'));
       return;
     }
 
@@ -1296,6 +1323,7 @@ export default function Page() {
     setSnapshot(null);
     shapeEnd.current = null;
     setActiveText(null);
+    setSelectedImageIndex(null);
     setSelectionBox(null);
     setSelectionMenu(null);
     setElements(Array.isArray(document.elements) ? document.elements : []);
@@ -1435,7 +1463,7 @@ export default function Page() {
 
     if (!email || isAuthSubmitting) {
       if (!email) {
-        setAuthMessage("Enter your email address first.");
+      setAuthMessage(t("Enter your email address first.", "Najpierw wprowadź adres e-mail."));
       }
       return;
     }
@@ -1810,6 +1838,15 @@ export default function Page() {
   };
 
   const getExportElementBounds = (element: CanvasElement): Bounds | null => {
+    if (element.kind === "image") {
+      return {
+        x: element.point.x,
+        y: element.point.y,
+        width: element.width,
+        height: element.height,
+      };
+    }
+
     if (element.kind === "stroke") {
       if (!element.points.length) return null;
       const padding = element.width + 8;
@@ -1954,7 +1991,24 @@ export default function Page() {
     }
 
     documentToExport.elements.forEach((element) => {
-      if (element.kind === "stroke") {
+      if (element.kind === "image") {
+        const image = importedImageCacheRef.current.get(element.src);
+        if (image?.complete) {
+          const centerX = element.point.x + element.width / 2;
+          const centerY = element.point.y + element.height / 2;
+          context.save();
+          context.translate(centerX, centerY);
+          context.rotate(((element.rotation ?? 0) * Math.PI) / 180);
+          context.drawImage(
+            image,
+            -element.width / 2,
+            -element.height / 2,
+            element.width,
+            element.height
+          );
+          context.restore();
+        }
+      } else if (element.kind === "stroke") {
         context.strokeStyle = element.color ?? "#111827";
         context.fillStyle = element.color ?? "#111827";
         drawStrokePath(context, element.points, element.width, element.style);
@@ -1991,7 +2045,7 @@ export default function Page() {
         )
       );
       downloadBoardBlob(blob, `${getSafeExportFileName(board.name)}.png`);
-      setBoardExportMessage("PNG downloaded.");
+      setBoardExportMessage(t("PNG downloaded.", "Pobrano PNG."));
     } catch (error) {
       setBoardExportMessage(
         error instanceof Error ? error.message : "Could not export this PNG."
@@ -2079,7 +2133,7 @@ export default function Page() {
         exportCanvas.height
       );
       downloadBoardBlob(pdf, `${getSafeExportFileName(board.name)}.pdf`);
-      setBoardExportMessage("PDF downloaded.");
+    setBoardExportMessage(t("PDF downloaded.", "Pobrano PDF."));
     } catch (error) {
       setBoardExportMessage(
         error instanceof Error ? error.message : "Could not export this PDF."
@@ -2109,7 +2163,7 @@ export default function Page() {
       }),
       `${getSafeExportFileName(board.name)}.scriboo.json`
     );
-    setBoardExportMessage("Editable JSON backup downloaded.");
+    setBoardExportMessage(t("Editable JSON backup downloaded.", "Pobrano edytowalną kopię JSON."));
   };
 
   const escapeCalendarText = (value: string) =>
@@ -2122,7 +2176,7 @@ export default function Page() {
   const exportBoardCalendar = (board: BoardSummary) => {
     const entries = getBoardDocumentForExport(board).calendarEntries;
     if (!entries.length) {
-      setBoardExportMessage("This board has no calendar entries to export.");
+      setBoardExportMessage(t("This board has no calendar entries to export.", "Ta tablica nie ma wpisów kalendarza do eksportu."));
       return;
     }
     const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
@@ -2153,7 +2207,7 @@ export default function Page() {
       new Blob([lines.join("\r\n")], { type: "text/calendar;charset=utf-8" }),
       `${getSafeExportFileName(board.name)}-calendar.ics`
     );
-    setBoardExportMessage("Calendar file downloaded.");
+    setBoardExportMessage(t("Calendar file downloaded.", "Pobrano plik kalendarza."));
   };
 
   const startRenamingBoard = (board: BoardSummary) => {
@@ -2173,7 +2227,7 @@ export default function Page() {
     if (!nextName) {
       setEditingBoardId("");
       setEditingBoardName("");
-      setAuthMessage("Enter a board name.");
+      setAuthMessage(t("Enter a board name.", "Wprowadź nazwę tablicy."));
       return;
     }
 
@@ -2302,7 +2356,7 @@ export default function Page() {
       }
       setShareEmailInput("");
       if (data.inviteEmailSent) {
-        setSharePanelMessage("Board shared successfully and invite email sent.");
+      setSharePanelMessage(t("Board shared successfully and invite email sent.", "Tablica została udostępniona, a zaproszenie wysłane."));
         setSharePanelTone("success");
       } else {
         setSharePanelMessage(
@@ -2358,7 +2412,7 @@ export default function Page() {
           )
         );
       }
-      setSharePanelMessage("Sharing removed.");
+      setSharePanelMessage(t("Sharing removed.", "Udostępnienie zostało usunięte."));
       setSharePanelTone("success");
     } catch (error) {
       setSharePanelMessage(
@@ -2377,7 +2431,11 @@ export default function Page() {
   ).length;
   const hasUnlimitedBoards = !Number.isFinite(currentMaxBoards);
   const boardUsageLabel = hasUnlimitedBoards
-    ? `${liveBoardsCount} board${liveBoardsCount === 1 ? "" : "s"} used`
+    ? language === "pl"
+      ? `Użyto ${liveBoardsCount} tablic`
+      : `${liveBoardsCount} board${liveBoardsCount === 1 ? "" : "s"} used`
+    : language === "pl"
+    ? `Użyto ${liveBoardsCount} / ${currentMaxBoards} tablic`
     : `${liveBoardsCount} / ${currentMaxBoards} boards used`;
   const hasActivePaidSubscription =
     currentSubscriptionStatus === "trialing" ||
@@ -2392,10 +2450,16 @@ export default function Page() {
     : "Free";
   const currentWorkspacePlanLabel = currentPlanLabel;
   const currentWorkspaceStatusMessage = hasUnlimitedBoards
-    ? `You are currently logged in on the ${currentWorkspacePlanLabel} plan with unlimited saved boards.`
-    : `You are currently logged in on the ${currentWorkspacePlanLabel} plan with up to ${currentMaxBoards} saved board${currentMaxBoards === 1 ? "" : "s"}.`;
+    ? t(
+        `You are currently logged in on the ${currentWorkspacePlanLabel} plan with unlimited saved boards.`,
+        `Jesteś zalogowany w planie ${currentWorkspacePlanLabel} z nielimitowaną liczbą zapisanych tablic.`
+      )
+    : t(
+        `You are currently logged in on the ${currentWorkspacePlanLabel} plan with up to ${currentMaxBoards} saved board${currentMaxBoards === 1 ? "" : "s"}.`,
+        `Jesteś zalogowany w planie ${currentWorkspacePlanLabel} z limitem ${currentMaxBoards} zapisanych tablic.`
+      );
   const currentSubscriptionEndLabel = currentSubscriptionCurrentPeriodEnd
-    ? new Intl.DateTimeFormat("en", {
+    ? new Intl.DateTimeFormat(language === "pl" ? "pl-PL" : "en-US", {
         month: "short",
         day: "numeric",
         year: "numeric",
@@ -2403,7 +2467,10 @@ export default function Page() {
     : "";
   const currentSubscriptionEndingMessage =
     currentSubscriptionCancelAtPeriodEnd && currentSubscriptionEndLabel
-      ? `Your ${currentWorkspacePlanLabel} plan is scheduled to end on ${currentSubscriptionEndLabel}.`
+      ? t(
+          `Your ${currentWorkspacePlanLabel} plan is scheduled to end on ${currentSubscriptionEndLabel}.`,
+          `Twój plan ${currentWorkspacePlanLabel} zakończy się ${currentSubscriptionEndLabel}.`
+        )
       : "";
   const currentPlanRank = hasActivePaidSubscription
     ? currentAccountPlan === "master"
@@ -2850,7 +2917,7 @@ export default function Page() {
       name: "Basic",
       value: "basic" as const,
       prices: { pln: "29.99", eur: "9.99" },
-      priceSuffix: `${billingCurrencyLabel} / month`,
+      priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
       accent: topBarWarmCardGradient,
       border: "rgba(217,138,86,0.24)",
       text: "#1f2937",
@@ -2858,15 +2925,15 @@ export default function Page() {
       buttonText: "#c25c2f",
       checkBackground: "rgba(217,138,86,0.12)",
       features: [
-        "Up to 5 boards",
-        "Share with up to 1 person",
+        t("Up to 5 boards", "Do 5 tablic"),
+        t("Share with up to 1 person", "Udostępnianie 1 osobie"),
       ],
     },
     {
       name: "Pro",
       value: "pro" as const,
       prices: { pln: "49.99", eur: "14.99" },
-      priceSuffix: `${billingCurrencyLabel} / month`,
+      priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
       accent: signatureIndigoGradient,
       border: "rgba(59,130,246,0.3)",
       text: "#ffffff",
@@ -2874,9 +2941,9 @@ export default function Page() {
       buttonText: "#166534",
       checkBackground: "rgba(255,255,255,0.18)",
       features: [
-        "Unlimited boards",
-        "Share with up to 3 people",
-        "Calendar planning",
+        t("Unlimited boards", "Nielimitowane tablice"),
+        t("Share with up to 3 people", "Udostępnianie 3 osobom"),
+        t("Calendar planning", "Planowanie w kalendarzu"),
       ],
       featured: true,
     },
@@ -2884,7 +2951,7 @@ export default function Page() {
       name: "Master",
       value: "master" as const,
       prices: { pln: "79.99", eur: "21.99" },
-      priceSuffix: `${billingCurrencyLabel} / month`,
+      priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
       accent: topBarCoolCardGradient,
       border: "rgba(89,171,168,0.26)",
       text: "#0f172a",
@@ -2892,11 +2959,11 @@ export default function Page() {
       buttonText: "#16738a",
       checkBackground: "rgba(89,171,168,0.14)",
       features: [
-        "Unlimited boards",
-        "Share with up to 10 people",
-        "Calendar planning",
-        "Full premium experience",
-        "Maximum workspace control",
+        t("Unlimited boards", "Nielimitowane tablice"),
+        t("Share with up to 10 people", "Udostępnianie 10 osobom"),
+        t("Calendar planning", "Planowanie w kalendarzu"),
+        t("Full premium experience", "Pełne funkcje premium"),
+        t("Maximum workspace control", "Maksymalna kontrola przestrzeni"),
       ],
     },
   ];
@@ -2907,12 +2974,12 @@ export default function Page() {
     1
   );
 
-  const calendarMonthLabel = new Intl.DateTimeFormat("en", {
+  const calendarMonthLabel = new Intl.DateTimeFormat(language === "pl" ? "pl-PL" : "en-US", {
     month: "long",
     year: "numeric",
   }).format(calendarMonthDate);
 
-  const calendarDayLabel = new Intl.DateTimeFormat("en", {
+  const calendarDayLabel = new Intl.DateTimeFormat(language === "pl" ? "pl-PL" : "en-US", {
     weekday: "short",
   });
 
@@ -3161,42 +3228,42 @@ export default function Page() {
 
   const boardBrowserHeading =
     boardBrowserView === "recent"
-      ? "Recent boards"
+      ? t("Recent boards", "Ostatnie tablice")
       : boardBrowserView === "mine"
-      ? "My boards"
+      ? t("My boards", "Moje tablice")
       : boardBrowserView === "starred"
-      ? "Starred boards"
+      ? t("Starred boards", "Ulubione tablice")
       : boardBrowserView === "trash"
-      ? "Trash"
+      ? t("Trash", "Kosz")
       : boardBrowserView === "calendar"
-      ? "Calendar"
+      ? t("Calendar", "Kalendarz")
       : boardBrowserView === "plan"
-      ? "Your plan"
-      : "All boards";
+      ? t("Your plan", "Twój plan")
+      : t("All boards", "Wszystkie tablice");
 
   const boardBrowserDescription =
     boardBrowserView === "recent"
-      ? "Your most recently updated boards appear first."
+      ? t("Your most recently updated boards appear first.", "Najnowsze zmodyfikowane tablice są wyświetlane jako pierwsze.")
       : boardBrowserView === "mine"
-      ? "Boards connected to your account."
+      ? t("Boards connected to your account.", "Tablice powiązane z Twoim kontem.")
       : boardBrowserView === "starred"
-      ? "Keep important boards close."
+      ? t("Keep important boards close.", "Miej ważne tablice zawsze pod ręką.")
       : boardBrowserView === "trash"
-      ? "Deleted boards stay here for 30 days before disappearing."
+      ? t("Deleted boards stay here for 30 days before disappearing.", "Usunięte tablice pozostają tutaj przez 30 dni.")
       : boardBrowserView === "calendar"
-      ? "Type meetings, schedules, and reminders directly into each day."
+      ? t("Type meetings, schedules, and reminders directly into each day.", "Dodawaj spotkania, harmonogramy i przypomnienia bezpośrednio do każdego dnia.")
       : boardBrowserView === "plan"
-      ? "Choose the workspace plan that fits how you build, organize, and schedule."
-      : "Open, rename, and create boards from one clean workspace.";
+      ? t("Choose the workspace plan that fits how you build, organize, and schedule.", "Wybierz plan przestrzeni dopasowany do tworzenia, organizacji i planowania.")
+      : t("Open, rename, and create boards from one clean workspace.", "Otwieraj, zmieniaj nazwy i twórz tablice w jednym miejscu.");
 
   const formatBoardDate = (value: string) => {
     const date = new Date(value);
 
     if (Number.isNaN(date.getTime())) {
-      return "Recently updated";
+      return t("Recently updated", "Ostatnio zaktualizowano");
     }
 
-    return new Intl.DateTimeFormat("en", {
+    return new Intl.DateTimeFormat(language === "pl" ? "pl-PL" : "en-US", {
       month: "short",
       day: "numeric",
       year: "numeric",
@@ -3231,6 +3298,15 @@ export default function Page() {
     };
 
     elementsToPreview.forEach((element) => {
+      if (element.kind === "image") {
+        includePoint(element.point.x, element.point.y);
+        includePoint(
+          element.point.x + element.width,
+          element.point.y + element.height
+        );
+        return;
+      }
+
       if (element.kind === "stroke") {
         element.points.forEach((point) =>
           includePoint(point.x, point.y, element.width * 0.75)
@@ -3431,6 +3507,23 @@ export default function Page() {
           />
           <g transform={`translate(${offsetX} ${offsetY}) scale(${scale})`}>
             {previewElements.map((element, index) => {
+              if (element.kind === "image") {
+                return (
+                  <image
+                    key={index}
+                    href={element.src}
+                    x={element.point.x}
+                    y={element.point.y}
+                    width={element.width}
+                    height={element.height}
+                    preserveAspectRatio="xMidYMid meet"
+                    transform={`rotate(${element.rotation ?? 0} ${
+                      element.point.x + element.width / 2
+                    } ${element.point.y + element.height / 2})`}
+                  />
+                );
+              }
+
               if (element.kind === "stroke") {
                 return (
                   <polyline
@@ -4558,6 +4651,34 @@ export default function Page() {
         continue;
       }
 
+      if (element.kind === "image") {
+        const cachedImage = importedImageCacheRef.current.get(element.src);
+        if (cachedImage?.complete) {
+          const centerX = element.point.x + element.width / 2;
+          const centerY = element.point.y + element.height / 2;
+          ctx.save();
+          ctx.translate(centerX, centerY);
+          ctx.rotate(((element.rotation ?? 0) * Math.PI) / 180);
+          ctx.drawImage(
+            cachedImage,
+            -element.width / 2,
+            -element.height / 2,
+            element.width,
+            element.height
+          );
+          ctx.restore();
+        } else {
+          const image = new Image();
+          image.onload = () => {
+            importedImageCacheRef.current.set(element.src, image);
+            latestRedrawCanvasRef.current();
+          };
+          image.src = element.src;
+          importedImageCacheRef.current.set(element.src, image);
+        }
+        continue;
+      }
+
       if (element.kind === "shape") {
         drawShape(
           ctx,
@@ -5161,6 +5282,90 @@ export default function Page() {
     e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
   ) => getCanvasCoordinatesFromClient(e.clientX, e.clientY);
 
+  const importImageFiles = async (files: File[]) => {
+    const imageFiles = files.filter((file) => file.type.startsWith("image/"));
+    if (!imageFiles.length) {
+      window.alert(t("Please choose an image file.", "Wybierz plik obrazu."));
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const center = getCanvasCoordinatesFromClient(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
+
+    const imported = await Promise.all(
+      imageFiles.map(
+        (file, index) =>
+          new Promise<ImageElement | null>((resolve) => {
+            if (file.size > 10 * 1024 * 1024) {
+              resolve(null);
+              return;
+            }
+
+            const reader = new FileReader();
+            reader.onerror = () => resolve(null);
+            reader.onload = () => {
+              if (typeof reader.result !== "string") {
+                resolve(null);
+                return;
+              }
+
+              const image = new Image();
+              image.onerror = () => resolve(null);
+              image.onload = () => {
+                const maxWidth = Math.max(240, rect.width / zoomRef.current * 0.55);
+                const maxHeight = Math.max(180, rect.height / zoomRef.current * 0.55);
+                const scale = Math.min(
+                  1,
+                  maxWidth / image.naturalWidth,
+                  maxHeight / image.naturalHeight
+                );
+                const width = Math.max(1, image.naturalWidth * scale);
+                const height = Math.max(1, image.naturalHeight * scale);
+                const src = reader.result as string;
+                importedImageCacheRef.current.set(src, image);
+                resolve({
+                  kind: "image",
+                  point: {
+                    x: center.x - width / 2 + index * 24,
+                    y: center.y - height / 2 + index * 24,
+                  },
+                  width,
+                  height,
+                  src,
+                  name: file.name,
+                });
+              };
+              image.src = reader.result;
+            };
+            reader.readAsDataURL(file);
+          })
+      )
+    );
+
+    const validImages = imported.filter(
+      (image): image is ImageElement => image !== null
+    );
+    if (!validImages.length) {
+      window.alert(
+        t(
+          "The image could not be imported. Use PNG, JPG, WebP, GIF, or SVG under 10 MB.",
+          "Nie udało się zaimportować obrazu. Użyj PNG, JPG, WebP, GIF lub SVG poniżej 10 MB."
+        )
+      );
+      return;
+    }
+
+    const firstImportedIndex = elements.length;
+    setElements((previous) => [...previous, ...validImages]);
+    setSelectedImageIndex(firstImportedIndex);
+    setTool("cursor");
+  };
+
   const movePenCursorElement = (point: Point) => {
     const cursorElement = penCursorElementRef.current;
     if (!cursorElement) return;
@@ -5445,6 +5650,27 @@ export default function Page() {
     return true;
   };
 
+  const findImageAtPoint = (point: Point) => {
+    for (let index = elements.length - 1; index >= 0; index -= 1) {
+      const element = elements[index];
+      if (element.kind !== "image") continue;
+      const centerX = element.point.x + element.width / 2;
+      const centerY = element.point.y + element.height / 2;
+      const radians = -((element.rotation ?? 0) * Math.PI) / 180;
+      const dx = point.x - centerX;
+      const dy = point.y - centerY;
+      const localX = dx * Math.cos(radians) - dy * Math.sin(radians);
+      const localY = dx * Math.sin(radians) + dy * Math.cos(radians);
+      if (
+        Math.abs(localX) <= element.width / 2 &&
+        Math.abs(localY) <= element.height / 2
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  };
+
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
     syncPenCursorPoint(e);
 
@@ -5473,6 +5699,14 @@ export default function Page() {
         if (activeText) {
           commitActiveText();
         }
+
+        const imageIndex = findImageAtPoint(point);
+        if (imageIndex !== -1) {
+          setSelectedImageIndex(imageIndex);
+          setSelectionBox(null);
+          return;
+        }
+        setSelectedImageIndex(null);
 
         if (openTextAtPoint(point)) {
           return;
@@ -5690,7 +5924,14 @@ export default function Page() {
 
       if (didAppendPoint) {
         if (currentStroke.current?.tool === "pen") {
-          drawLivePenStrokeSegment();
+          if (currentStroke.current.style === "solid") {
+            drawLivePenStrokeSegment();
+          } else {
+            // Incremental fragments restart the browser's dash pattern for every
+            // tiny segment. Redraw the complete active path so dashed and dotted
+            // strokes are visible and correctly spaced while the pointer moves.
+            scheduleRedrawCanvas();
+          }
         } else {
           scheduleRedrawCanvas();
         }
@@ -5702,6 +5943,7 @@ export default function Page() {
   const clearCanvas = () => {
     setElements([]);
     setActiveText(null);
+    setSelectedImageIndex(null);
 
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -5841,7 +6083,116 @@ export default function Page() {
   };
 
   const canvasCursor: string =
-    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? "crosshair" : "default" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : "crosshair";
+    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? BLACK_CROSSHAIR_CURSOR : "default" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : BLACK_CROSSHAIR_CURSOR;
+
+  const beginImageTransform = (
+    e: React.PointerEvent<HTMLDivElement>,
+    mode: "move" | "resize" | "rotate"
+  ) => {
+    if (selectedImageIndex === null) return;
+    const image = elements[selectedImageIndex];
+    if (!image || image.kind !== "image") return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const centerX =
+      (image.point.x + image.width / 2) * zoom + offset.x;
+    const centerY =
+      (image.point.y + image.height / 2) * zoom + offset.y + topBarHeight;
+    imageTransformRef.current = {
+      mode,
+      pointerId: e.pointerId,
+      index: selectedImageIndex,
+      startClient: { x: e.clientX, y: e.clientY },
+      startImage: { ...image, point: { ...image.point } },
+      startDistance: Math.hypot(e.clientX - centerX, e.clientY - centerY),
+      startAngle: Math.atan2(e.clientY - centerY, e.clientX - centerX),
+    };
+  };
+
+  const updateImageTransform = (e: React.PointerEvent<HTMLDivElement>) => {
+    const gesture = imageTransformRef.current;
+    if (!gesture || gesture.pointerId !== e.pointerId) return;
+    e.preventDefault();
+    const image = gesture.startImage;
+    const centerX = image.point.x + image.width / 2;
+    const centerY = image.point.y + image.height / 2;
+    let nextImage: ImageElement = image;
+
+    if (gesture.mode === "move") {
+      nextImage = {
+        ...image,
+        point: {
+          x: image.point.x + (e.clientX - gesture.startClient.x) / zoomRef.current,
+          y: image.point.y + (e.clientY - gesture.startClient.y) / zoomRef.current,
+        },
+      };
+    } else {
+      const screenCenterX = centerX * zoomRef.current + offsetRef.current.x;
+      const screenCenterY =
+        centerY * zoomRef.current + offsetRef.current.y + topBarHeight;
+      if (gesture.mode === "resize") {
+        const distance = Math.hypot(
+          e.clientX - screenCenterX,
+          e.clientY - screenCenterY
+        );
+        const scale = Math.max(
+          0.08,
+          distance / Math.max(1, gesture.startDistance ?? 1)
+        );
+        const width = Math.max(32 / zoomRef.current, image.width * scale);
+        const height = Math.max(32 / zoomRef.current, image.height * scale);
+        nextImage = {
+          ...image,
+          width,
+          height,
+          point: { x: centerX - width / 2, y: centerY - height / 2 },
+        };
+      } else {
+        const angle = Math.atan2(
+          e.clientY - screenCenterY,
+          e.clientX - screenCenterX
+        );
+        nextImage = {
+          ...image,
+          rotation:
+            (image.rotation ?? 0) +
+            ((angle - (gesture.startAngle ?? 0)) * 180) / Math.PI,
+        };
+      }
+    }
+
+    setElements((previous) =>
+      previous.map((element, index) =>
+        index === gesture.index ? nextImage : element
+      )
+    );
+  };
+
+  const endImageTransform = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (imageTransformRef.current?.pointerId !== e.pointerId) return;
+    imageTransformRef.current = null;
+    if (e.currentTarget.hasPointerCapture(e.pointerId)) {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    }
+  };
+
+  const selectShapeTool = (nextTool: "circle" | "square" | "arrow" | "line") => {
+    // A shape popover closes underneath the pointer. Clear any drawing/panning
+    // cursor left behind by the previous tool before revealing the canvas.
+    isPanningRef.current = false;
+    setIsPanning(false);
+    setPanningCursorPoint(null);
+    hidePenCursor();
+    document.body.style.cursor = "";
+    document.documentElement.style.cursor = "";
+
+    setTool(nextTool);
+    setShowShapesMenu(false);
+    setShowPenMenu(false);
+    setShowTextMenu(false);
+    setShowEraserMenu(false);
+  };
 
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
@@ -5996,6 +6347,96 @@ export default function Page() {
         }}
       />
 
+      {selectedImageIndex !== null && (() => {
+        const selectedImage = elements[selectedImageIndex];
+        if (!selectedImage || selectedImage.kind !== "image") return null;
+        const handleStyle = {
+          position: "absolute" as const,
+          width: "12px",
+          height: "12px",
+          borderRadius: "999px",
+          border: "2px solid #ffffff",
+          background: "#7c3aed",
+          boxShadow: "0 1px 5px rgba(15,23,42,0.35)",
+          touchAction: "none" as const,
+        };
+        const transformEvents = {
+          onPointerMove: updateImageTransform,
+          onPointerUp: endImageTransform,
+          onPointerCancel: endImageTransform,
+        };
+
+        return (
+          <div
+            aria-label={t("Selected image", "Wybrany obraz")}
+            onPointerDown={(event) => beginImageTransform(event, "move")}
+            {...transformEvents}
+            style={{
+              position: "fixed",
+              left: `${selectedImage.point.x * zoom + offset.x}px`,
+              top: `${selectedImage.point.y * zoom + offset.y + topBarHeight}px`,
+              width: `${selectedImage.width * zoom}px`,
+              height: `${selectedImage.height * zoom}px`,
+              border: "2px solid #7c3aed",
+              boxSizing: "border-box",
+              transform: `rotate(${selectedImage.rotation ?? 0}deg)`,
+              transformOrigin: "center",
+              cursor: "move",
+              touchAction: "none",
+              zIndex: 12,
+            }}
+          >
+            <div
+              aria-hidden="true"
+              style={{
+                position: "absolute",
+                left: "50%",
+                top: "-28px",
+                width: "2px",
+                height: "26px",
+                background: "#7c3aed",
+                transform: "translateX(-50%)",
+                pointerEvents: "none",
+              }}
+            />
+            <div
+              aria-label={t("Rotate image", "Obróć obraz")}
+              onPointerDown={(event) => beginImageTransform(event, "rotate")}
+              {...transformEvents}
+              style={{
+                ...handleStyle,
+                left: "50%",
+                top: "-35px",
+                width: "15px",
+                height: "15px",
+                transform: "translate(-50%, -50%)",
+                cursor: "grab",
+              }}
+            />
+            {[
+              { left: "0%", top: "0%", cursor: "nwse-resize" },
+              { left: "100%", top: "0%", cursor: "nesw-resize" },
+              { left: "0%", top: "100%", cursor: "nesw-resize" },
+              { left: "100%", top: "100%", cursor: "nwse-resize" },
+            ].map((handle, index) => (
+              <div
+                key={index}
+                aria-label={t("Resize image", "Zmień rozmiar obrazu")}
+                onPointerDown={(event) => beginImageTransform(event, "resize")}
+                {...transformEvents}
+                style={{
+                  ...handleStyle,
+                  left: handle.left,
+                  top: handle.top,
+                  transform: "translate(-50%, -50%)",
+                  cursor: handle.cursor,
+                }}
+              />
+            ))}
+          </div>
+        );
+      })()}
+
       {penCursorPoint && tool === "pen" && !isPanning && (
         <div
           ref={penCursorElementRef}
@@ -6114,8 +6555,8 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Choose writing style"
-                  title="Choose writing style"
+                  aria-label={t("Choose writing style", "Wybierz styl pisania")}
+                  title={t("Choose writing style", "Wybierz styl pisania")}
                   onClick={() => {
                     setShowTextColorMenu(false);
                     setShowTextFormatMenu(false);
@@ -6205,7 +6646,7 @@ export default function Page() {
                 }}
               >
                 <input
-                  aria-label="Text size"
+                        aria-label={t("Text size", "Rozmiar tekstu")}
                   inputMode="numeric"
                   value={activeTextSize}
                   onChange={(e) => {
@@ -6238,7 +6679,7 @@ export default function Page() {
                   }}
                 >
                   <button
-                    aria-label="Increase text size"
+                        aria-label={t("Increase text size", "Zwiększ rozmiar tekstu")}
                     onClick={() => applyTextSize(activeTextSize + 1)}
                     style={{
                       width: "16px",
@@ -6255,7 +6696,7 @@ export default function Page() {
                     <ChevronUp size={16} strokeWidth={2.5} />
                   </button>
                   <button
-                    aria-label="Decrease text size"
+                        aria-label={t("Decrease text size", "Zmniejsz rozmiar tekstu")}
                     onClick={() => applyTextSize(activeTextSize - 1)}
                     style={{
                       width: "16px",
@@ -6283,8 +6724,8 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Choose text formatting"
-                  title="Choose text formatting"
+                  aria-label={t("Choose text formatting", "Wybierz formatowanie tekstu")}
+                  title={t("Choose text formatting", "Wybierz formatowanie tekstu")}
                   onClick={() => {
                     setShowTextStyleMenu(false);
                     setShowTextColorMenu(false);
@@ -6396,8 +6837,8 @@ export default function Page() {
                   }}
                 >
                   <button
-                    aria-label="Square opacity"
-                    title="Square opacity"
+                    aria-label={t("Square opacity", "Krycie kwadratu")}
+                    title={t("Square opacity", "Krycie kwadratu")}
                     onClick={() => {
                       setShowTextStyleMenu(false);
                       setShowTextFormatMenu(false);
@@ -6471,11 +6912,11 @@ export default function Page() {
                           marginBottom: "9px",
                         }}
                       >
-                        <span>Opacity</span>
+                        <span>{t("Opacity", "Krycie")}</span>
                         <span>{activeTextBoxOpacity}%</span>
                       </div>
                       <input
-                        aria-label="Square opacity"
+                          aria-label={t("Square opacity", "Krycie kwadratu")}
                         type="range"
                         className="modern-range"
                         min="10"
@@ -6503,8 +6944,8 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Choose text color"
-                  title="Choose text color"
+                  aria-label={t("Choose text color", "Wybierz kolor tekstu")}
+                  title={t("Choose text color", "Wybierz kolor tekstu")}
                   onClick={() => {
                     setShowTextStyleMenu(false);
                     setShowTextFormatMenu(false);
@@ -6566,10 +7007,10 @@ export default function Page() {
                         marginBottom: "9px",
                       }}
                     >
-                      Opacity
+                            {t("Opacity", "Krycie")}
                     </div>
                     <input
-                      aria-label="Text opacity"
+                          aria-label={t("Text opacity", "Krycie tekstu")}
                       type="range"
                       className="modern-range"
                       min="10"
@@ -6648,8 +7089,8 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Choose text alignment"
-                  title="Choose text alignment"
+                  aria-label={t("Choose text alignment", "Wybierz wyrównanie tekstu")}
+                  title={t("Choose text alignment", "Wybierz wyrównanie tekstu")}
                   onClick={() => {
                     setShowTextStyleMenu(false);
                     setShowTextFormatMenu(false);
@@ -6747,8 +7188,8 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Choose list style"
-                  title="Choose list style"
+                  aria-label={t("Choose list style", "Wybierz styl listy")}
+                  title={t("Choose list style", "Wybierz styl listy")}
                   onClick={() => {
                     setShowTextStyleMenu(false);
                     setShowTextFormatMenu(false);
@@ -7182,7 +7623,7 @@ export default function Page() {
               cursor: "pointer",
             }}
           >
-            Copy
+                  {t("Copy", "Kopiuj")}
           </button>
           <button
             onClick={deleteSelection}
@@ -7197,7 +7638,7 @@ export default function Page() {
               cursor: "pointer",
             }}
           >
-            Delete
+                  {t("Delete", "Usuń")}
           </button>
         </div>
       )}
@@ -7229,7 +7670,7 @@ export default function Page() {
               color: panelTextColor,
             }}
           >
-            Text size
+                  {t("Text size", "Rozmiar tekstu")}
           </div>
           <div
             style={{
@@ -7343,12 +7784,12 @@ export default function Page() {
                     letterSpacing: "-0.015em",
                   }}
                 >
-                  Wróć do swojej tablicy.
+                  {t("Return to your board.", "Wróć do swojej tablicy.")}
                 </div>
               </div>
               <button
                 type="button"
-                aria-label="Zamknij logowanie"
+                aria-label={t("Close login", "Zamknij logowanie")}
                 onClick={closeAuthModal}
                 style={{
                   width: "36px",
@@ -7419,7 +7860,7 @@ export default function Page() {
               }}
             >
               <div style={{ height: "1px", flex: 1, background: "linear-gradient(90deg, rgba(226,232,240,0), rgba(226,232,240,1))" }} />
-              lub
+                    {t("or", "lub")}
               <div style={{ height: "1px", flex: 1, background: "linear-gradient(90deg, rgba(226,232,240,1), rgba(226,232,240,0))" }} />
             </div>
 
@@ -7439,12 +7880,12 @@ export default function Page() {
                     fontWeight: 700,
                   }}
                 >
-                  Name
+                    {t("Name", "Imię")}
                 </span>
                 <input
                   type="text"
                   autoComplete="name"
-                  placeholder="Your name"
+                      placeholder={t("Your name", "Twoje imię")}
                   value={authName}
                   onChange={(e) => setAuthName(e.currentTarget.value)}
                   style={{
@@ -7480,7 +7921,7 @@ export default function Page() {
                   fontWeight: 700,
                 }}
               >
-                Email
+                    {t("Email", "E-mail")}
               </span>
               <div style={{ position: "relative" }}>
                 <Mail
@@ -7496,7 +7937,7 @@ export default function Page() {
                 <input
                   type="email"
                   autoComplete="email"
-                  placeholder="twoj@email.pl"
+                      placeholder={t("you@example.com", "twoj@email.pl")}
                   value={authEmail}
                   onChange={(e) => setAuthEmail(e.currentTarget.value)}
                   style={{
@@ -7532,7 +7973,7 @@ export default function Page() {
                   fontWeight: 700,
                 }}
               >
-                Hasło
+                    {t("Password", "Hasło")}
               </span>
               <div style={{ position: "relative" }}>
                 <Lock
@@ -7552,7 +7993,7 @@ export default function Page() {
                   }
                   value={authPassword}
                   onChange={(e) => setAuthPassword(e.currentTarget.value)}
-                  placeholder="Wpisz hasło"
+                      placeholder={t("Enter password", "Wpisz hasło")}
                   style={{
                     width: "100%",
                     height: "46px",
@@ -7582,7 +8023,7 @@ export default function Page() {
                     fontWeight: 700,
                   }}
                 >
-                  Powtorz haslo
+                    {t("Confirm password", "Powtórz hasło")}
                 </span>
                 <div style={{ position: "relative" }}>
                   <Lock
@@ -7598,7 +8039,7 @@ export default function Page() {
                   <input
                     type="password"
                     autoComplete="new-password"
-                    placeholder="Wpisz haslo ponownie"
+                      placeholder={t("Enter password again", "Wpisz hasło ponownie")}
                     value={authConfirmPassword}
                     onChange={(e) =>
                       setAuthConfirmPassword(e.currentTarget.value)
@@ -7636,7 +8077,7 @@ export default function Page() {
             >
               <label style={{ display: "flex", alignItems: "center", gap: "8px" }}>
                 <input type="checkbox" style={{ accentColor: "#7c3aed" }} />
-                Zapamiętaj mnie
+                      {t("Remember me", "Zapamiętaj mnie")}
               </label>
               <button
                 type="button"
@@ -7653,7 +8094,7 @@ export default function Page() {
                   padding: 0,
                 }}
               >
-                Nie pamiętasz?
+                    {t("Forgot password?", "Nie pamiętasz hasła?")}
               </button>
             </div>
 
@@ -7695,7 +8136,7 @@ export default function Page() {
                     padding: 0,
                   }}
                 >
-                  Resend confirmation email
+                    {t("Resend confirmation email", "Wyślij ponownie e-mail potwierdzający")}
                 </button>
               </div>
             )}
@@ -7809,7 +8250,7 @@ export default function Page() {
         }}
       >
         <button
-          aria-label="Ustawienia"
+          aria-label={t("Settings", "Ustawienia")}
           onClick={() => {
             setShowSettingsMenu((prev) => !prev);
             setShowBoardsMenu(false);
@@ -7847,7 +8288,7 @@ export default function Page() {
           }}
         >
             <button
-              aria-label="Boards"
+            aria-label={t("Boards", "Tablice")}
               onClick={() => {
                 setShowBoardsMenu((prev) => !prev);
                 setShowSettingsMenu(false);
@@ -7925,11 +8366,11 @@ export default function Page() {
                           lineHeight: 1,
                         }}
                       >
-                        Boards
+                    {t("Boards", "Tablice")}
                       </div>
                     </div>
                     <button
-                      aria-label="Close boards"
+                    aria-label={t("Close boards", "Zamknij tablice")}
                       onClick={() => setShowBoardsMenu(false)}
                       style={{
                         width: "34px",
@@ -7949,7 +8390,7 @@ export default function Page() {
                   </div>
 
                     <button
-                      aria-label="Create board"
+                      aria-label={t("Create board", "Utwórz tablicę")}
                       onClick={createBoard}
                       disabled={isBoardsLoading || liveBoardsCount >= currentMaxBoards}
                       onMouseEnter={() => {
@@ -8018,44 +8459,44 @@ export default function Page() {
                     }
                   >
                     <Plus size={17} />
-                    New board
+                        {t("New board", "Nowa tablica")}
                   </button>
 
                   <div style={{ display: "grid", gap: "8px", alignContent: "start" }}>
                     {[
                       {
-                        label: "All boards",
+                        label: t("All boards", "Wszystkie tablice"),
                         value: "all" as const,
                         icon: <LayoutGrid size={15} />,
                       },
                       {
-                        label: "Recent",
+                        label: t("Recent", "Ostatnie"),
                         value: "recent" as const,
                         icon: <Clock3 size={15} />,
                       },
                       {
-                        label: "My boards",
+                        label: t("My boards", "Moje tablice"),
                         value: "mine" as const,
                         icon: <Monitor size={15} />,
                       },
                       {
-                        label: "Starred",
+                        label: t("Starred", "Ulubione"),
                         value: "starred" as const,
                         icon: <Star size={15} />,
                       },
                       {
-                        label: "Trash",
+                        label: t("Trash", "Kosz"),
                         value: "trash" as const,
                         icon: <Trash2 size={15} />,
                       },
                       {
-                        label: "Calendar",
+                        label: t("Calendar", "Kalendarz"),
                         value: "calendar" as const,
                         icon: <CalendarDays size={15} />,
                         locked: !canUseCalendar,
                       },
                       {
-                        label: "Your plan",
+                        label: t("Your plan", "Twój plan"),
                         value: "plan" as const,
                         icon: <Star size={15} />,
                       },
@@ -8147,8 +8588,10 @@ export default function Page() {
                           lineHeight: 1.45,
                         }}
                       >
-                        Click a card to open it. Click the active board card title to
-                        rename it.
+                        {t(
+                          "Click a card to open it. Click the active board card title to rename it.",
+                          "Kliknij kartę, aby ją otworzyć. Kliknij tytuł aktywnej tablicy, aby zmienić jej nazwę."
+                        )}
                       </div>
                     </div>
                     <div
@@ -8172,7 +8615,7 @@ export default function Page() {
                           textDecoration: "none",
                         }}
                       >
-                        Privacy Policy
+                                {t("Privacy Policy", "Polityka prywatności")}
                       </Link>
                       <Link
                         href="/terms"
@@ -8183,7 +8626,7 @@ export default function Page() {
                           textDecoration: "none",
                         }}
                       >
-                        Terms of Service
+                                {t("Terms of Service", "Regulamin")}
                       </Link>
                     </div>
                   </div>
@@ -8305,7 +8748,7 @@ export default function Page() {
                             textTransform: "uppercase",
                           }}
                         >
-                          Logged in
+                            {t("Logged in", "Zalogowano")}
                         </div>
                         <div
                           style={{
@@ -8403,7 +8846,7 @@ export default function Page() {
                           }}
                         >
                           <ChevronLeft size={16} />
-                          Year
+                          {t("Year", "Rok")}
                         </button>
                         <button
                           type="button"
@@ -8474,7 +8917,7 @@ export default function Page() {
                             color: "#52647c",
                           }}
                         >
-                          Year
+                              {t("Year", "Rok")}
                           <ChevronRight size={16} />
                         </button>
                         <button
@@ -8491,7 +8934,7 @@ export default function Page() {
                             placeItems: "center",
                             cursor: "pointer",
                           }}
-                          aria-label="Scroll calendar left"
+                          aria-label={t("Scroll calendar left", "Przewiń kalendarz w lewo")}
                         >
                           <ChevronLeft size={18} />
                         </button>
@@ -8514,7 +8957,7 @@ export default function Page() {
                             cursor: "pointer",
                           }}
                         >
-                          Today
+                          {t("Today", "Dzisiaj")}
                         </button>
                         <button
                           type="button"
@@ -8530,7 +8973,7 @@ export default function Page() {
                             placeItems: "center",
                             cursor: "pointer",
                           }}
-                          aria-label="Scroll calendar right"
+                          aria-label={t("Scroll calendar right", "Przewiń kalendarz w prawo")}
                         >
                           <ChevronRight size={18} />
                         </button>
@@ -8550,7 +8993,7 @@ export default function Page() {
                           fontWeight: 600,
                         }}
                       >
-                        Modified recently
+                          {t("Modified recently", "Ostatnio zmodyfikowane")}
                       </div>
                       )}
                     </div>
@@ -8582,24 +9025,24 @@ export default function Page() {
                         >
                           {[
                             {
-                              label: "Current plan",
+                              label: t("Current plan", "Obecny plan"),
                               value: currentWorkspacePlanLabel,
                             },
                             {
-                              label: "Board access",
+                              label: t("Board access", "Dostęp do tablic"),
                               value: hasUnlimitedBoards
-                                ? "Unlimited saved boards"
-                                : `Up to ${currentMaxBoards} saved boards`,
+                                ? t("Unlimited saved boards", "Nielimitowane zapisane tablice")
+                                : t(`Up to ${currentMaxBoards} saved boards`, `Do ${currentMaxBoards} zapisanych tablic`),
                             },
                             {
-                              label: "Subscription status",
+                              label: t("Subscription status", "Status subskrypcji"),
                               value:
                                 currentSubscriptionCancelAtPeriodEnd &&
                                 currentSubscriptionEndLabel
                                   ? `Ends on ${currentSubscriptionEndLabel}`
                                   : hasActivePaidSubscription
                                   ? "Paid plan active"
-                                  : "Free to upgrade anytime",
+                                  : t("Free to upgrade anytime", "Możesz przejść na wyższy plan w każdej chwili"),
                             },
                           ].map((item) => (
                             <div
@@ -8687,7 +9130,7 @@ export default function Page() {
                                     fontWeight: 700,
                                   }}
                                 >
-                                  Upgrade your workspace
+                                  {t("Upgrade your workspace", "Ulepsz swoją przestrzeń roboczą")}
                                 </div>
                                 <div
                                   style={{
@@ -8698,7 +9141,7 @@ export default function Page() {
                                     ...premiumHeadingStyle,
                                   }}
                                 >
-                                  Pick the plan that matches your pace.
+                                  {t("Pick the plan that matches your pace.", "Wybierz plan dopasowany do Twojego tempa.")}
                                 </div>
                               </div>
                               <div
@@ -8721,9 +9164,9 @@ export default function Page() {
                               }}
                             >
                               {[
-                                "Clean organization",
-                                "Smarter scheduling",
-                                "Better workspace flow",
+                                t("Clean organization", "Lepsza organizacja"),
+                                t("Smarter scheduling", "Inteligentne planowanie"),
+                                t("Better workspace flow", "Sprawniejsza praca"),
                               ].map((badge) => (
                                 <div
                                   key={badge}
@@ -8753,10 +9196,10 @@ export default function Page() {
                               }}
                             >
                               {[
-                                `Plan: ${currentWorkspacePlanLabel}`,
+                                `${t("Plan", "Plan")}: ${currentWorkspacePlanLabel}`,
                                 hasUnlimitedBoards
-                                  ? "Unlimited boards"
-                                  : `${currentMaxBoards} board limit`,
+                                  ? t("Unlimited boards", "Nielimitowane tablice")
+                                  : t(`${currentMaxBoards} board limit`, `Limit ${currentMaxBoards} tablic`),
                               ].map((meta) => (
                                 <div
                                   key={meta}
@@ -8808,7 +9251,7 @@ export default function Page() {
                                 fontWeight: 700,
                               }}
                             >
-                              Monthly billing
+                              {t("Monthly billing", "Rozliczenie miesięczne")}
                             </div>
                             <div
                               style={{
@@ -8819,7 +9262,7 @@ export default function Page() {
                                 ...premiumHeadingStyle,
                               }}
                             >
-                              Clear pricing in {billingCurrencyLabel}.
+                              {t("Clear pricing in", "Przejrzyste ceny w")} {billingCurrencyLabel}.
                             </div>
                             <div
                               style={{
@@ -8829,7 +9272,7 @@ export default function Page() {
                                 maxWidth: "420px",
                               }}
                             >
-                              Start simple, move up when your boards, schedules, and team rhythm need more room.
+                              {t("Start simple, move up when your boards, schedules, and team rhythm need more room.", "Zacznij prosto i przejdź wyżej, gdy tablice, harmonogramy i praca zespołu będą potrzebować więcej miejsca.")}
                             </div>
                             <div
                               style={{
@@ -8906,8 +9349,8 @@ export default function Page() {
                                 }}
                               >
                                 {isBillingPortalLoading
-                                  ? "Opening billing..."
-                                  : "Manage subscription"}
+                                  ? t("Opening billing...", "Otwieranie płatności...")
+                                  : t("Manage subscription", "Zarządzaj subskrypcją")}
                               </button>
                             )}
                           </div>
@@ -8993,7 +9436,7 @@ export default function Page() {
                                       {currentSubscriptionCancelAtPeriodEnd &&
                                       currentSubscriptionEndLabel
                                         ? `Active until ${currentSubscriptionEndLabel}`
-                                        : "Current plan"}
+                                        : t("Current plan", "Obecny plan")}
                                     </div>
                                   )}
                                   {plan.featured && (
@@ -9012,7 +9455,7 @@ export default function Page() {
                                         letterSpacing: "-0.01em",
                                       }}
                                     >
-                                      Most popular
+                                      {t("Most popular", "Najpopularniejszy")}
                                     </div>
                                   )}
                                 </div>
@@ -9141,7 +9584,7 @@ export default function Page() {
                                   }}
                                 >
                                   {pendingBillingPlan === plan.value
-                                    ? "Opening billing..."
+                                    ? t("Opening billing...", "Otwieranie płatności...")
                                     : hasActivePaidSubscription &&
                                       currentAccountPlan === plan.value
                                     ? currentSubscriptionCancelAtPeriodEnd &&
@@ -9149,12 +9592,12 @@ export default function Page() {
                                       ? `${plan.name} active until ${currentSubscriptionEndLabel}`
                                       : `${plan.name} active`
                                     : currentPlanRank === 0
-                                    ? `Subscribe — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/month`
+                                    ? t(`Subscribe — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/month`, `Subskrybuj — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/miesiąc`)
                                     : plan.value === "basic"
-                                    ? "Switch to Basic"
+                                    ? t("Switch to Basic", "Przejdź na Basic")
                                     : currentPlanRank < (plan.value === "master" ? 3 : 2)
-                                    ? `Upgrade to ${plan.name}`
-                                    : `Change to ${plan.name}`}
+                                    ? t(`Upgrade to ${plan.name}`, `Przejdź na ${plan.name}`)
+                                    : t(`Change to ${plan.name}`, `Zmień na ${plan.name}`)}
                                 </span>
                               </button>
                             </div>
@@ -9173,24 +9616,22 @@ export default function Page() {
                             fontWeight: 600,
                           }}
                         >
-                          Paid plans are monthly subscriptions that renew
-                          automatically until cancelled. The selected price and
-                          any charge due now will be shown again before payment.
-                          You can cancel through Manage subscription; access
-                          continues until the end of the paid billing period.
-                          By subscribing, you agree to the{" "}
+                          {t(
+                            "Paid plans are monthly subscriptions that renew automatically until cancelled. The selected price and any charge due now will be shown again before payment. You can cancel through Manage subscription; access continues until the end of the paid billing period. By subscribing, you agree to the",
+                            "Płatne plany są miesięcznymi subskrypcjami odnawianymi automatycznie do czasu anulowania. Wybrana cena i należna teraz opłata zostaną ponownie pokazane przed płatnością. Subskrypcję możesz anulować w sekcji zarządzania; dostęp pozostanie aktywny do końca opłaconego okresu. Subskrybując, akceptujesz"
+                          )}{" "}
                           <Link
                             href="/terms"
                             style={{ color: "#2563eb", fontWeight: 800 }}
                           >
-                            Terms of Service
+                            {t("Terms of Service", "Regulamin")}
                           </Link>{" "}
-                          and acknowledge the{" "}
+                          {t("and acknowledge the", "i potwierdzasz zapoznanie się z")}{" "}
                           <Link
                             href="/privacy"
                             style={{ color: "#2563eb", fontWeight: 800 }}
                           >
-                            Privacy Policy
+                            {t("Privacy Policy", "Polityką prywatności")}
                           </Link>
                           .
                         </div>
@@ -9276,7 +9717,7 @@ export default function Page() {
                                       lineHeight: 1.1,
                                     }}
                                   >
-                                    Confirm plan change
+                                    {t("Confirm plan change", "Potwierdź zmianę planu")}
                                   </div>
                                   <div
                                     style={{
@@ -9285,11 +9726,11 @@ export default function Page() {
                                       lineHeight: 1.6,
                                     }}
                                   >
-                                    You are changing from{" "}
+                                    {t("You are changing from", "Zmieniasz plan z")}{" "}
                                     <strong style={{ color: "#0f172a" }}>
                                       {billingChangeRequest.currentPlan}
                                     </strong>{" "}
-                                    to{" "}
+                                    {t("to", "na")}{" "}
                                     <strong style={{ color: "#0f172a" }}>
                                       {billingChangeRequest.targetPlan}
                                     </strong>
@@ -9314,7 +9755,7 @@ export default function Page() {
                                         color: "#334155",
                                       }}
                                     >
-                                      <span>Estimated charge now</span>
+                                      <span>{t("Estimated charge now", "Szacowana opłata teraz")}</span>
                                       <strong style={{ color: "#0f172a" }}>
                                         {isFreeUpgradeNow
                                           ? `0 ${billingChangeRequest.currency.toUpperCase()}`
@@ -9334,7 +9775,7 @@ export default function Page() {
                                       }}
                                     >
                                       <span>
-                                        Next renewal price
+                                        {t("Next renewal price", "Cena kolejnego odnowienia")}
                                       </span>
                                       <strong style={{ color: "#0f172a" }}>
                                         {nextMonthlyPrice}
@@ -9384,7 +9825,7 @@ export default function Page() {
                                         cursor: "pointer",
                                       }}
                                     >
-                                      Cancel
+                                      {t("Cancel", "Anuluj")}
                                     </button>
                                     <button
                                       type="button"
@@ -9411,7 +9852,7 @@ export default function Page() {
                                         cursor: "pointer",
                                       }}
                                     >
-                                      Confirm change
+                                      {t("Confirm change", "Potwierdź zmianę")}
                                     </button>
                                   </div>
                                     </>
@@ -9463,7 +9904,7 @@ export default function Page() {
                                         cursor: "pointer",
                                       }}
                                     >
-                                      OK
+                                      {t("OK", "OK")}
                                     </button>
                                   </div>
                                 </>
@@ -9495,7 +9936,7 @@ export default function Page() {
                                 lineHeight: 1.2,
                               }}
                             >
-                              Calendar preview
+                              {t("Calendar preview", "Podgląd kalendarza")}
                             </div>
                             <div
                               style={{
@@ -9505,7 +9946,7 @@ export default function Page() {
                                 lineHeight: 1.55,
                               }}
                             >
-                              You can view your calendar here, but editing is available on the Pro and Master plans.
+                              {t("You can view your calendar here, but editing is available on the Pro and Master plans.", "Tutaj możesz przeglądać kalendarz, ale edycja jest dostępna w planach Pro i Master.")}
                             </div>
                           </div>
                         )}
@@ -9697,7 +10138,7 @@ export default function Page() {
                                                   e.currentTarget.value
                                                 )
                                               }
-                                              aria-label="Start time"
+                                      aria-label={t("Start time", "Godzina rozpoczęcia")}
                                               style={{
                                                 width: "100%",
                                                 height: "34px",
@@ -9816,7 +10257,7 @@ export default function Page() {
                                                     e.currentTarget.value
                                                   )
                                                 }
-                                                aria-label="Choose a custom event color"
+                                      aria-label={t("Choose a custom event color", "Wybierz własny kolor wydarzenia")}
                                                 style={{
                                                   position: "absolute",
                                                   inset: 0,
@@ -9833,7 +10274,7 @@ export default function Page() {
                                             onClick={() =>
                                               lockCalendarEntry(entry.id)
                                             }
-                                            aria-label="Confirm calendar entry"
+                                      aria-label={t("Confirm calendar entry", "Potwierdź wpis kalendarza")}
                                             style={{
                                               width: "32px",
                                               height: "32px",
@@ -9875,7 +10316,7 @@ export default function Page() {
                                               lockCalendarEntry(entry.id);
                                             }
                                           }}
-                                          placeholder="Meeting, schedule, reminder..."
+                                    placeholder={t("Meeting, schedule, reminder...", "Spotkanie, harmonogram, przypomnienie...")}
                                           style={{
                                             width: "100%",
                                             minWidth: "120px",
@@ -9974,7 +10415,7 @@ export default function Page() {
                                             e.stopPropagation();
                                             removeCalendarEntry(entry.id);
                                           }}
-                                          aria-label="Remove calendar entry"
+                                      aria-label={t("Remove calendar entry", "Usuń wpis kalendarza")}
                                           style={{
                                             position: "absolute",
                                             top: "-8px",
@@ -10030,7 +10471,7 @@ export default function Page() {
                                   }}
                                 >
                                   <Plus size={12} />
-                                  {canUseCalendar ? "Add" : "Upgrade to edit"}
+                                    {canUseCalendar ? t("Add", "Dodaj") : t("Upgrade to edit", "Ulepsz plan, aby edytować")}
                                 </button>
                               </div>
                             </div>
@@ -10059,7 +10500,7 @@ export default function Page() {
                                   fontWeight: 750,
                                 }}
                               >
-                                No schedules on this calendar yet
+                                {t("No schedules on this calendar yet", "W tym kalendarzu nie ma jeszcze wydarzeń")}
                               </div>
                               <div
                                 style={{
@@ -10277,7 +10718,7 @@ export default function Page() {
                                             textTransform: "uppercase",
                                           }}
                                         >
-                                          Active board
+                                          {t("Active board", "Aktywna tablica")}
                                         </div>
                                       )}
                                       {!isOwnedBoard && !isInTrash && (
@@ -10296,7 +10737,7 @@ export default function Page() {
                                             fontWeight: 600,
                                           }}
                                         >
-                                          Shared with you · {board.sharePermission === "editor" ? "Can edit" : "View only"}
+                                          {t("Shared with you", "Udostępniono Tobie")} · {board.sharePermission === "editor" ? t("Can edit", "Może edytować") : t("View only", "Tylko podgląd")}
                                         </div>
                                       )}
                                       {isOwnedBoard &&
@@ -10319,7 +10760,7 @@ export default function Page() {
                                               fontWeight: 600,
                                             }}
                                           >
-                                            Shared with {board.shareCount}
+                                            {t("Shared with", "Udostępniono")}{" "}{board.shareCount}
                                           </div>
                                         )}
                                     </div>
@@ -10336,7 +10777,7 @@ export default function Page() {
                                       <button
                                         type="button"
                                         aria-label={`Export ${board.name}`}
-                                        title="Export board"
+                                        title={t("Export board", "Eksportuj tablicę")}
                                         disabled={isBoardsLoading}
                                         onClick={(event) => {
                                           event.stopPropagation();
@@ -10363,7 +10804,7 @@ export default function Page() {
                                           <button
                                             type="button"
                                             aria-label={`Version history for ${board.name}`}
-                                            title="Version history"
+                                      title={t("Version history", "Historia wersji")}
                                             disabled={isBoardsLoading}
                                             onClick={(e) => {
                                               e.stopPropagation();
@@ -10510,7 +10951,7 @@ export default function Page() {
                                     }}
                                   >
                                     <RefreshCw size={14} />
-                                    Restore
+                                                {t("Restore", "Przywróć")}
                                   </button>
                                   <button
                                     type="button"
@@ -10536,7 +10977,7 @@ export default function Page() {
                                     }}
                                   >
                                     <Trash2 size={14} />
-                                    Delete forever
+                                                {t("Delete forever", "Usuń na zawsze")}
                                   </button>
                                 </div>
                               )}
@@ -10607,7 +11048,7 @@ export default function Page() {
                                 fontWeight: 750,
                               }}
                             >
-                              No boards match that search
+                              {t("No boards match that search", "Brak tablic pasujących do wyszukiwania")}
                             </div>
                             <div
                               style={{
@@ -10617,8 +11058,7 @@ export default function Page() {
                                 lineHeight: 1.5,
                               }}
                             >
-                              Try another name, or create a new board for a fresh
-                              project.
+                              {t("Try another name, or create a new board for a fresh project.", "Spróbuj innej nazwy lub utwórz nową tablicę dla nowego projektu.")}
                             </div>
                           </div>
                         </div>
@@ -10687,14 +11127,15 @@ export default function Page() {
                     lineHeight: 1.1,
                   }}
                 >
-                  Ustawienia
+                  {t("Settings", "Ustawienia")}
                 </div>
 
                 <nav style={{ display: "grid", gap: "8px" }}>
                   {[
-                    { id: "background", label: "Tło i wygląd" },
-                    { id: "tools", label: "Narzędzia" },
-                    { id: "account", label: "Konto" },
+                    { id: "background", label: t("Background & appearance", "Tło i wygląd") },
+                    { id: "tools", label: t("Tools", "Narzędzia") },
+                    { id: "language", label: t("Languages", "Języki") },
+                    { id: "account", label: t("Account", "Konto") },
                   ].map((item) => {
                     const isActive = activeSettingsSection === item.id;
 
@@ -10727,6 +11168,8 @@ export default function Page() {
                           <Square size={18} />
                         ) : item.id === "tools" ? (
                           <Pen size={18} />
+                        ) : item.id === "language" ? (
+                          <Languages size={18} />
                         ) : (
                           <Lock size={18} />
                         )}
@@ -10745,7 +11188,7 @@ export default function Page() {
                 }}
               >
                 <button
-                  aria-label="Zamknij ustawienia"
+                  aria-label={t("Close settings", "Zamknij ustawienia")}
                   onClick={() => setShowSettingsMenu(false)}
                   style={{
                     position: "absolute",
@@ -10777,7 +11220,7 @@ export default function Page() {
                         lineHeight: 1.15,
                       }}
                     >
-                      Tło i wygląd
+                      {t("Background & appearance", "Tło i wygląd")}
                     </h2>
                     <div
                       style={{
@@ -10788,7 +11231,7 @@ export default function Page() {
                         lineHeight: 1.25,
                       }}
                     >
-                      Tło tablicy
+                      {t("Board background", "Tło tablicy")}
                     </div>
                     <div
                       style={{
@@ -10806,7 +11249,7 @@ export default function Page() {
                           setCustomCanvasBackground(nextColor);
                           setCanvasBackground(nextColor);
                         }}
-                        aria-label="Wybierz własny kolor tła"
+                        aria-label={t("Choose a custom background color", "Wybierz własny kolor tła")}
                         style={{
                           position: "absolute",
                           opacity: 0,
@@ -10945,7 +11388,7 @@ export default function Page() {
                           lineHeight: 1.25,
                         }}
                       >
-                        Tryb siatki
+                        {t("Grid mode", "Tryb siatki")}
                       </div>
                       <div
                         style={{
@@ -11091,7 +11534,7 @@ export default function Page() {
                             fontWeight: 600,
                           }}
                         >
-                          <span>Przezroczystość siatki</span>
+                          <span>{t("Grid opacity", "Przezroczystość siatki")}</span>
                           <span style={{ color: "#94a3b8" }}>
                             {gridOpacity}%
                           </span>
@@ -11125,13 +11568,13 @@ export default function Page() {
                         lineHeight: 1.15,
                       }}
                     >
-                      Narzędzia
+                      {t("Tools", "Narzędzia")}
                     </h2>
                     <div style={{ display: "grid", gap: "12px" }}>
                       {[
-                        { label: "Kursor", value: "cursor" },
-                        { label: "Pióro", value: "pen" },
-                        { label: "Gumka", value: "eraser" },
+                        { label: t("Cursor", "Kursor"), value: "cursor" },
+                        { label: t("Pen", "Pióro"), value: "pen" },
+                        { label: t("Eraser", "Gumka"), value: "eraser" },
                       ].map((option) => {
                         const isActive = tool === option.value;
 
@@ -11168,6 +11611,129 @@ export default function Page() {
                   </>
                 )}
 
+                {activeSettingsSection === "language" && (
+                  <>
+                    <h2
+                      style={{
+                        margin: "0 0 10px",
+                        fontSize: "24px",
+                        fontWeight: 700,
+                        letterSpacing: "0",
+                        lineHeight: 1.15,
+                      }}
+                    >
+                      {t("Languages", "Języki")}
+                    </h2>
+                    <p
+                      style={{
+                        margin: "0 0 24px",
+                        color: "#94a3b8",
+                        fontSize: "14px",
+                        lineHeight: 1.5,
+                      }}
+                    >
+                      {t(
+                        "Choose the language used throughout Scriboo.",
+                        "Wybierz język używany w całym Scriboo."
+                      )}
+                    </p>
+                    <div style={{ display: "grid", gap: "12px", maxWidth: "420px" }}>
+                      {([
+                        { value: "en" as const, label: "English" },
+                        { value: "pl" as const, label: "Polski" },
+                      ]).map((option) => {
+                        const isActive = language === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setLanguage(option.value)}
+                            aria-pressed={isActive}
+                            style={{
+                              minHeight: "66px",
+                              padding: "0 18px",
+                              borderRadius: "12px",
+                              border: `1px solid ${
+                                isActive ? "#7c3aed" : panelBorderColor
+                              }`,
+                              background: isActive
+                                ? selectedControlBackground
+                                : controlBackground,
+                              color: panelTextColor,
+                              display: "flex",
+                              alignItems: "center",
+                              justifyContent: "space-between",
+                              textAlign: "left",
+                              cursor: "pointer",
+                            }}
+                          >
+                            <span
+                              style={{
+                                display: "flex",
+                                alignItems: "center",
+                                gap: "12px",
+                              }}
+                            >
+                              <span
+                                aria-hidden="true"
+                                style={{
+                                  width: "34px",
+                                  height: "24px",
+                                  borderRadius: "6px",
+                                  border: "1px solid rgba(148,163,184,0.3)",
+                                  background: "#ffffff",
+                                  display: "grid",
+                                  placeItems: "center",
+                                  overflow: "hidden",
+                                  boxShadow:
+                                    "0 3px 9px rgba(15,23,42,0.1)",
+                                  flex: "0 0 auto",
+                                }}
+                              >
+                                {option.value === "en" ? (
+                                  <svg
+                                    viewBox="0 0 60 40"
+                                    width="34"
+                                    height="24"
+                                    focusable="false"
+                                  >
+                                    <rect width="60" height="40" fill="#21468b" />
+                                    <path d="M0 0 60 40M60 0 0 40" stroke="#fff" strokeWidth="9" />
+                                    <path d="M0 0 60 40M60 0 0 40" stroke="#cf142b" strokeWidth="4" />
+                                    <path d="M30 0v40M0 20h60" stroke="#fff" strokeWidth="13" />
+                                    <path d="M30 0v40M0 20h60" stroke="#cf142b" strokeWidth="7" />
+                                  </svg>
+                                ) : (
+                                  <svg
+                                    viewBox="0 0 60 40"
+                                    width="34"
+                                    height="24"
+                                    focusable="false"
+                                  >
+                                    <rect width="60" height="20" fill="#fff" />
+                                    <rect y="20" width="60" height="20" fill="#dc143c" />
+                                  </svg>
+                                )}
+                              </span>
+                              <span style={{ display: "grid", gap: "5px" }}>
+                                <span style={{ fontSize: "15px", fontWeight: 700 }}>
+                                  {option.label}
+                                </span>
+                                <span style={{ color: "#94a3b8", fontSize: "12px" }}>
+                                  {option.value === "en"
+                                    ? t("Interface in English", "Interfejs w języku angielskim")
+                                    : t("Interface in Polish", "Interfejs w języku polskim")}
+                                </span>
+                              </span>
+                            </span>
+                            {isActive && <Check size={19} />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </>
+                )}
+
                 {activeSettingsSection === "account" && (
                   <>
                     <h2
@@ -11179,7 +11745,7 @@ export default function Page() {
                         lineHeight: 1.15,
                       }}
                     >
-                      Konto
+                      {t("Account", "Konto")}
                     </h2>
                     {currentAccountEmail && (
                       <div
@@ -11201,7 +11767,7 @@ export default function Page() {
                             lineHeight: 1.35,
                           }}
                         >
-                          Signed in as
+                          {t("Signed in as", "Zalogowano jako")}
                           <div style={{ marginTop: "4px", color: "#7c3aed" }}>
                             {currentAccountName || currentAccountEmail}
                           </div>
@@ -11228,7 +11794,7 @@ export default function Page() {
                             lineHeight: 1.35,
                           }}
                         >
-                          Workspace plan
+                          {t("Workspace plan", "Plan przestrzeni roboczej")}
                           <div
                             style={{
                               marginTop: "8px",
@@ -11275,7 +11841,7 @@ export default function Page() {
                             cursor: "pointer",
                           }}
                         >
-                          Account &amp; security
+                          {t("Account & security", "Konto i bezpieczeństwo")}
                         </button>
                         <button
                           type="button"
@@ -11295,8 +11861,8 @@ export default function Page() {
                           }}
                         >
                           {isExportingAccountData
-                            ? "Preparing export..."
-                            : "Download my data"}
+                            ? t("Preparing export...", "Przygotowywanie eksportu...")
+                            : t("Download my data", "Pobierz moje dane")}
                         </button>
                         <div
                           style={{
@@ -11306,9 +11872,10 @@ export default function Page() {
                             maxWidth: "320px",
                           }}
                         >
-                          Download a JSON export with your account details,
-                          owned boards and board content, calendar entries,
-                          sharing records, and subscription information.
+                          {t(
+                            "Download a JSON export with your account details, owned boards and board content, calendar entries, sharing records, and subscription information.",
+                            "Pobierz eksport JSON zawierający dane konta, własne tablice i ich zawartość, wpisy kalendarza, udostępnienia oraz informacje o subskrypcji."
+                          )}
                         </div>
                         {accountExportError && (
                           <div
@@ -11341,7 +11908,7 @@ export default function Page() {
                             cursor: "pointer",
                           }}
                         >
-                          Log out
+                          {t("Log out", "Wyloguj się")}
                         </button>
                         <div
                           style={{
@@ -11359,7 +11926,7 @@ export default function Page() {
                               fontWeight: 800,
                             }}
                           >
-                            Danger zone
+                            {t("Danger zone", "Strefa niebezpieczna")}
                           </div>
                           <div
                             style={{
@@ -11368,8 +11935,10 @@ export default function Page() {
                               lineHeight: 1.5,
                             }}
                           >
-                            Permanently delete your account, boards, calendar
-                            entries, and sharing access.
+                            {t(
+                              "Permanently delete your account, boards, calendar entries, and sharing access.",
+                              "Trwale usuń konto, tablice, wpisy kalendarza i dostęp do udostępnień."
+                            )}
                           </div>
                           <button
                             type="button"
@@ -11389,7 +11958,7 @@ export default function Page() {
                               cursor: "pointer",
                             }}
                           >
-                            Delete account
+                            {t("Delete account", "Usuń konto")}
                           </button>
                         </div>
                       </div>
@@ -11413,7 +11982,7 @@ export default function Page() {
                         cursor: "pointer",
                       }}
                     >
-                      Zaloguj się
+                      {t("Log in", "Zaloguj się")}
                     </button>
                   </>
                 )}
@@ -11476,7 +12045,7 @@ export default function Page() {
                       fontWeight: 800,
                     }}
                   >
-                    Permanently delete account?
+                {t("Permanently delete account?", "Trwale usunąć konto?")}
                   </div>
                   <div
                     style={{
@@ -11486,12 +12055,12 @@ export default function Page() {
                       lineHeight: 1.55,
                     }}
                   >
-                    This action cannot be undone.
+                {t("This action cannot be undone.", "Tej operacji nie można cofnąć.")}
                   </div>
                 </div>
                 <button
                   type="button"
-                  aria-label="Close account deletion confirmation"
+                aria-label={t("Close account deletion confirmation", "Zamknij potwierdzenie usunięcia konta")}
                   onClick={closeDeleteAccountModal}
                   disabled={isDeletingAccount}
                   style={{
@@ -11521,12 +12090,12 @@ export default function Page() {
                   lineHeight: 1.6,
                 }}
               >
-                <strong>This will permanently remove:</strong>
+                <strong>{t("This will permanently remove:", "Zostaną trwale usunięte:")}</strong>
                 <ul style={{ margin: "8px 0 0", paddingLeft: "20px" }}>
-                  <li>Your profile and sign-in access</li>
-                  <li>All boards and calendar entries</li>
-                  <li>All board invitations and sharing access</li>
-                  <li>Your active subscription, which will be cancelled now</li>
+                  <li>{t("Your profile and sign-in access", "Twój profil i dostęp do logowania")}</li>
+                  <li>{t("All boards and calendar entries", "Wszystkie tablice i wpisy kalendarza")}</li>
+                  <li>{t("All board invitations and sharing access", "Wszystkie zaproszenia i udostępnienia")}</li>
+                  <li>{t("Your active subscription, which will be cancelled now", "Aktywna subskrypcja, która zostanie teraz anulowana")}</li>
                 </ul>
                 <div style={{ marginTop: "9px" }}>
                   Required billing records may remain with Stripe for accounting
@@ -11544,7 +12113,7 @@ export default function Page() {
                   fontWeight: 700,
                 }}
               >
-                Password
+                  {t("Password", "Hasło")}
                 <input
                   type="password"
                   autoComplete="current-password"
@@ -11574,7 +12143,7 @@ export default function Page() {
                   fontWeight: 700,
                 }}
               >
-                Type DELETE to confirm
+                  {t("Type DELETE to confirm", "Wpisz DELETE, aby potwierdzić")}
                 <input
                   type="text"
                   autoComplete="off"
@@ -11637,7 +12206,7 @@ export default function Page() {
                     cursor: isDeletingAccount ? "default" : "pointer",
                   }}
                 >
-                  Keep my account
+                  {t("Keep my account", "Zachowaj moje konto")}
                 </button>
                 <button
                   type="button"
@@ -11771,7 +12340,7 @@ export default function Page() {
                 }}
               >
                 <RefreshCw size={11} />
-                Retry
+                {t("Retry", "Spróbuj ponownie")}
               </button>
             )}
           </div>
@@ -11779,8 +12348,8 @@ export default function Page() {
 
         <Link
           href="/support"
-          aria-label="Help and Support"
-          title="Help & Support"
+            aria-label={t("Help and Support", "Pomoc i wsparcie")}
+            title={t("Help & Support", "Pomoc i wsparcie")}
           style={{
             position: "absolute",
             top: "50%",
@@ -11802,7 +12371,7 @@ export default function Page() {
           }}
         >
           <CircleHelp size={16} />
-          Help &amp; Support
+                {t("Help & Support", "Pomoc i wsparcie")}
         </Link>
 
         {currentAccountEmail && (
@@ -11900,7 +12469,7 @@ export default function Page() {
                         textTransform: "uppercase",
                       }}
                     >
-                      Account
+                      {t("Account", "Konto")}
                     </div>
                     <div
                       style={{
@@ -11956,7 +12525,7 @@ export default function Page() {
                     boxShadow: "0 1px 0 rgba(255,255,255,0.82) inset",
                   }}
                 >
-                  {currentPlanLabel} plan
+                      {currentPlanLabel} {t("plan", "plan")}
                 </div>
                 <button
                   type="button"
@@ -11978,7 +12547,7 @@ export default function Page() {
                     cursor: "pointer",
                   }}
                 >
-                  Log out
+                    {t("Log out", "Wyloguj się")}
                 </button>
               </div>
             )}
@@ -12036,16 +12605,15 @@ export default function Page() {
                     }}
                   >
                     <Download size={22} color="#059669" />
-                    Export board
+                {t("Export board", "Eksportuj tablicę")}
                   </div>
                   <div style={{ color: "#475569", fontSize: "13px", lineHeight: 1.5 }}>
-                    Download <strong>{exportingBoard.name}</strong> in the format you
-                    need. Your original board stays unchanged.
+                    {t("Download", "Pobierz")} <strong>{exportingBoard.name}</strong> {t("in the format you need. Your original board stays unchanged.", "w wybranym formacie. Oryginalna tablica pozostanie bez zmian.")}
                   </div>
                 </div>
                 <button
                   type="button"
-                  aria-label="Close board export"
+              aria-label={t("Close board export", "Zamknij eksport tablicy")}
                   disabled={isBoardExporting}
                   onClick={() => {
                     setExportingBoard(null);
@@ -12205,16 +12773,15 @@ export default function Page() {
                     }}
                   >
                     <History size={22} color="#0284c7" />
-                    Version history
+                    {t("Version history", "Historia wersji")}
                   </div>
                   <div style={{ color: "#475569", fontSize: "13px", lineHeight: 1.5 }}>
-                    Earlier versions of <strong>{versionHistoryBoard.name}</strong>.
-                    Scriboo keeps up to 50 recent snapshots for {versionRetentionDays} days.
+                    {t("Earlier versions of", "Wcześniejsze wersje")} <strong>{versionHistoryBoard.name}</strong>. {t("Scriboo keeps up to 50 recent snapshots for", "Scriboo przechowuje do 50 ostatnich kopii przez")} {versionRetentionDays} {t("days.", "dni.")}
                   </div>
                 </div>
                 <button
                   type="button"
-                  aria-label="Close version history"
+                  aria-label={t("Close version history", "Zamknij historię wersji")}
                   disabled={isVersionHistoryLoading}
                   onClick={() => {
                     setVersionHistoryBoard(null);
@@ -12249,8 +12816,7 @@ export default function Page() {
                   lineHeight: 1.5,
                 }}
               >
-                Restoring does not destroy your current work. Scriboo saves the current
-                board as a recovery version first.
+                {t("Restoring does not destroy your current work. Scriboo saves the current board as a recovery version first.", "Przywracanie nie usuwa bieżącej pracy. Scriboo najpierw zapisuje obecną tablicę jako wersję odzyskiwania.")}
               </div>
 
               {versionHistoryMessage && (
@@ -12279,7 +12845,7 @@ export default function Page() {
                     fontWeight: 650,
                   }}
                 >
-                  Loading recovery versions…
+                  {t("Loading recovery versions…", "Wczytywanie wersji odzyskiwania…")}
                 </div>
               ) : boardVersions.length === 0 && !versionHistoryMessage ? (
                 <div
@@ -12293,8 +12859,7 @@ export default function Page() {
                     lineHeight: 1.55,
                   }}
                 >
-                  No earlier versions yet. Scriboo creates snapshots automatically as
-                  you continue editing this board.
+                  {t("No earlier versions yet. Scriboo creates snapshots automatically as you continue editing this board.", "Nie ma jeszcze wcześniejszych wersji. Scriboo tworzy kopie automatycznie podczas edycji tej tablicy.")}
                 </div>
               ) : (
                 <div style={{ display: "grid", gap: "10px" }}>
@@ -12327,7 +12892,7 @@ export default function Page() {
                           </div>
                           <div style={{ color: "#64748b", fontSize: "12px" }}>
                             {formatBoardDate(version.createdAt)} · {version.elementCount}{" "}
-                            items · {version.calendarEntryCount} calendar entries
+                            {t("items", "elementów")} · {version.calendarEntryCount} {t("calendar entries", "wpisów kalendarza")}
                           </div>
                         </div>
                         <button
@@ -12352,7 +12917,7 @@ export default function Page() {
                           }}
                         >
                           <RefreshCw size={14} />
-                          Restore
+                          {t("Restore", "Przywróć")}
                         </button>
                       </div>
                     );
@@ -12409,7 +12974,7 @@ export default function Page() {
                       fontWeight: 700,
                     }}
                   >
-                    Share board
+                {t("Share board", "Udostępnij tablicę")}
                   </div>
                   <div
                     style={{
@@ -12418,9 +12983,10 @@ export default function Page() {
                       lineHeight: 1.5,
                     }}
                   >
-                    {sharingBoard.name} can be shared with up to {shareLimit}{" "}
-                    {shareLimit === 1 ? "person" : "people"} on your{" "}
-                    {currentPlanLabel} plan.
+                    {t(
+                      `${sharingBoard.name} can be shared with up to ${shareLimit} ${shareLimit === 1 ? "person" : "people"} on your ${currentPlanLabel} plan.`,
+                      `Tablicę ${sharingBoard.name} możesz udostępnić maksymalnie ${shareLimit} osobom w planie ${currentPlanLabel}.`
+                    )}
                   </div>
                 </div>
                 <button
@@ -12462,7 +13028,7 @@ export default function Page() {
                       submitBoardShare().catch(() => null);
                     }
                   }}
-                  placeholder="Enter email address"
+              placeholder={t("Enter email address", "Wprowadź adres e-mail")}
                   style={{
                     flex: "1 1 auto",
                     height: "44px",
@@ -12496,7 +13062,7 @@ export default function Page() {
                     opacity: isSharePanelLoading || !shareEmailInput.trim() ? 0.6 : 1,
                   }}
                 >
-                  Share
+                    {t("Share", "Udostępnij")}
                 </button>
               </div>
 
@@ -12531,7 +13097,7 @@ export default function Page() {
                     fontWeight: 700,
                   }}
                 >
-                  People with access
+                {t("People with access", "Osoby z dostępem")}
                 </div>
 
                 {boardShares.length === 0 ? (
@@ -12544,7 +13110,7 @@ export default function Page() {
                       fontSize: "13px",
                     }}
                   >
-                    No one else has access yet.
+                    {t("No one else has access yet.", "Nikt inny nie ma jeszcze dostępu.")}
                   </div>
                 ) : (
                   <div style={{ display: "grid", gap: "10px" }}>
@@ -12596,7 +13162,7 @@ export default function Page() {
                             cursor: isSharePanelLoading ? "default" : "pointer",
                           }}
                         >
-                          Remove
+                          {t("Remove", "Usuń")}
                         </button>
                       </div>
                     ))}
@@ -12639,7 +13205,7 @@ export default function Page() {
               textShadow: "0 1px 10px rgba(15,23,42,0.18)",
             }}
           >
-            Jesteś w trybie gościa. Załóż konto i wybierz odpowiedni plan. 🚀
+              {t("You are in guest mode. Create an account and choose the right plan. 🚀", "Jesteś w trybie gościa. Załóż konto i wybierz odpowiedni plan. 🚀")}
           </span>
 
           <div
@@ -12652,7 +13218,7 @@ export default function Page() {
             }}
           >
           <button
-            aria-label="Zaloguj się"
+              aria-label={t("Log in", "Zaloguj się")}
             onClick={() => openAuthModal("login")}
             style={{
               minWidth: "124px",
@@ -12690,7 +13256,7 @@ export default function Page() {
                 MozOsxFontSmoothing: "grayscale",
               }}
             >
-              Zaloguj się
+              {t("Log in", "Zaloguj się")}
             </span>
           </button>
 
@@ -12709,11 +13275,11 @@ export default function Page() {
               textShadow: "0 1px 8px rgba(15,23,42,0.14)",
             }}
           >
-            Nie masz konta?
+              {t("Don't have an account?", "Nie masz konta?")}
           </span>
 
           <button
-            aria-label="Zarejestruj się"
+              aria-label={t("Register", "Zarejestruj się")}
             onClick={() => openAuthModal("register")}
             onMouseEnter={() => setIsRegisterCtaHovered(true)}
             onMouseLeave={() => setIsRegisterCtaHovered(false)}
@@ -12768,7 +13334,7 @@ export default function Page() {
                 textRendering: "optimizeLegibility",
               }}
             >
-              Zarejestruj się
+              {t("Register", "Zarejestruj się")}
             </span>
           </button>
           </div>
@@ -12799,15 +13365,20 @@ export default function Page() {
         <input
           ref={fileUploadRef}
           type="file"
+          accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml"
           multiple
           onChange={(e) => {
+            const files = Array.from(e.currentTarget.files ?? []);
             e.currentTarget.value = "";
+            if (files.length) {
+              void importImageFiles(files);
+            }
           }}
           style={{ display: "none" }}
         />
 
         <button
-          aria-label="Upload files"
+          aria-label={t("Upload files", "Prześlij pliki")}
           onClick={() => {
             if (activeText) {
               commitActiveText();
@@ -13013,18 +13584,28 @@ export default function Page() {
                   }}
                 />
                 <div
+                  aria-hidden="true"
                   style={{
-                    width: `${Math.max(6, penWidth)}px`,
-                    height: `${Math.max(6, penWidth)}px`,
-                    borderRadius: "999px",
-                    background: penColor,
-                    boxShadow:
-                      penColor === "#ffffff"
-                        ? "inset 0 0 0 1px rgba(0,0,0,0.25)"
-                        : "none",
-                    flexShrink: 0,
+                    width: "24px",
+                    height: "24px",
+                    display: "grid",
+                    placeItems: "center",
+                    flex: "0 0 24px",
                   }}
-                />
+                >
+                  <div
+                    style={{
+                      width: `${Math.max(6, penWidth)}px`,
+                      height: `${Math.max(6, penWidth)}px`,
+                      borderRadius: "999px",
+                      background: penColor,
+                      boxShadow:
+                        penColor === "#ffffff"
+                          ? "inset 0 0 0 1px rgba(0,0,0,0.25)"
+                          : "none",
+                    }}
+                  />
+                </div>
               </div>
 
               <div
@@ -13161,7 +13742,8 @@ export default function Page() {
                 top: "50%",
                 left: "54px",
                 transform: "translateY(-50%)",
-                minWidth: "190px",
+                width: "224px",
+                minHeight: "64px",
                 padding: "12px 14px",
                 borderRadius: "12px",
                 background: popoverBackground,
@@ -13195,14 +13777,25 @@ export default function Page() {
                 }}
               />
               <div
+                aria-hidden="true"
                 style={{
-                  width: `${Math.max(8, eraserWidth)}px`,
-                  height: `${Math.max(8, eraserWidth)}px`,
-                  borderRadius: "999px",
-                  background: canvasFillColor,
-                  flexShrink: 0,
+                  width: "32px",
+                  height: "32px",
+                  display: "grid",
+                  placeItems: "center",
+                  flex: "0 0 32px",
                 }}
-              />
+              >
+                <div
+                  style={{
+                    width: `${8 + ((eraserWidth - 8) / 56) * 24}px`,
+                    height: `${8 + ((eraserWidth - 8) / 56) * 24}px`,
+                    borderRadius: "999px",
+                    background: canvasFillColor,
+                    boxShadow: `inset 0 0 0 1px ${panelBorderColor}`,
+                  }}
+                />
+              </div>
             </div>
           )}
         </div>
@@ -13270,13 +13863,7 @@ export default function Page() {
               }}
             >
               <button
-                onClick={() => {
-                  setTool("circle");
-                  setShowShapesMenu(false);
-                  setShowPenMenu(false);
-                  setShowTextMenu(false);
-                  setShowEraserMenu(false);
-                }}
+                onClick={() => selectShapeTool("circle")}
                 style={{
                   width: "32px",
                   height: "32px",
@@ -13294,13 +13881,7 @@ export default function Page() {
               </button>
 
               <button
-                onClick={() => {
-                  setTool("square");
-                  setShowShapesMenu(false);
-                  setShowPenMenu(false);
-                  setShowTextMenu(false);
-                  setShowEraserMenu(false);
-                }}
+                onClick={() => selectShapeTool("square")}
                 style={{
                   width: "32px",
                   height: "32px",
@@ -13318,13 +13899,7 @@ export default function Page() {
               </button>
 
               <button
-                onClick={() => {
-                  setTool("arrow");
-                  setShowShapesMenu(false);
-                  setShowPenMenu(false);
-                  setShowTextMenu(false);
-                  setShowEraserMenu(false);
-                }}
+                onClick={() => selectShapeTool("arrow")}
                 style={{
                   width: "32px",
                   height: "32px",
@@ -13342,13 +13917,7 @@ export default function Page() {
               </button>
 
               <button
-                onClick={() => {
-                  setTool("line");
-                  setShowShapesMenu(false);
-                  setShowPenMenu(false);
-                  setShowTextMenu(false);
-                  setShowEraserMenu(false);
-                }}
+                onClick={() => selectShapeTool("line")}
                 style={{
                   width: "32px",
                   height: "32px",
