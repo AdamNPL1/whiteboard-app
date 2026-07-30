@@ -2,7 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 
 import { normalizeEmail } from "@/lib/auth-utils";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
-import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import {
+  createSupabaseServerAuthClient,
+  getSupabaseServiceRoleClient,
+} from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
@@ -56,7 +59,7 @@ export async function PATCH(request: NextRequest) {
       return NextResponse.json({ error: "Could not update your display name." }, { status: 500 });
     }
 
-    const { error: profileError } = await supabase
+    const { error: profileError } = await getSupabaseServiceRoleClient()
       .from("profiles")
       .update({ name: displayName, updated_at: new Date().toISOString() })
       .eq("id", user.id);

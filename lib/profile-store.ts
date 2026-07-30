@@ -2,6 +2,8 @@ import "server-only";
 
 import type { SupabaseClient, User } from "@supabase/supabase-js";
 
+import { getSupabaseServiceRoleClient } from "@/lib/supabase-server";
+
 export type AppProfilePlan = "basic" | "pro" | "master";
 export type AppProfileSubscriptionStatus =
   | "inactive"
@@ -126,9 +128,14 @@ export const ensureProfileForSupabaseUser = async (
   const normalizedEmail = user.email.trim().toLowerCase();
   const normalizedName = getUserProfileName(user);
   const now = new Date().toISOString();
+  // Profile and billing rows are server-owned. The authenticated client is
+  // intentionally used only for the RLS-protected read above; every write goes
+  // through the service-role client so browser users never need write access to
+  // plan, subscription, or Stripe fields.
+  const serviceRole = getSupabaseServiceRoleClient();
 
   if (!existingProfileRow) {
-    const { data: createdProfile, error: insertError } = await supabase
+    const { data: createdProfile, error: insertError } = await serviceRole
       .from("profiles")
       .insert({
         id: user.id,
@@ -170,7 +177,7 @@ export const ensureProfileForSupabaseUser = async (
     return mapProfileRow(existingProfileRow, user);
   }
 
-  const { data: updatedProfile, error: updateError } = await supabase
+  const { data: updatedProfile, error: updateError } = await serviceRole
     .from("profiles")
     .update({
       ...updates,

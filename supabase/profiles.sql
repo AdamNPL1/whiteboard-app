@@ -53,23 +53,12 @@ to authenticated
 using (auth.uid()::text = id);
 
 drop policy if exists "profiles_insert_own" on public.profiles;
-create policy "profiles_insert_own"
-on public.profiles
-for insert
-to authenticated
-with check (auth.uid()::text = id);
-
 drop policy if exists "profiles_update_own" on public.profiles;
-create policy "profiles_update_own"
-on public.profiles
-for update
-to authenticated
-using (auth.uid()::text = id)
-with check (auth.uid()::text = id);
-
 drop policy if exists "profiles_delete_own" on public.profiles;
-create policy "profiles_delete_own"
-on public.profiles
-for delete
-to authenticated
-using (auth.uid()::text = id);
+
+-- Profiles contain server-owned billing fields (plan, subscription state, and
+-- Stripe identifiers). Authenticated browser clients may read their own row,
+-- but all inserts, updates, and deletes must go through trusted server code
+-- using the service-role client.
+revoke insert, update, delete on table public.profiles from anon, authenticated;
+grant select on table public.profiles to authenticated;
