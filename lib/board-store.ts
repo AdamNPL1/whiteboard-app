@@ -1339,7 +1339,7 @@ export const removeBoardShareForUser = async (
   const entry = await loadUserBoardCollection(client, userId, userEmail);
   getOwnedBoardOrThrow(entry, boardId);
 
-  const { error } = await client
+  const { error } = await getSupabaseServiceRoleClient()
     .from("board_shares")
     .delete()
     .eq("id", shareId)

@@ -45,6 +45,7 @@ set
   invite_expires_at = null
 from public.profiles profiles
 where shares.recipient_user_id is null
+  and shares.invite_token_hash is null
   and lower(profiles.email) = lower(shares.shared_with_email);
 
 create index if not exists board_shares_owner_user_id_idx
@@ -79,18 +80,14 @@ using (
 );
 
 drop policy if exists "board_shares_insert_owner" on public.board_shares;
-create policy "board_shares_insert_owner"
-on public.board_shares
-for insert
-to authenticated
-with check (auth.uid() = owner_user_id);
-
 drop policy if exists "board_shares_delete_owner" on public.board_shares;
-create policy "board_shares_delete_owner"
-on public.board_shares
-for delete
-to authenticated
-using (auth.uid() = owner_user_id);
+
+-- Share creation, acceptance, updates, and revocation enforce board ownership,
+-- invitation tokens, recipient email matching, and plan limits in trusted
+-- server code. Browser clients may read shares relevant to their account, but
+-- must never manufacture or mutate sharing relationships directly.
+revoke all on table public.board_shares from anon, authenticated;
+grant select on table public.board_shares to authenticated;
 
 -- Make the newly created table immediately visible to the Supabase Data API.
 notify pgrst, 'reload schema';
