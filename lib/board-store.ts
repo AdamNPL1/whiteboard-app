@@ -453,18 +453,20 @@ const loadUserBoardState = async (supabase: SupabaseClient, userId: string) => {
 };
 
 const persistActiveBoardId = async (
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   userId: string,
   activeBoardId: string
 ) => {
-  const { error } = await supabase.from("user_board_state").upsert(
-    {
-      user_id: userId,
-      active_board_id: activeBoardId || null,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" }
-  );
+  const { error } = await getSupabaseServiceRoleClient()
+    .from("user_board_state")
+    .upsert(
+      {
+        user_id: userId,
+        active_board_id: activeBoardId || null,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: "user_id" }
+    );
 
   if (error) {
     throw new Error(`SUPABASE_BOARD_STATE_WRITE_FAILED:${error.message}`);
@@ -472,7 +474,7 @@ const persistActiveBoardId = async (
 };
 
 const createBoardRecord = async (
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   userId: string,
   index: number
 ) => {
@@ -489,7 +491,7 @@ const createBoardRecord = async (
     document,
   };
 
-  const { data, error } = await supabase
+  const { data, error } = await getSupabaseServiceRoleClient()
     .from("boards")
     .insert(row)
     .select("id,user_id,name,created_at,updated_at,deleted_at,starred,document")
@@ -529,7 +531,7 @@ const loadUserBoardCollection = async (
     .map((board) => board.id);
 
   if (expiredBoardIds.length > 0) {
-    const { error } = await supabase
+    const { error } = await getSupabaseServiceRoleClient()
       .from("boards")
       .delete()
       .eq("user_id", userId)
@@ -640,7 +642,7 @@ const getOwnedBoardIncludingTrashOrThrow = (
 };
 
 const updateBoardRow = async (
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   boardId: string,
   updates: Partial<{
     name: string;
@@ -650,7 +652,10 @@ const updateBoardRow = async (
     document: BoardDocument;
   }>
 ) => {
-  const { error } = await supabase.from("boards").update(updates).eq("id", boardId);
+  const { error } = await getSupabaseServiceRoleClient()
+    .from("boards")
+    .update(updates)
+    .eq("id", boardId);
 
   if (error) {
     throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
@@ -1070,7 +1075,7 @@ export const permanentlyDeleteBoardForUser = async (
     throw new Error("BOARD_NOT_IN_TRASH");
   }
 
-  const { error } = await client
+  const { error } = await getSupabaseServiceRoleClient()
     .from("boards")
     .delete()
     .eq("id", board.id)

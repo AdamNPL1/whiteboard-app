@@ -29,4 +29,19 @@ describe("Supabase write boundaries", () => {
     expect(sql).not.toContain('create policy "board_shares_insert_owner"');
     expect(sql).not.toContain('create policy "board_shares_delete_owner"');
   });
+
+  it("keeps browser users from bypassing board limits", () => {
+    const sql = readSql("rls-policies.sql");
+
+    expect(sql).toContain(
+      "revoke all on table public.boards from anon, authenticated"
+    );
+    expect(sql).toContain(
+      "revoke all on table public.user_board_state from anon, authenticated"
+    );
+    expect(sql).toContain("create trigger enforce_board_plan_limit_trigger");
+    expect(sql).toContain("pg_advisory_xact_lock");
+    expect(sql).not.toContain('create policy "boards_insert_own"');
+    expect(sql).not.toContain('create policy "boards_update_own"');
+  });
 });
