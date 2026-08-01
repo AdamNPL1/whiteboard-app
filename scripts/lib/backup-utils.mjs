@@ -4,15 +4,28 @@ import { dirname, join, resolve } from "node:path";
 import { gunzipSync, gzipSync } from "node:zlib";
 
 export const BACKUP_FORMAT = "scriboo-encrypted-backup-v1";
-export const PAYLOAD_FORMAT = "scriboo-app-data-v1";
+export const LEGACY_PAYLOAD_FORMAT = "scriboo-app-data-v1";
+export const PAYLOAD_FORMAT = "scriboo-app-data-v2";
 export const BACKUP_DIRECTORY = resolve("backups");
 
-export const TABLES = [
+export const LEGACY_TABLES = [
   { name: "profiles", key: "id" },
   { name: "boards", key: "id" },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
 ];
+
+export const TABLES = [
+  { name: "profiles", key: "id" },
+  { name: "boards", key: "id" },
+  { name: "board_versions", key: "id" },
+  { name: "user_board_state", key: "user_id" },
+  { name: "board_shares", key: "id" },
+  { name: "stripe_webhook_events", key: "event_id" },
+];
+
+export const getTableDefinitions = (payload) =>
+  payload?.format === LEGACY_PAYLOAD_FORMAT ? LEGACY_TABLES : TABLES;
 
 const getEncryptionKey = () => {
   const encoded = process.env.BACKUP_ENCRYPTION_KEY?.trim();
@@ -118,12 +131,16 @@ export const readAllRows = async (client, table, key) => {
 };
 
 export const validatePayload = (payload) => {
-  if (payload?.format !== PAYLOAD_FORMAT) throw new Error("Invalid Scriboo backup payload.");
+  if (![PAYLOAD_FORMAT, LEGACY_PAYLOAD_FORMAT].includes(payload?.format)) {
+    throw new Error("Invalid Scriboo backup payload.");
+  }
+
+  const tableDefinitions = getTableDefinitions(payload);
 
   const boardIds = new Set((payload.tables?.boards ?? []).map((row) => row.id));
   const profileIds = new Set((payload.tables?.profiles ?? []).map((row) => row.id));
 
-  for (const { name, key } of TABLES) {
+  for (const { name, key } of tableDefinitions) {
     const rows = payload.tables?.[name];
     if (!Array.isArray(rows)) throw new Error(`Backup table ${name} is missing.`);
     const identifiers = rows.map((row) => String(row?.[key] ?? ""));
@@ -153,6 +170,22 @@ export const validatePayload = (payload) => {
       throw new Error(`Share ${share.id} references a missing board.`);
     }
   }
+  for (const version of payload.tables.board_versions ?? []) {
+    if (!boardIds.has(version.board_id)) {
+      throw new Error(`Board version ${version.id} references a missing board.`);
+    }
+  }
+
+  if (payload.format === PAYLOAD_FORMAT) {
+    const coverage = payload.manifest?.coverage;
+    if (
+      coverage?.type !== "application-data-only" ||
+      coverage?.authUsers !== false ||
+      coverage?.storageObjects !== false
+    ) {
+      throw new Error("Backup coverage manifest is missing or misleading.");
+    }
+  }
 
   return {
     profiles: payload.tables.profiles.length,
@@ -162,10 +195,15 @@ export const validatePayload = (payload) => {
       0
     ),
     sharingRelationships: payload.tables.board_shares.length,
+    boardVersions: payload.tables.board_versions?.length ?? 0,
+    processedStripeEvents: payload.tables.stripe_webhook_events?.length ?? 0,
     subscriptionMappings: payload.tables.profiles.filter(
       (profile) => profile.stripe_customer_id || profile.stripe_subscription_id
     ).length,
     orphanedBoards: orphanedBoards.length,
+    includesAuthUsers: false,
+    includesStorageObjects: false,
+    legacyFormat: payload.format === LEGACY_PAYLOAD_FORMAT,
   };
 };
 

@@ -55,6 +55,13 @@ export async function POST(request: NextRequest) {
   });
 
   if (error || !user) {
+    if (error) {
+      console.error("Supabase password login failed", {
+        message: error.message,
+        status: error.status,
+        code: error.code,
+      });
+    }
     if (
       error?.message?.toLowerCase().includes("email not confirmed") ||
       error?.message?.toLowerCase().includes("email not verified")

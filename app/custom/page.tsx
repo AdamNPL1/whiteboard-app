@@ -9592,7 +9592,10 @@ export default function Page() {
                                       ? `${plan.name} active until ${currentSubscriptionEndLabel}`
                                       : `${plan.name} active`
                                     : currentPlanRank === 0
-                                    ? t(`Subscribe — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/month`, `Subskrybuj — ${plan.prices[billingCurrency]} ${billingCurrency.toUpperCase()}/miesiąc`)
+                                    ? t(
+                                        `Subscribe to ${plan.name}`,
+                                        `Subskrybuj plan ${plan.name}`
+                                      )
                                     : plan.value === "basic"
                                     ? t("Switch to Basic", "Przejdź na Basic")
                                     : currentPlanRank < (plan.value === "master" ? 3 : 2)

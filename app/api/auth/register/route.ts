@@ -89,6 +89,11 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
+    console.error("Supabase sign-up failed", {
+      message: error.message,
+      status: error.status,
+      code: error.code,
+    });
     const errorMessage = error.message.toLowerCase();
 
     if (

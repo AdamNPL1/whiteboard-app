@@ -51,6 +51,11 @@ export async function POST(request: NextRequest) {
   });
 
   if (error) {
+    console.error("Supabase password-reset request failed", {
+      message: error.message,
+      status: error.status,
+      code: error.code,
+    });
     return NextResponse.json(
       { error: "Could not send the reset email." },
       { status: 500 }

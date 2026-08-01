@@ -38,6 +38,12 @@ const payload = {
   manifest: {
     createdAt,
     sourceSupabaseHost: projectHost(sourceUrl),
+    coverage: {
+      type: "application-data-only",
+      authUsers: false,
+      storageObjects: false,
+      excludedEphemeralTables: ["api_rate_limits"],
+    },
     tables: tableManifest,
   },
   tables,

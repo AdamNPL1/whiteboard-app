@@ -1,8 +1,8 @@
 import { createClient } from "@supabase/supabase-js";
 
 import {
-  TABLES,
   findBackupFile,
+  getTableDefinitions,
   hashRows,
   projectHost,
   readAllRows,
@@ -23,6 +23,7 @@ if (!targetUrl || !targetKey) {
 const filePath = findBackupFile(process.argv[2]);
 const { absolutePath, payload } = readBackup(filePath);
 const expectedSummary = validatePayload(payload);
+const tableDefinitions = getTableDefinitions(payload);
 if (projectHost(targetUrl) === payload.manifest.sourceSupabaseHost) {
   throw new Error("Refusing to restore into the source/production Supabase project.");
 }
@@ -33,7 +34,7 @@ const client = createClient(targetUrl, targetKey, {
 
 const alreadyRestored = new Set();
 
-for (const { name, key } of TABLES) {
+for (const { name, key } of tableDefinitions) {
   const { count, error } = await client.from(name).select("*", { count: "exact", head: true });
   if (error) throw new Error(`RESTORE_TARGET_CHECK_FAILED:${name}:${error.code || "unknown"}`);
   if ((count ?? 0) === 0) continue;
@@ -48,7 +49,7 @@ for (const { name, key } of TABLES) {
   alreadyRestored.add(name);
 }
 
-for (const { name } of TABLES) {
+for (const { name } of tableDefinitions) {
   if (alreadyRestored.has(name)) continue;
   const rows = payload.tables[name];
   for (let index = 0; index < rows.length; index += 100) {
@@ -65,7 +66,7 @@ for (const { name } of TABLES) {
   }
 }
 
-for (const { name, key } of TABLES) {
+for (const { name, key } of tableDefinitions) {
   const restoredRows = await readAllRows(client, name, key);
   if (hashRows(restoredRows, key) !== payload.manifest.tables[name].sha256) {
     throw new Error(`RESTORE_VERIFICATION_FAILED:${name}`);

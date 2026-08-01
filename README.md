@@ -99,6 +99,39 @@ For private testing while maintenance mode is enabled, set a strong
 `TESTER_ACCESS_PASSWORD` environment variable and send the trusted tester to
 `/tester-access`. Successful access is remembered in that browser for 14 days.
 
+## Backups and disaster recovery
+
+Scriboo's encrypted application backup includes profiles, boards, board
+history, board state, sharing relationships, and the Stripe webhook idempotency
+ledger. Rate-limit rows are deliberately excluded because they are temporary.
+
+This custom backup is **not a complete Supabase project backup**: Supabase Auth
+accounts/password hashes and Storage objects are managed outside the public
+application tables. Production must therefore also have Supabase managed
+database backups or another tested full-database recovery method enabled.
+
+Create `.env.backup.local` from `.env.backup.example`, keep its encryption key
+outside Git, then run:
+
+```bash
+npm run backup:create
+npm run backup:verify
+npm run backup:check
+```
+
+Copy the encrypted `.scriboo-backup` file to a separate, access-controlled
+location. A backup left only on the development laptop is not disaster
+recovery. Test restoration only against an empty non-production Supabase
+project using `.env.restore.local` and:
+
+```bash
+npm run backup:restore:test
+```
+
+Never point the restore test at production. Run a restore drill after schema
+changes and at least quarterly. For launch, schedule the application backup
+daily and alert if `npm run backup:check` reports a file older than 26 hours.
+
 3. Run the Supabase SQL in this order:
 
 - [supabase/profiles.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/profiles.sql:1)
