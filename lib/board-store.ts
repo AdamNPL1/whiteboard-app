@@ -15,7 +15,7 @@ const isValidCalendarEntryColor = (
   color: string | undefined
 ): color is string => typeof color === "string" && /^#[0-9a-fA-F]{6}$/.test(color);
 
-export type GridMode = "none" | "small" | "standard" | "large";
+export type GridMode = "none" | "dots" | "small" | "standard" | "large";
 
 export type BoardDocument = {
   elements: unknown[];
@@ -199,6 +199,7 @@ const normalizeBoardDocument = (
       ? document.customCanvasBackground
       : "#131619",
   gridMode:
+    document?.gridMode === "dots" ||
     document?.gridMode === "small" ||
     document?.gridMode === "standard" ||
     document?.gridMode === "large"
@@ -394,6 +395,22 @@ const loadBoardShareRowsForOwner = async (
     .eq("owner_user_id", userId);
 
   if (error) {
+    if (error.message.includes("recipient_user_id")) {
+      const { data: legacyData, error: legacyError } = await supabase
+        .from("board_shares")
+        .select("id,board_id,owner_user_id,shared_with_email,permission,status,invite_token_hash,invite_expires_at,accepted_at,created_at,updated_at")
+        .eq("owner_user_id", userId);
+
+      if (legacyError) {
+        throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${legacyError.message}`);
+      }
+
+      return (legacyData ?? []).map((share) => ({
+        ...share,
+        recipient_user_id: null,
+      })) as BoardShareRow[];
+    }
+
     throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${error.message}`);
   }
 
@@ -411,6 +428,13 @@ const loadBoardShareRowsForRecipient = async (
     .eq("status", "accepted");
 
   if (error) {
+    // Older installations do not have recipient-bound shares yet. Failing
+    // closed here keeps shared boards inaccessible until the secure migration
+    // is applied, while still allowing users to work with their owned boards.
+    if (error.message.includes("recipient_user_id")) {
+      return [] as BoardShareRow[];
+    }
+
     throw new Error(`SUPABASE_BOARD_SHARES_READ_FAILED:${error.message}`);
   }
 
@@ -509,6 +533,9 @@ const loadUserBoardCollection = async (
   userId: string,
   userEmail?: string
 ): Promise<UserBoardCollection> => {
+  // Kept in the internal signature while callers migrate away from the former
+  // email-based share lookup. Access is now bound to the authenticated user ID.
+  void userEmail;
   const [ownedBoardRows, boardState, ownerShareRows, recipientShareRows] =
     await Promise.all([
       loadOwnedBoardRows(supabase, userId),
@@ -650,12 +677,25 @@ const updateBoardRow = async (
     deleted_at: string | null;
     starred: boolean;
     document: BoardDocument;
-  }>
+  }>,
+  expectedUpdatedAt?: string
 ) => {
-  const { error } = await getSupabaseServiceRoleClient()
+  let query = getSupabaseServiceRoleClient()
     .from("boards")
     .update(updates)
     .eq("id", boardId);
+
+  if (expectedUpdatedAt) {
+    query = query.eq("updated_at", expectedUpdatedAt);
+    const { data, error } = await query.select("id").maybeSingle();
+    if (error) {
+      throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
+    }
+    if (!data) throw new Error("BOARD_SAVE_CONFLICT");
+    return;
+  }
+
+  const { error } = await query;
 
   if (error) {
     throw new Error(`SUPABASE_BOARD_UPDATE_FAILED:${error.message}`);
@@ -782,7 +822,7 @@ export const createBoardForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const availableBoardCount = entry.boards.filter(
     (board) => board.ownedByUser && !board.deletedAt
   ).length;
@@ -814,7 +854,7 @@ export const selectBoardForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getAccessibleBoardOrThrow(entry, boardId);
 
   await persistActiveBoardId(client, userId, board.id);
@@ -835,11 +875,12 @@ export const saveBoardForUser = async (
   plan: AppProfilePlan,
   subscriptionStatus: AppProfileSubscriptionStatus,
   boardId: string,
-  document: Partial<BoardDocument>
+  document: Partial<BoardDocument>,
+  expectedUpdatedAt?: string
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getAccessibleBoardOrThrow(entry, boardId);
   if (!board.ownedByUser && board.sharePermission !== "editor") {
     throw new Error("BOARD_FORBIDDEN");
@@ -853,14 +894,17 @@ export const saveBoardForUser = async (
       };
   const updatedAt = new Date().toISOString();
 
-  await createBoardSnapshot(board);
+  const clearsExistingBoard =
+    board.document.elements.length > 0 && documentToStore.elements.length === 0;
+  await createBoardSnapshot(board, "automatic", clearsExistingBoard);
   await updateBoardRow(
     board.ownedByUser ? client : getSupabaseServiceRoleClient(),
     board.id,
     {
     document: documentToStore,
     updated_at: updatedAt,
-    }
+    },
+    expectedUpdatedAt
   );
 
   return {
@@ -894,7 +938,7 @@ export const renameBoardForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardOrThrow(entry, boardId);
   const normalizedName = name.trim().slice(0, 40);
 
@@ -936,7 +980,7 @@ export const setBoardStarredForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardOrThrow(entry, boardId);
   const updatedAt = new Date().toISOString();
 
@@ -972,7 +1016,7 @@ export const moveBoardToTrashForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardOrThrow(entry, boardId);
   const deletedAt = new Date().toISOString();
   const nextBoards = entry.boards.map((item) =>
@@ -1018,7 +1062,7 @@ export const restoreBoardFromTrashForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardIncludingTrashOrThrow(entry, boardId);
 
   if (!board.deletedAt) {
@@ -1068,7 +1112,7 @@ export const permanentlyDeleteBoardForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardIncludingTrashOrThrow(entry, boardId);
 
   if (!board.deletedAt) {
@@ -1161,7 +1205,7 @@ export const restoreBoardVersionForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   const board = getOwnedBoardOrThrow(entry, boardId);
   const versionClient = getSupabaseServiceRoleClient();
   const { data, error } = await versionClient
@@ -1220,7 +1264,7 @@ export const getBoardSharesForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   getOwnedBoardOrThrow(entry, boardId);
 
   const shares = await loadBoardShareRowsForOwner(client, userId);
@@ -1254,7 +1298,7 @@ export const shareBoardWithUserForPlan = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   getOwnedBoardOrThrow(entry, boardId);
 
   const normalizedEmail = normalizeEmail(email);
@@ -1341,7 +1385,7 @@ export const removeBoardShareForUser = async (
 ) => {
   const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId, userEmail);
+  const entry = await loadUserBoardCollection(client, userId);
   getOwnedBoardOrThrow(entry, boardId);
 
   const { error } = await getSupabaseServiceRoleClient()

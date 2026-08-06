@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import { CallProvider } from "@/app/components/CallProvider";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
 
@@ -26,7 +27,9 @@ export default function RootLayout({
   return (
     <html lang="en" className="h-full antialiased">
       <body className="min-h-full flex flex-col">
-        <LanguageProvider>{children}</LanguageProvider>
+        <LanguageProvider>
+          <CallProvider>{children}</CallProvider>
+        </LanguageProvider>
       </body>
     </html>
   );

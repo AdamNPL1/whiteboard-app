@@ -5,6 +5,7 @@ import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { mapSupabaseUserToAppUser } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 export const runtime = "nodejs";
 
@@ -13,6 +14,7 @@ export async function POST(request: NextRequest) {
     | {
         email?: string;
         password?: string;
+        turnstileToken?: string;
       }
     | null;
   const email = normalizeEmail(body?.email ?? "");
@@ -29,6 +31,13 @@ export async function POST(request: NextRequest) {
   if (!email || !password) {
     return NextResponse.json(
       { error: "Enter your email and password." },
+      { status: 400 }
+    );
+  }
+
+  if (!(await verifyTurnstileToken(request, body?.turnstileToken))) {
+    return NextResponse.json(
+      { error: "Complete the security check and try again." },
       { status: 400 }
     );
   }

@@ -1,7 +1,8 @@
 ﻿"use client";
 
 import Link from "next/link";
-import { useEffect, useEffectEvent, useRef, useState } from "react";
+import NextImage from "next/image";
+import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import {
   Pen,
   Eraser,
@@ -47,10 +48,13 @@ import {
   Upload,
   UserRound,
   AlertTriangle,
+  Video,
   X,
 } from "lucide-react";
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
+import { useCall } from "@/app/components/CallProvider";
+import TurnstileWidget from "@/app/components/TurnstileWidget";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line";
 type StrokeTool = "pen" | "eraser";
@@ -153,12 +157,29 @@ type TextSelection = {
   end: number;
 };
 type SettingsSection = "background" | "tools" | "language" | "account";
-type GridMode = "none" | "small" | "standard" | "large";
+type GridMode = "none" | "dots" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
 type AuthMode = "login" | "register";
 type SocialAuthProvider = "google" | "apple";
-type BoardSaveState = "saved" | "dirty" | "saving" | "error" | "offline";
+const enabledSocialProviders: Array<{
+  label: string;
+  value: SocialAuthProvider;
+}> = [
+  ...(process.env.NEXT_PUBLIC_GOOGLE_AUTH_ENABLED === "true"
+    ? [{ label: "Google", value: "google" as const }]
+    : []),
+  ...(process.env.NEXT_PUBLIC_APPLE_AUTH_ENABLED === "true"
+    ? [{ label: "Apple", value: "apple" as const }]
+    : []),
+];
+type BoardSaveState =
+  | "saved"
+  | "dirty"
+  | "saving"
+  | "error"
+  | "offline"
+  | "conflict";
 type PublicAccount = {
   id: string;
   name: string;
@@ -231,6 +252,7 @@ type BoardBrowserView =
 
 export default function Page() {
   const { language, setLanguage, text: t } = useLanguage();
+  const { setBoardContext } = useCall();
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -474,6 +496,10 @@ export default function Page() {
   const [isPanning, setIsPanning] = useState(false);
   const [penCursorPoint, setPenCursorPoint] = useState<Point | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showGuestWelcome, setShowGuestWelcome] = useState(true);
+  const [showGuestFeatureShowcase, setShowGuestFeatureShowcase] = useState(false);
+  const [guestFeatureIndex, setGuestFeatureIndex] = useState(0);
+  const guestFeatureTrackRef = useRef<HTMLDivElement | null>(null);
   const [authMode, setAuthMode] = useState<AuthMode>("login");
   const [authName, setAuthName] = useState("");
   const [authEmail, setAuthEmail] = useState("");
@@ -482,6 +508,12 @@ export default function Page() {
   const [authMessage, setAuthMessage] = useState("");
   const [canResendConfirmation, setCanResendConfirmation] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
+  const [hasAcceptedLegal, setHasAcceptedLegal] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+  const handleTurnstileToken = useCallback((token: string) => {
+    setTurnstileToken(token);
+  }, []);
   const [currentAccountName, setCurrentAccountName] = useState("");
   const [currentAccountEmail, setCurrentAccountEmail] = useState("");
   const [currentAccountId, setCurrentAccountId] = useState("");
@@ -498,7 +530,9 @@ export default function Page() {
   const [currentSubscriptionCurrentPeriodEnd, setCurrentSubscriptionCurrentPeriodEnd] =
     useState<string | null>(null);
   const [currentMaxBoards, setCurrentMaxBoards] = useState(5);
+  const [boardActionMessage, setBoardActionMessage] = useState("");
   const [billingMessage, setBillingMessage] = useState("");
+  const checkoutAttemptIdsRef = useRef<Record<string, string>>({});
   const [billingMessageTone, setBillingMessageTone] = useState<
     "error" | "success"
   >("success");
@@ -569,6 +603,23 @@ export default function Page() {
   const [boardSaveState, setBoardSaveState] =
     useState<BoardSaveState>("saved");
   const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    const activeBoard = boards.find(
+      (board) => board.id === activeBoardId && !board.deletedAt
+    );
+
+    setBoardContext(
+      activeBoard ? { id: activeBoard.id, name: activeBoard.name } : null
+    );
+  }, [activeBoardId, boards, setBoardContext]);
+
+  useEffect(
+    () => () => {
+      setBoardContext(null);
+    },
+    [setBoardContext]
+  );
   const [isRegisterCtaHovered, setIsRegisterCtaHovered] = useState(false);
   const [isAuthSubmitHovered, setIsAuthSubmitHovered] = useState(false);
   const [isNewBoardButtonHovered, setIsNewBoardButtonHovered] = useState(false);
@@ -631,6 +682,7 @@ export default function Page() {
   const latestSaveAttemptRef = useRef(0);
   const hasUnsavedBoardChangesRef = useRef(false);
   const boardSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
+  const boardUpdatedAtRef = useRef<Record<string, string>>({});
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -1070,7 +1122,14 @@ export default function Page() {
           await fetch("/api/auth/register", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ name, email, password, confirmPassword }),
+            body: JSON.stringify({
+              name,
+              email,
+              password,
+              confirmPassword,
+              acceptedLegal: hasAcceptedLegal,
+              turnstileToken,
+            }),
           })
         );
 
@@ -1096,6 +1155,7 @@ export default function Page() {
         setAuthMode("login");
         setAuthMessage(data.message ?? "Check your email to confirm your account.");
         setCanResendConfirmation(true);
+        setTurnstileResetSignal((value) => value + 1);
         return;
       }
 
@@ -1103,7 +1163,7 @@ export default function Page() {
         await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email, password }),
+          body: JSON.stringify({ email, password, turnstileToken }),
         })
       );
 
@@ -1115,6 +1175,9 @@ export default function Page() {
       setAuthMessage("");
       setShowLoginModal(false);
     } catch (error) {
+      if (authMode === "register") {
+        setTurnstileResetSignal((value) => value + 1);
+      }
       const message =
         error instanceof Error ? error.message : "Something went wrong.";
       if (
@@ -1130,6 +1193,7 @@ export default function Page() {
       }
       setAuthMessage(message);
     } finally {
+      setTurnstileResetSignal((value) => value + 1);
       setIsAuthSubmitting(false);
     }
   };
@@ -1145,7 +1209,10 @@ export default function Page() {
         await fetch("/api/auth/resend", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: authEmail.trim().toLowerCase() }),
+          body: JSON.stringify({
+            email: authEmail.trim().toLowerCase(),
+            turnstileToken,
+          }),
         })
       );
 
@@ -1158,6 +1225,7 @@ export default function Page() {
           : "Could not resend the confirmation email."
       );
     } finally {
+      setTurnstileResetSignal((value) => value + 1);
       setIsAuthSubmitting(false);
     }
   };
@@ -1401,7 +1469,10 @@ export default function Page() {
           await fetch(`/api/boards/${boardId}`, {
             method: "PUT",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(documentSnapshot),
+            body: JSON.stringify({
+              ...documentSnapshot,
+              expectedUpdatedAt: boardUpdatedAtRef.current[boardId],
+            }),
           })
         );
 
@@ -1410,6 +1481,7 @@ export default function Page() {
             updatedAt: string;
           };
           const savedUpdatedAt: string = savedBoard.updatedAt;
+          boardUpdatedAtRef.current[boardId] = savedUpdatedAt;
 
           setBoards((previousBoards) =>
             previousBoards.map<BoardSummary>((board) =>
@@ -1452,7 +1524,10 @@ export default function Page() {
           (error instanceof Error && error.message === "OFFLINE") ||
           (typeof navigator !== "undefined" && !navigator.onLine);
         if (offline) setIsOnline(false);
-        setBoardSaveState(offline ? "offline" : "error");
+        const conflict =
+          error instanceof Error &&
+          error.message.includes("changed in another window or by another editor");
+        setBoardSaveState(conflict ? "conflict" : offline ? "offline" : "error");
       }
       throw error;
     }
@@ -1476,7 +1551,7 @@ export default function Page() {
         await fetch("/api/auth/forgot-password", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email }),
+          body: JSON.stringify({ email, turnstileToken }),
         })
       );
 
@@ -1490,6 +1565,7 @@ export default function Page() {
           : "Could not send the reset email."
       );
     } finally {
+      setTurnstileResetSignal((value) => value + 1);
       setIsAuthSubmitting(false);
     }
   };
@@ -1569,9 +1645,31 @@ export default function Page() {
   };
 
   const createBoard = async () => {
-    if (!currentAccountId || liveBoardsCount >= currentMaxBoards || isBoardsLoading)
+    if (!currentAccountId) {
+      setBoardActionMessage(
+        t("Log in to create a board.", "Zaloguj się, aby utworzyć tablicę.")
+      );
       return;
+    }
 
+    if (liveBoardsCount >= currentMaxBoards) {
+      setBoardActionMessage(
+        t(
+          `Your ${currentPlanLabel} plan allows up to ${currentMaxBoards} boards.`,
+          `Twój plan ${currentPlanLabel} pozwala utworzyć maksymalnie ${currentMaxBoards} tablic.`
+        )
+      );
+      return;
+    }
+
+    if (isBoardsLoading) {
+      setBoardActionMessage(
+        t("Boards are still loading. Try again in a moment.", "Tablice nadal się ładują. Spróbuj ponownie za chwilę.")
+      );
+      return;
+    }
+
+    setBoardActionMessage("");
     setIsBoardsLoading(true);
 
     try {
@@ -1604,7 +1702,7 @@ export default function Page() {
         setEditingBoardName(data.board.name);
       }
     } catch (error) {
-      setAuthMessage(
+      setBoardActionMessage(
         error instanceof Error ? error.message : "Could not create a new board."
       );
     } finally {
@@ -1966,28 +2064,42 @@ export default function Page() {
 
     if (documentToExport.gridMode !== "none" && documentToExport.gridOpacity > 0) {
       const spacing =
-        documentToExport.gridMode === "small"
+        documentToExport.gridMode === "dots"
+          ? 48
+          : documentToExport.gridMode === "small"
           ? 24
           : documentToExport.gridMode === "large"
           ? 72
           : 40;
       const lightGrid = background === darkCanvasColor || background === greyCanvasColor;
-      context.beginPath();
-      context.lineWidth = 1;
-      context.strokeStyle = lightGrid
+      const exportGridColor = lightGrid
         ? `rgba(255,255,255,${documentToExport.gridOpacity / 100})`
         : `rgba(15,23,42,${documentToExport.gridOpacity / 100})`;
       const startX = Math.floor(contentBounds.x / spacing) * spacing;
       const startY = Math.floor(contentBounds.y / spacing) * spacing;
-      for (let x = startX; x <= contentBounds.x + contentBounds.width; x += spacing) {
-        context.moveTo(x, contentBounds.y);
-        context.lineTo(x, contentBounds.y + contentBounds.height);
+      if (documentToExport.gridMode === "dots") {
+        context.fillStyle = exportGridColor;
+        for (let x = startX; x <= contentBounds.x + contentBounds.width; x += spacing) {
+          for (let y = startY; y <= contentBounds.y + contentBounds.height; y += spacing) {
+            context.beginPath();
+            context.arc(x, y, 1.7, 0, Math.PI * 2);
+            context.fill();
+          }
+        }
+      } else {
+        context.beginPath();
+        context.lineWidth = 1;
+        context.strokeStyle = exportGridColor;
+        for (let x = startX; x <= contentBounds.x + contentBounds.width; x += spacing) {
+          context.moveTo(x, contentBounds.y);
+          context.lineTo(x, contentBounds.y + contentBounds.height);
+        }
+        for (let y = startY; y <= contentBounds.y + contentBounds.height; y += spacing) {
+          context.moveTo(contentBounds.x, y);
+          context.lineTo(contentBounds.x + contentBounds.width, y);
+        }
+        context.stroke();
       }
-      for (let y = startY; y <= contentBounds.y + contentBounds.height; y += spacing) {
-        context.moveTo(contentBounds.x, y);
-        context.lineTo(contentBounds.x + contentBounds.width, y);
-      }
-      context.stroke();
     }
 
     documentToExport.elements.forEach((element) => {
@@ -2340,7 +2452,22 @@ export default function Page() {
       }
 
       if (data.share) {
-        setBoardShares((previous) => [...previous, data.share as BoardShareSummary]);
+        const nextShare = data.share as BoardShareSummary;
+        setBoardShares((previous) => {
+          const existingIndex = previous.findIndex(
+            (share) =>
+              share.id === nextShare.id ||
+              share.email.toLowerCase() === nextShare.email.toLowerCase()
+          );
+
+          if (existingIndex === -1) {
+            return [...previous, nextShare];
+          }
+
+          return previous.map((share, index) =>
+            index === existingIndex ? nextShare : share
+          );
+        });
       }
       if (typeof data.shareLimit === "number") {
         setShareLimit(data.shareLimit);
@@ -2630,6 +2757,10 @@ export default function Page() {
     targetPlan: "basic" | "pro" | "master",
     confirmSubscriptionChange = false
   ): Promise<void> => {
+    const attemptKey = `${targetPlan}:${billingCurrency}`;
+    const attemptId =
+      checkoutAttemptIdsRef.current[attemptKey] ?? crypto.randomUUID();
+    checkoutAttemptIdsRef.current[attemptKey] = attemptId;
     const response = await fetch("/api/billing/checkout", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -2637,6 +2768,7 @@ export default function Page() {
         targetPlan,
         targetCurrency: billingCurrency,
         confirmSubscriptionChange,
+        attemptId,
       }),
     });
     const data = (await response.json().catch(() => ({}))) as {
@@ -2709,6 +2841,7 @@ export default function Page() {
       return;
     }
 
+    delete checkoutAttemptIdsRef.current[attemptKey];
     applyBillingCheckoutResponse(data);
   };
 
@@ -4591,7 +4724,13 @@ export default function Page() {
     if (gridMode === "none" || gridOpacity <= 0) return;
 
     const gridSpacing =
-      gridMode === "small" ? 24 : gridMode === "large" ? 72 : 40;
+      gridMode === "dots"
+        ? 48
+        : gridMode === "small"
+        ? 24
+        : gridMode === "large"
+        ? 72
+        : 40;
     const gridVisibleLeft = -offset.x / zoom;
     const gridVisibleTop = -offset.y / zoom;
     const gridVisibleRight = (width - offset.x) / zoom;
@@ -4608,6 +4747,21 @@ export default function Page() {
     ctx.save();
     ctx.translate(offset.x, offset.y);
     ctx.scale(zoom, zoom);
+
+    if (gridMode === "dots") {
+      ctx.fillStyle = gridColor;
+      const dotRadius = 1.7 / Math.max(zoom, 0.35);
+      for (let x = gridStartX; x <= gridVisibleRight; x += gridSpacing) {
+        for (let y = gridStartY; y <= gridVisibleBottom; y += gridSpacing) {
+          ctx.beginPath();
+          ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+          ctx.fill();
+        }
+      }
+      ctx.restore();
+      return;
+    }
+
     ctx.beginPath();
     ctx.lineWidth = 1 / zoom;
     ctx.strokeStyle = gridColor;
@@ -4837,6 +4991,12 @@ export default function Page() {
     if (!currentAccountId) return;
     loadBoardsEffect();
   }, [currentAccountId]);
+
+  useEffect(() => {
+    for (const board of boards) {
+      if (board.updatedAt) boardUpdatedAtRef.current[board.id] = board.updatedAt;
+    }
+  }, [boards]);
 
   useEffect(() => {
     if (!isCalendarBrowserVisible) return;
@@ -5941,6 +6101,15 @@ export default function Page() {
   };
 
   const clearCanvas = () => {
+    if (elements.length === 0) return;
+    const confirmed = window.confirm(
+      t(
+        "Clear every object from this board? Scriboo will preserve the previous board in version history before the cleared board is stored.",
+        "Usunąć wszystkie obiekty z tej tablicy? Scriboo zachowa poprzednią tablicę w historii wersji przed zapisaniem pustej tablicy."
+      )
+    );
+    if (!confirmed) return;
+
     setElements([]);
     setActiveText(null);
     setSelectedImageIndex(null);
@@ -6298,6 +6467,55 @@ export default function Page() {
         (activeText.height - textPaddingY * 2 - activeTextContentHeight) / 2
       )
     : textPaddingY;
+
+  const guestFeatures = [
+    {
+      key: "video",
+      title: t("Video calls", "Rozmowy wideo"),
+      eyebrow: t("Meet without leaving the board", "Spotkajcie się bez opuszczania tablicy"),
+      description: t(
+        "Clear one-to-one conversations beside the work you are creating together.",
+        "Wyraźne rozmowy jeden na jeden obok pracy, którą tworzycie razem."
+      ),
+      accent: "linear-gradient(145deg, #252ea8 0%, #4e6ff0 48%, #6bc8be 100%)",
+    },
+    {
+      key: "calendar",
+      title: t("Calendar", "Kalendarz"),
+      eyebrow: t("Keep every session in view", "Miej każde spotkanie pod kontrolą"),
+      description: t(
+        "Plan lessons, sessions, and follow-ups in one calm, organized place.",
+        "Planuj lekcje, spotkania i kolejne kroki w jednym uporządkowanym miejscu."
+      ),
+      accent: "linear-gradient(145deg, #5e35d9 0%, #547ee8 48%, #55c49a 100%)",
+    },
+    {
+      key: "whiteboard",
+      title: t("Whiteboard", "Tablica"),
+      eyebrow: t("Think visually, together", "Myślcie wizualnie, razem"),
+      description: t(
+        "Draw, explain, import materials, and return to every shared idea later.",
+        "Rysuj, tłumacz, dodawaj materiały i wracaj później do wspólnych pomysłów."
+      ),
+      accent: "linear-gradient(145deg, #7138e5 0%, #4d86eb 52%, #55caaa 100%)",
+    },
+  ] as const;
+
+  const guestShowcasePageCount = 3;
+
+  const scrollGuestFeatures = (nextIndex: number) => {
+    const normalizedIndex =
+      (nextIndex + guestShowcasePageCount) % guestShowcasePageCount;
+    setGuestFeatureIndex(normalizedIndex);
+    const track = guestFeatureTrackRef.current;
+    const page = track?.querySelector<HTMLElement>("[data-scriboo-feature-page]");
+    if (!track || !page) return;
+    const gap = 18;
+    track.scrollTo({
+      left: normalizedIndex * (page.offsetWidth + gap),
+      behavior: "smooth",
+    });
+  };
 
   return (
     <div
@@ -7812,16 +8030,13 @@ export default function Page() {
 
             <div
               style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
+                display: enabledSocialProviders.length ? "grid" : "none",
+                gridTemplateColumns: `repeat(${enabledSocialProviders.length}, minmax(0, 1fr))`,
                 gap: "10px",
                 marginBottom: "14px",
               }}
             >
-              {[
-                { label: "Google", value: "google" as const },
-                { label: "Apple", value: "apple" as const },
-              ].map((provider) => (
+              {enabledSocialProviders.map((provider) => (
                 <button
                   key={provider.value}
                   type="button"
@@ -7848,7 +8063,7 @@ export default function Page() {
 
             <div
               style={{
-                display: "flex",
+                display: enabledSocialProviders.length ? "flex" : "none",
                 alignItems: "center",
                 gap: "10px",
                 margin: "14px 0 16px",
@@ -8063,6 +8278,40 @@ export default function Page() {
               </label>
             )}
 
+            {authMode === "register" && (
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "flex-start",
+                  gap: "9px",
+                  marginBottom: "14px",
+                  color: "#475569",
+                  fontSize: "12px",
+                  lineHeight: 1.5,
+                  fontWeight: 650,
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={hasAcceptedLegal}
+                  onChange={(event) =>
+                    setHasAcceptedLegal(event.currentTarget.checked)
+                  }
+                  required
+                  style={{ accentColor: "#7c3aed", marginTop: 2 }}
+                />
+                <span>
+                  {t("I accept the", "Akceptuję")} <Link href="/terms">{t("Terms of Service", "Regulamin")}</Link>{" "}
+                  {t("and confirm that I have read the", "i potwierdzam zapoznanie się z")} <Link href="/privacy">{t("Privacy Policy", "Polityką prywatności")}</Link>.
+                </span>
+              </label>
+            )}
+
+            <TurnstileWidget
+              onTokenChange={handleTurnstileToken}
+              resetSignal={turnstileResetSignal}
+            />
+
             <div
               style={{
                 display: authMode === "login" ? "flex" : "none",
@@ -8232,6 +8481,542 @@ export default function Page() {
         </div>
       )}
 
+      {!currentAccountId && showGuestWelcome && !showLoginModal && (
+        <aside
+          className="scriboo-guest-welcome"
+          aria-label={t("Welcome to Scriboo", "Witamy w Scriboo")}
+          onPointerEnter={hidePenCursor}
+          onPointerMove={hidePenCursor}
+          style={{
+            position: "fixed",
+            right: "22px",
+            bottom: "22px",
+            width: "min(350px, calc(100vw - 32px))",
+            padding: "20px",
+            borderRadius: "24px",
+            background:
+              "linear-gradient(145deg, rgba(255,255,255,0.98) 0%, rgba(248,250,255,0.97) 62%, rgba(239,253,248,0.96) 100%)",
+            border: "1px solid rgba(203,213,225,0.78)",
+            boxShadow:
+              "0 26px 70px rgba(40,52,105,0.18), 0 1px 0 rgba(255,255,255,0.9) inset",
+            color: "#0f172a",
+            zIndex: 48,
+            overflow: "hidden",
+          }}
+        >
+          <div
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              width: "180px",
+              height: "180px",
+              right: "-82px",
+              top: "-96px",
+              borderRadius: "50%",
+              background:
+                "linear-gradient(135deg, rgba(124,58,237,0.2), rgba(59,130,246,0.18), rgba(52,211,153,0.18))",
+              filter: "blur(4px)",
+              pointerEvents: "none",
+            }}
+          />
+
+          <button
+            type="button"
+            aria-label={t("Close welcome message", "Zamknij wiadomość powitalną")}
+            onClick={() => setShowGuestWelcome(false)}
+            style={{
+              position: "absolute",
+              top: "14px",
+              right: "14px",
+              width: "30px",
+              height: "30px",
+              borderRadius: "10px",
+              border: "1px solid rgba(203,213,225,0.72)",
+              background: "rgba(255,255,255,0.72)",
+              color: "#475569",
+              display: "grid",
+              placeItems: "center",
+              padding: 0,
+              cursor: "pointer",
+              zIndex: 1,
+            }}
+          >
+            <X size={15} />
+          </button>
+
+          <div
+            style={{
+              position: "relative",
+              display: "flex",
+              alignItems: "center",
+              gap: "12px",
+              paddingRight: "38px",
+            }}
+          >
+            <div
+              style={{
+                width: "44px",
+                height: "44px",
+                flex: "0 0 auto",
+                borderRadius: "14px",
+                overflow: "hidden",
+                background: "#f5f3ff",
+                boxShadow: "0 9px 24px rgba(76,73,177,0.16)",
+              }}
+            >
+              <NextImage
+                src="/icon.png"
+                alt=""
+                width={1024}
+                height={1024}
+                priority
+                style={{ width: "100%", height: "100%", objectFit: "cover" }}
+              />
+            </div>
+            <div>
+              <div
+                style={{
+                  color: "#64748b",
+                  fontSize: "11px",
+                  fontWeight: 700,
+                  letterSpacing: "0.1em",
+                  textTransform: "uppercase",
+                }}
+              >
+                {t("Welcome to", "Witamy w")}
+              </div>
+              <div
+                style={{
+                  position: "relative",
+                  width: "142px",
+                  height: "31px",
+                  marginTop: "1px",
+                  overflow: "hidden",
+                }}
+              >
+                <NextImage
+                  src="/scriboo-wordmark-transparent.png"
+                  alt="Scriboo"
+                  width={1992}
+                  height={1024}
+                  priority
+                  draggable={false}
+                  style={{
+                    position: "absolute",
+                    width: "144px",
+                    height: "auto",
+                    left: "-1px",
+                    top: "-11px",
+                    display: "block",
+                    userSelect: "none",
+                  }}
+                />
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              marginTop: "17px",
+              fontSize: "15px",
+              lineHeight: 1.48,
+              fontWeight: 400,
+              color: "#334155",
+            }}
+          >
+            {t(
+              "Bring your ideas together, shape them on a shared canvas, and build alongside people who inspire you.",
+              "Połącz swoje pomysły, rozwijaj je na wspólnej tablicy i twórz razem z ludźmi, którzy Cię inspirują."
+            )}
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              marginTop: "14px",
+              display: "flex",
+              alignItems: "center",
+              gap: "8px",
+              color: "#5b6478",
+              fontSize: "12px",
+              fontWeight: 700,
+            }}
+          >
+            <Star size={14} color="#7c3aed" />
+            {t(
+              "A welcoming workspace for ideas made together.",
+              "Przyjazna przestrzeń dla pomysłów tworzonych razem."
+            )}
+          </div>
+
+          <div
+            style={{
+              position: "relative",
+              marginTop: "18px",
+              display: "grid",
+              gridTemplateColumns: "1fr auto",
+              gap: "10px",
+            }}
+          >
+            <button
+              type="button"
+              onClick={() => {
+                setShowGuestWelcome(false);
+                openAuthModal("register");
+              }}
+              style={{
+                minHeight: "42px",
+                padding: "0 17px",
+                borderRadius: "13px",
+                border: "none",
+                background:
+                  "linear-gradient(100deg, #783de8 0%, #557ce9 54%, #54bba0 100%)",
+                color: "#ffffff",
+                fontSize: "14px",
+                fontWeight: 700,
+                cursor: "pointer",
+                boxShadow: "0 11px 25px rgba(84,91,210,0.2)",
+              }}
+            >
+              {t("Join the community", "Dołącz do społeczności")}
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setShowGuestWelcome(false);
+                setShowGuestFeatureShowcase(true);
+              }}
+              style={{
+                minHeight: "42px",
+                padding: "0 13px",
+                borderRadius: "13px",
+                border: "1px solid rgba(203,213,225,0.82)",
+                background: "rgba(255,255,255,0.76)",
+                color: "#475569",
+                fontSize: "13px",
+                fontWeight: 700,
+                cursor: "pointer",
+              }}
+            >
+              {t("Explore", "Odkrywaj")}
+            </button>
+          </div>
+        </aside>
+      )}
+
+      {!currentAccountId && !showLoginModal && !showGuestFeatureShowcase && (
+        <button
+          type="button"
+          className="scriboo-discover-rail"
+          aria-label={t("Discover Scriboo features", "Poznaj funkcje Scriboo")}
+          onClick={() => {
+            setShowGuestWelcome(false);
+            setShowGuestFeatureShowcase(true);
+          }}
+          onPointerEnter={hidePenCursor}
+          onPointerMove={hidePenCursor}
+        >
+          <span>{t("Discover", "Odkrywaj")}</span>
+          <ChevronLeft size={17} strokeWidth={2.4} />
+        </button>
+      )}
+
+      {!currentAccountId && showGuestFeatureShowcase && !showLoginModal && (
+        <section
+          className="scriboo-feature-showcase"
+          aria-label={t("Discover Scriboo", "Poznaj Scriboo")}
+          onPointerEnter={hidePenCursor}
+          onPointerMove={hidePenCursor}
+        >
+          <div className="scriboo-feature-showcase__glow" aria-hidden="true" />
+          <header className="scriboo-feature-showcase__header">
+            <div>
+              <div className="scriboo-feature-showcase__eyebrow">
+                {t("Everything works together", "Wszystko działa razem")}
+              </div>
+              <h2>{t("One workspace. Every session.", "Jedna przestrzeń. Każde spotkanie.")}</h2>
+              <p>
+                {t(
+                  "Move between conversation, planning, and creation without breaking your flow.",
+                  "Przechodź między rozmową, planowaniem i tworzeniem bez przerywania pracy."
+                )}
+              </p>
+            </div>
+            <button
+              type="button"
+              className="scriboo-feature-showcase__close"
+              aria-label={t("Close feature showcase", "Zamknij prezentację funkcji")}
+              onClick={() => setShowGuestFeatureShowcase(false)}
+            >
+              <X size={19} />
+            </button>
+          </header>
+
+          <div
+            ref={guestFeatureTrackRef}
+            className="scriboo-feature-showcase__track"
+            onScroll={(event) => {
+              const track = event.currentTarget;
+              const page = track.querySelector<HTMLElement>("[data-scriboo-feature-page]");
+              if (!page) return;
+              const nextIndex = Math.round(track.scrollLeft / (page.offsetWidth + 18));
+              setGuestFeatureIndex(Math.max(0, Math.min(guestShowcasePageCount - 1, nextIndex)));
+            }}
+          >
+            <div data-scriboo-feature-page className="scriboo-feature-page">
+              <div className="scriboo-feature-page__cards">
+              {guestFeatures.map((feature) => (
+              <article
+                key={feature.key}
+                data-scriboo-feature-card
+                className="scriboo-feature-card"
+                style={{
+                  backgroundImage: feature.accent,
+                  backgroundSize: "185% 185%",
+                  backgroundPosition: "0% 50%",
+                }}
+              >
+                <span
+                  className="scriboo-feature-card__gradient-wave"
+                  aria-hidden="true"
+                  style={{ backgroundImage: feature.accent }}
+                />
+
+                <div className="scriboo-feature-card__topline">
+                  <span className="scriboo-feature-card__icon">
+                    {feature.key === "video" ? (
+                      <Video size={18} fill="currentColor" />
+                    ) : feature.key === "calendar" ? (
+                      <CalendarDays size={18} />
+                    ) : (
+                      <Pen size={18} />
+                    )}
+                  </span>
+                  <span>{feature.title}</span>
+                </div>
+
+                <div className={`scriboo-feature-visual scriboo-feature-visual--${feature.key}`}>
+                  {feature.key === "video" && (
+                    <>
+                      <div className="scriboo-video-person scriboo-video-person--primary">
+                        <UserRound size={48} />
+                        <span>{t("You", "Ty")}</span>
+                      </div>
+                      <div className="scriboo-video-person scriboo-video-person--secondary">
+                        <UserRound size={33} />
+                        <span>{t("Guest", "Gość")}</span>
+                      </div>
+                      <div className="scriboo-video-controls">
+                        <span><Video size={15} /></span>
+                        <span><UserRound size={15} /></span>
+                        <span><Share2 size={15} /></span>
+                      </div>
+                    </>
+                  )}
+                  {feature.key === "calendar" && (
+                    <>
+                      <div className="scriboo-calendar-heading">
+                        <div>
+                          <small>{t("Your week", "Twój tydzień")}</small>
+                          <strong>{t("Sessions", "Spotkania")}</strong>
+                        </div>
+                        <CalendarDays size={23} />
+                      </div>
+                      <div className="scriboo-calendar-grid">
+                        {["09", "10", "11", "12", "13", "14", "15"].map((day, dayIndex) => (
+                          <span key={day} className={dayIndex === 3 ? "is-active" : ""}>
+                            <small>{["M", "T", "W", "T", "F", "S", "S"][dayIndex]}</small>
+                            {day}
+                          </span>
+                        ))}
+                      </div>
+                      <div className="scriboo-calendar-event">
+                        <Clock3 size={15} />
+                        <div>
+                          <strong>{t("Creative session", "Sesja kreatywna")}</strong>
+                          <small>14:00–15:30</small>
+                        </div>
+                      </div>
+                    </>
+                  )}
+                  {feature.key === "whiteboard" && (
+                    <>
+                      <div className="scriboo-board-toolbar">
+                        <Pen size={15} />
+                        <Type size={15} />
+                        <Shapes size={15} />
+                        <Upload size={15} />
+                      </div>
+                      <div className="scriboo-board-note scriboo-board-note--one">
+                        {t("Explain", "Tłumacz")}
+                      </div>
+                      <div className="scriboo-board-note scriboo-board-note--two">
+                        {t("Create", "Twórz")}
+                      </div>
+                      <svg className="scriboo-board-line" viewBox="0 0 260 130" aria-hidden="true">
+                        <path d="M15 95 C55 15, 105 120, 155 48 S225 22, 248 78" />
+                        <circle cx="155" cy="48" r="7" />
+                      </svg>
+                    </>
+                  )}
+                </div>
+
+                <div className="scriboo-feature-card__copy">
+                  <small>{feature.eyebrow}</small>
+                  <p>{feature.description}</p>
+                </div>
+              </article>
+              ))}
+              </div>
+            </div>
+
+            <div data-scriboo-feature-page className="scriboo-feature-page">
+              <div className="scriboo-workflow-page">
+                <div className="scriboo-workflow-page__intro">
+                  <small>{t("A simple rhythm", "Prosty rytm pracy")}</small>
+                  <h3>{t("From preparation to progress.", "Od przygotowania do postępów.")}</h3>
+                  <p>
+                    {t(
+                      "Keep every part of a session connected, before, during, and after you meet.",
+                      "Połącz każdy etap spotkania — przed, w trakcie i po jego zakończeniu."
+                    )}
+                  </p>
+                </div>
+                <div className="scriboo-workflow-page__steps">
+                  {[
+                    {
+                      number: "01",
+                      icon: <CalendarDays size={25} />,
+                      title: t("Prepare", "Przygotuj"),
+                      copy: t("Plan the session and gather everything in one board.", "Zaplanuj spotkanie i zbierz wszystko na jednej tablicy."),
+                    },
+                    {
+                      number: "02",
+                      icon: <Video size={25} />,
+                      title: t("Work together", "Pracujcie razem"),
+                      copy: t("Talk, explain, and create without leaving the workspace.", "Rozmawiaj, tłumacz i twórz bez opuszczania przestrzeni."),
+                    },
+                    {
+                      number: "03",
+                      icon: <History size={25} />,
+                      title: t("Continue", "Kontynuuj"),
+                      copy: t("Return to the board and continue exactly where you stopped.", "Wróć do tablicy i kontynuuj dokładnie od tego miejsca."),
+                    },
+                  ].map((step) => (
+                    <article key={step.number}>
+                      <span className="scriboo-workflow-page__number">{step.number}</span>
+                      <span className="scriboo-workflow-page__icon">{step.icon}</span>
+                      <h4>{step.title}</h4>
+                      <p>{step.copy}</p>
+                    </article>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            <div data-scriboo-feature-page className="scriboo-feature-page">
+              <div className="scriboo-feature-page__cards scriboo-feature-page__cards--pricing">
+                {[
+                  {
+                    name: "Basic",
+                    price: "29.99",
+                    features: [
+                      t("Up to 5 boards", "Do 5 tablic"),
+                      t("Share with up to 1 person", "Udostępnianie 1 osobie"),
+                    ],
+                    button: t("Choose Basic", "Wybierz Basic"),
+                    tone: "basic",
+                  },
+                  {
+                    name: "Pro",
+                    price: "49.99",
+                    features: [
+                      t("Unlimited boards", "Nielimitowane tablice"),
+                      t("Share with up to 3 people", "Udostępnianie 3 osobom"),
+                      t("Calendar planning", "Planowanie w kalendarzu"),
+                    ],
+                    button: t("Choose Pro", "Wybierz Pro"),
+                    badge: t("Most popular", "Najpopularniejszy"),
+                    tone: "pro",
+                  },
+                  {
+                    name: "Master",
+                    price: "79.99",
+                    features: [
+                      t("Unlimited boards", "Nielimitowane tablice"),
+                      t("Share with up to 10 people", "Udostępnianie 10 osobom"),
+                      t("Full premium experience", "Pełne doświadczenie premium"),
+                    ],
+                    button: t("Choose Master", "Wybierz Master"),
+                    tone: "master",
+                  },
+                ].map((plan) => (
+                  <article
+                    key={plan.name}
+                    className={`scriboo-showcase-plan scriboo-showcase-plan--${plan.tone}`}
+                  >
+                    <div className="scriboo-showcase-plan__heading">
+                      <h3>{plan.name}</h3>
+                      {plan.badge && <span>{plan.badge}</span>}
+                    </div>
+                    <div className="scriboo-showcase-plan__price">
+                      <strong>{plan.price}</strong>
+                      <span>PLN / {t("month", "miesiąc")}</span>
+                    </div>
+                    <ul>
+                      {plan.features.map((item) => (
+                        <li key={item}><Check size={15} /> <span>{item}</span></li>
+                      ))}
+                    </ul>
+                    <button
+                      type="button"
+                      onClick={() => openAuthModal("register")}
+                    >
+                      {plan.button}
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          <footer className="scriboo-feature-showcase__footer">
+            <button
+              type="button"
+              aria-label={t("Previous feature", "Poprzednia funkcja")}
+              onClick={() => scrollGuestFeatures(guestFeatureIndex - 1)}
+            >
+              <ChevronLeft size={21} />
+            </button>
+            <div className="scriboo-feature-showcase__dots" aria-label={t("Feature pages", "Strony funkcji") }>
+              {Array.from({ length: guestShowcasePageCount }, (_, index) => (
+                <button
+                  type="button"
+                  key={index}
+                  className={index === guestFeatureIndex ? "is-active" : ""}
+                  aria-label={
+                    index === 0
+                      ? t("Show features", "Pokaż funkcje")
+                      : index === 1
+                      ? t("Show how Scriboo works", "Pokaż, jak działa Scriboo")
+                      : t("Show plans and pricing", "Pokaż plany i ceny")
+                  }
+                  onClick={() => scrollGuestFeatures(index)}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              aria-label={t("Next feature", "Następna funkcja")}
+              onClick={() => scrollGuestFeatures(guestFeatureIndex + 1)}
+            >
+              <ChevronRight size={21} />
+            </button>
+          </footer>
+        </section>
+      )}
+
       <div
         onPointerEnter={hidePenCursor}
         onPointerMove={hidePenCursor}
@@ -8249,6 +9034,41 @@ export default function Page() {
           MozOsxFontSmoothing: "grayscale",
         }}
       >
+        {!currentAccountId && (
+          <div
+            aria-label="Scriboo"
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "18px",
+              transform: "translateY(-50%)",
+              width: "148px",
+              height: "38px",
+              overflow: "hidden",
+              filter: "drop-shadow(0 2px 6px rgba(35,35,105,0.14))",
+              pointerEvents: "none",
+            }}
+          >
+            <NextImage
+              src="/scriboo-wordmark-white.png"
+              alt="Scriboo"
+              width={1992}
+              height={1024}
+              priority
+              draggable={false}
+              style={{
+                position: "absolute",
+                width: "150px",
+                height: "auto",
+                left: "-1px",
+                top: "-11px",
+                display: "block",
+                userSelect: "none",
+              }}
+            />
+          </div>
+        )}
+
         <button
           aria-label={t("Settings", "Ustawienia")}
           onClick={() => {
@@ -8269,7 +9089,7 @@ export default function Page() {
             border: "none",
             background: "transparent",
             color: "#ffffff",
-            display: "grid",
+            display: currentAccountId ? "grid" : "none",
             placeItems: "center",
             cursor: "pointer",
             padding: 0,
@@ -8285,6 +9105,7 @@ export default function Page() {
             top: "50%",
             left: "64px",
             transform: "translateY(-50%)",
+            display: currentAccountId ? "block" : "none",
           }}
         >
             <button
@@ -8392,7 +9213,6 @@ export default function Page() {
                     <button
                       aria-label={t("Create board", "Utwórz tablicę")}
                       onClick={createBoard}
-                      disabled={isBoardsLoading || liveBoardsCount >= currentMaxBoards}
                       onMouseEnter={() => {
                         if (!isBoardsLoading && liveBoardsCount < currentMaxBoards) {
                           setIsNewBoardButtonHovered(true);
@@ -8461,6 +9281,25 @@ export default function Page() {
                     <Plus size={17} />
                         {t("New board", "Nowa tablica")}
                   </button>
+
+                  {boardActionMessage && (
+                    <div
+                      role="alert"
+                      style={{
+                        marginTop: "8px",
+                        padding: "9px 11px",
+                        borderRadius: "10px",
+                        border: "1px solid rgba(220,38,38,0.16)",
+                        background: "rgba(254,226,226,0.72)",
+                        color: "#b91c1c",
+                        fontSize: "12px",
+                        fontWeight: 650,
+                        lineHeight: 1.35,
+                      }}
+                    >
+                      {boardActionMessage}
+                    </div>
+                  )}
 
                   <div style={{ display: "grid", gap: "8px", alignContent: "start" }}>
                     {[
@@ -10649,9 +11488,7 @@ export default function Page() {
                               ) : (
                                 <div
                                   style={{
-                                    display: "flex",
-                                    alignItems: "flex-start",
-                                    justifyContent: "space-between",
+                                    display: "grid",
                                     gap: "10px",
                                   }}
                                 >
@@ -10674,14 +11511,24 @@ export default function Page() {
                                       style={{
                                         padding: 0,
                                         border: "none",
-                                      background: "transparent",
-                                      color: "#0f172a",
-                                      fontSize: "19px",
-                                      fontWeight: 780,
-                                      fontFamily: appSansFontFamily,
-                                      lineHeight: 1.15,
-                                      textAlign: "left",
-                                      cursor:
+                                        minWidth: 0,
+                                        width: "100%",
+                                        maxWidth: "100%",
+                                        background: "transparent",
+                                        color: "#0f172a",
+                                        fontSize:
+                                          board.name.length > 28
+                                            ? "15px"
+                                            : board.name.length > 18
+                                              ? "17px"
+                                              : "19px",
+                                        fontWeight: 780,
+                                        fontFamily: appSansFontFamily,
+                                        lineHeight: 1.15,
+                                        textAlign: "left",
+                                        overflowWrap: "anywhere",
+                                        wordBreak: "break-word",
+                                        cursor:
                                           isBoardsLoading ||
                                           isInTrash ||
                                           !isOwnedBoard
@@ -10774,7 +11621,9 @@ export default function Page() {
                                         display: "flex",
                                         alignItems: "center",
                                         gap: "8px",
-                                        flex: "0 0 auto",
+                                        flexWrap: "wrap",
+                                        justifyContent: "flex-end",
+                                        width: "100%",
                                       }}
                                     >
                                       <button
@@ -11403,12 +12252,17 @@ export default function Page() {
                       >
                         {[
                           {
-                            label: "Brak",
+                            label: t("None", "Brak"),
                             value: "none",
                             spacing: 0,
                           },
                           {
-                            label: "Mała",
+                            label: t("Dots", "Kropki"),
+                            value: "dots",
+                            spacing: 18,
+                          },
+                          {
+                            label: t("Small", "Mała"),
                             value: "small",
                             spacing: 13,
                           },
@@ -11418,7 +12272,7 @@ export default function Page() {
                             spacing: 20,
                           },
                           {
-                            label: "Duża",
+                            label: t("Large", "Duża"),
                             value: "large",
                             spacing: 32,
                           },
@@ -11427,6 +12281,8 @@ export default function Page() {
                           const previewBackground =
                             option.value === "none"
                               ? "linear-gradient(135deg, rgba(148,163,184,0.12), rgba(148,163,184,0.04))"
+                              : option.value === "dots"
+                              ? "radial-gradient(circle, rgba(100,116,139,0.48) 1.35px, transparent 1.55px)"
                               : `linear-gradient(rgba(100,116,139,0.28) 1px, transparent 1px), linear-gradient(90deg, rgba(100,116,139,0.28) 1px, transparent 1px)`;
 
                           return (
@@ -12257,7 +13113,9 @@ export default function Page() {
             aria-label={
               boardSaveState === "offline" || !isOnline
                 ? "Offline. Changes will save after reconnecting."
-                : boardSaveState === "error"
+                : boardSaveState === "conflict"
+                  ? "This board changed elsewhere. Reload before editing further."
+                  : boardSaveState === "error"
                   ? "Save failed. Retry saving."
                   : boardSaveState === "saving"
                     ? "Saving board."
@@ -12268,19 +13126,19 @@ export default function Page() {
             style={{
               position: "absolute",
               top: "50%",
-              left: "112px",
+              left: "154px",
               transform: "translateY(-50%)",
               minHeight: "30px",
               padding: "0 10px",
               borderRadius: "999px",
               border:
-                boardSaveState === "error"
+                boardSaveState === "error" || boardSaveState === "conflict"
                   ? "1px solid rgba(254,202,202,0.74)"
                   : boardSaveState === "offline" || !isOnline
                     ? "1px solid rgba(253,230,138,0.78)"
                     : "1px solid rgba(255,255,255,0.3)",
               background:
-                boardSaveState === "error"
+                boardSaveState === "error" || boardSaveState === "conflict"
                   ? "rgba(153,27,27,0.34)"
                   : boardSaveState === "offline" || !isOnline
                     ? "rgba(146,64,14,0.34)"
@@ -12297,35 +13155,49 @@ export default function Page() {
           >
             {boardSaveState === "offline" || !isOnline ? (
               <CloudOff size={14} />
-            ) : boardSaveState === "error" ? (
+            ) : boardSaveState === "error" || boardSaveState === "conflict" ? (
               <AlertTriangle size={14} />
             ) : boardSaveState === "saving" ? (
               <RefreshCw size={14} />
             ) : boardSaveState === "saved" ? (
               <CheckCircle2 size={14} />
             ) : (
-              <Clock3 size={14} />
+              <RefreshCw size={14} />
             )}
 
-            <span style={{ whiteSpace: "nowrap" }}>
-              {boardSaveState === "offline" || !isOnline
-                ? "Offline — changes not saved"
-                : boardSaveState === "error"
-                  ? "Save failed"
-                  : boardSaveState === "saving"
-                    ? "Saving…"
-                    : boardSaveState === "dirty"
-                      ? "Waiting to save…"
-                      : "Saved"}
-            </span>
+            {(boardSaveState === "offline" ||
+              !isOnline ||
+              boardSaveState === "conflict" ||
+              boardSaveState === "error") && (
+              <span style={{ whiteSpace: "nowrap" }}>
+                {boardSaveState === "offline" || !isOnline
+                  ? "Offline — changes not saved"
+                  : boardSaveState === "conflict"
+                    ? "Newer board found"
+                    : "Save failed"}
+              </span>
+            )}
 
             {(boardSaveState === "error" ||
+              boardSaveState === "conflict" ||
               boardSaveState === "offline" ||
               !isOnline) && (
               <button
                 type="button"
                 disabled={!isOnline}
-                onClick={() => persistBoard(activeBoardId).catch(() => null)}
+                onClick={() => {
+                  if (boardSaveState === "conflict") {
+                    const reload = window.confirm(
+                      t(
+                        "Reload the newer saved board? Your unsaved changes in this window will be discarded.",
+                        "Wczytać nowszą zapisaną tablicę? Niezapisane zmiany w tym oknie zostaną odrzucone."
+                      )
+                    );
+                    if (reload) loadBoards().catch(() => null);
+                    return;
+                  }
+                  persistBoard(activeBoardId).catch(() => null);
+                }}
                 style={{
                   height: "22px",
                   padding: "0 8px",
@@ -12343,7 +13215,9 @@ export default function Page() {
                 }}
               >
                 <RefreshCw size={11} />
-                {t("Retry", "Spróbuj ponownie")}
+                {boardSaveState === "conflict"
+                  ? t("Reload", "Wczytaj ponownie")
+                  : t("Retry", "Spróbuj ponownie")}
               </button>
             )}
           </div>
@@ -13221,6 +14095,7 @@ export default function Page() {
             }}
           >
           <button
+              className="scriboo-login-cta"
               aria-label={t("Log in", "Zaloguj się")}
             onClick={() => openAuthModal("login")}
             style={{
@@ -13249,7 +14124,9 @@ export default function Page() {
               opacity: 0.96,
             }}
           >
+            <span className="scriboo-login-cta__outline-pulse" aria-hidden="true" />
             <span
+              className="scriboo-login-cta__label"
               style={{
                 display: "inline-block",
                 transform: "translateY(-0.5px)",

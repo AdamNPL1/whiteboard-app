@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { normalizeEmail } from "@/lib/auth-utils";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 export const runtime = "nodejs";
 
@@ -12,6 +13,7 @@ export async function POST(request: NextRequest) {
   const body = (await request.json().catch(() => null)) as
     | {
         email?: string;
+        turnstileToken?: string;
       }
     | null;
   const email = normalizeEmail(body?.email ?? "");
@@ -27,6 +29,13 @@ export async function POST(request: NextRequest) {
   if (!isValidEmail(email)) {
     return NextResponse.json(
       { error: "Enter a valid email address." },
+      { status: 400 }
+    );
+  }
+
+  if (!(await verifyTurnstileToken(request, body?.turnstileToken))) {
+    return NextResponse.json(
+      { error: "Complete the security check and try again." },
       { status: 400 }
     );
   }

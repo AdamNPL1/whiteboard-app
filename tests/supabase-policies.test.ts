@@ -44,4 +44,22 @@ describe("Supabase write boundaries", () => {
     expect(sql).not.toContain('create policy "boards_insert_own"');
     expect(sql).not.toContain('create policy "boards_update_own"');
   });
+
+  it("keeps call mutations server-owned and Realtime topics participant-only", () => {
+    const sql = readSql("call-sessions.sql");
+
+    expect(sql).toContain(
+      "revoke all on table public.call_sessions from anon, authenticated"
+    );
+    expect(sql).toContain(
+      "grant select on table public.call_sessions to authenticated"
+    );
+    expect(sql).toContain("pg_advisory_xact_lock");
+    expect(sql).toContain("call_sessions.caller_user_id");
+    expect(sql).toContain("call_sessions.recipient_user_id");
+    expect(sql).toContain("on realtime.messages");
+    expect(sql).toContain("realtime.messages.extension in ('broadcast', 'presence')");
+    expect(sql).not.toContain('create policy "call_sessions_insert');
+    expect(sql).not.toContain('create policy "call_sessions_update');
+  });
 });

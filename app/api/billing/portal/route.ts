@@ -6,6 +6,7 @@ import {
   createSupabaseServerAuthClient,
   getSupabaseServiceRoleClient,
 } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -32,6 +33,14 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
+
+  const rateLimit = await enforceRateLimit(request, {
+    action: "billing-portal",
+    limit: 10,
+    windowSeconds: 10 * 60,
+    identifiers: [user.id],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const profile = await ensureProfileForSupabaseUser(supabase, user);
 

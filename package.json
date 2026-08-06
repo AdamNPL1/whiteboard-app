@@ -9,6 +9,7 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "launch:check": "node --env-file=.env.local scripts/check-launch-readiness.mjs",
     "backup:create": "node --env-file=.env.local --env-file=.env.backup.local scripts/backup-supabase.mjs",
     "backup:verify": "node --env-file=.env.backup.local scripts/verify-backup.mjs",
     "backup:check": "node --env-file=.env.backup.local scripts/check-backup-readiness.mjs",

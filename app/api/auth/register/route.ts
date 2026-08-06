@@ -5,6 +5,8 @@ import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { mapSupabaseUserToAppUser } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
+import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
+import { verifyTurnstileToken } from "@/lib/turnstile";
 
 export const runtime = "nodejs";
 
@@ -17,12 +19,15 @@ export async function POST(request: NextRequest) {
         email?: string;
         password?: string;
         confirmPassword?: string;
+        acceptedLegal?: boolean;
+        turnstileToken?: string;
       }
     | null;
   const name = (body?.name ?? "").trim();
   const email = normalizeEmail(body?.email ?? "");
   const password = body?.password ?? "";
   const confirmPassword = body?.confirmPassword ?? "";
+  const acceptedLegal = body?.acceptedLegal === true;
 
   const rateLimit = await enforceRateLimit(request, {
     action: "auth-register",
@@ -60,6 +65,22 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (!acceptedLegal) {
+    return NextResponse.json(
+      { error: "Accept the Terms of Service and Privacy Policy to continue." },
+      { status: 400 }
+    );
+  }
+
+  if (!(await verifyTurnstileToken(request, body?.turnstileToken))) {
+    return NextResponse.json(
+      { error: "Complete the security check and try again." },
+      { status: 400 }
+    );
+  }
+
+  const legalAcceptedAt = new Date().toISOString();
+
   const responseCookies: Array<{
     name: string;
     value: string;
@@ -84,6 +105,9 @@ export async function POST(request: NextRequest) {
       emailRedirectTo: `${request.nextUrl.origin}/auth/callback?next=/custom`,
       data: {
         name,
+        legal_accepted_at: legalAcceptedAt,
+        terms_version: TERMS_VERSION,
+        privacy_version: PRIVACY_VERSION,
       },
     },
   });

@@ -24,9 +24,16 @@ body {
   background: var(--background);
   color: var(--foreground);
   font-family: "Lato", Arial, Helvetica, sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: subpixel-antialiased;
+  -moz-osx-font-smoothing: auto;
+  text-rendering: geometricPrecision;
+  font-kerning: normal;
+}
+
+body * {
+  -webkit-font-smoothing: subpixel-antialiased !important;
+  -moz-osx-font-smoothing: auto !important;
+  text-rendering: geometricPrecision !important;
 }
 
 button,
@@ -34,6 +41,13 @@ input,
 textarea,
 select {
   font-family: inherit;
+  text-rendering: geometricPrecision;
+  font-kerning: normal;
+}
+
+svg {
+  shape-rendering: geometricPrecision;
+  text-rendering: geometricPrecision;
 }
 
 textarea.custom-text-input {
@@ -247,4 +261,953 @@ input.modern-range::-ms-thumb {
 .calendar-bottom-scrollbar::-webkit-scrollbar-thumb:hover {
   background: rgba(90, 90, 90, 0.9);
   background-clip: padding-box;
+}
+
+@keyframes scriboo-welcome-rise-v2 {
+  0% {
+    opacity: 0;
+    transform: translateY(calc(100% + 70px)) scale(0.985);
+  }
+  72% {
+    opacity: 1;
+    transform: translateY(-7px) scale(1);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.scriboo-guest-welcome {
+  will-change: transform, opacity;
+  animation: scriboo-welcome-rise-v2 880ms cubic-bezier(0.16, 1, 0.3, 1) 650ms both;
+}
+
+@keyframes scriboo-discover-rail-enter {
+  from {
+    opacity: 0;
+    transform: translate(100%, -50%);
+  }
+  to {
+    opacity: 1;
+    transform: translate(0, -50%);
+  }
+}
+
+@keyframes scriboo-showcase-enter {
+  from {
+    opacity: 0;
+    transform: translateX(calc(100% + 36px)) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+.scriboo-discover-rail {
+  position: fixed;
+  right: 0;
+  top: 50%;
+  z-index: 47;
+  width: 42px;
+  min-height: 154px;
+  padding: 14px 8px;
+  border: 1px solid rgba(203, 213, 225, 0.82);
+  border-right: 0;
+  border-radius: 18px 0 0 18px;
+  background: linear-gradient(180deg, #7650ed 0%, #5a82eb 54%, #5bc4a3 100%);
+  color: #fff;
+  box-shadow: -12px 18px 36px rgba(55, 65, 135, 0.2);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  cursor: pointer;
+  animation: scriboo-discover-rail-enter 680ms cubic-bezier(0.16, 1, 0.3, 1) 1.15s both;
+}
+
+.scriboo-discover-rail span {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scriboo-discover-rail:hover {
+  filter: saturate(1.08) brightness(1.04);
+  box-shadow: -16px 20px 42px rgba(55, 65, 135, 0.25);
+}
+
+.scriboo-feature-showcase {
+  position: fixed;
+  right: 20px;
+  top: 68px;
+  bottom: 20px;
+  z-index: 49;
+  width: min(960px, calc(100vw - 40px));
+  padding: 28px;
+  border: 1px solid rgba(198, 208, 226, 0.88);
+  border-radius: 30px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.985), rgba(247,249,255,0.985) 65%, rgba(239,253,248,0.98));
+  box-shadow: 0 34px 100px rgba(30, 41, 90, 0.24), inset 0 1px 0 rgba(255,255,255,0.95);
+  overflow: hidden;
+  color: #11182d;
+  animation: scriboo-showcase-enter 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+  display: flex;
+  flex-direction: column;
+  box-sizing: border-box;
+}
+
+.scriboo-feature-showcase__glow {
+  position: absolute;
+  width: 430px;
+  height: 430px;
+  right: -190px;
+  top: -220px;
+  border-radius: 999px;
+  background: linear-gradient(135deg, rgba(117,74,237,0.23), rgba(77,131,234,0.2), rgba(83,199,166,0.2));
+  filter: blur(12px);
+  pointer-events: none;
+}
+
+.scriboo-feature-showcase__header {
+  position: relative;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.scriboo-feature-showcase__eyebrow {
+  color: #6852d9;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+}
+
+.scriboo-feature-showcase__header h2 {
+  margin: 7px 0 7px;
+  font-size: clamp(27px, 3vw, 42px);
+  line-height: 1.02;
+  letter-spacing: -0.035em;
+  font-weight: 900;
+}
+
+.scriboo-feature-showcase__header p {
+  margin: 0;
+  max-width: 650px;
+  color: #64708a;
+  font-size: 15px;
+  line-height: 1.45;
+}
+
+.scriboo-feature-showcase__close {
+  width: 42px;
+  height: 42px;
+  flex: 0 0 42px;
+  border-radius: 14px;
+  border: 1px solid rgba(196, 207, 226, 0.86);
+  background: rgba(255,255,255,0.78);
+  color: #46516a;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.scriboo-feature-showcase__track {
+  position: relative;
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: 100%;
+  gap: 18px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scrollbar-width: none;
+  overscroll-behavior-x: contain;
+  flex: 1;
+  min-height: 0;
+  padding: 20px 10px 18px;
+  box-sizing: border-box;
+}
+
+.scriboo-feature-page {
+  min-width: 0;
+  height: 100%;
+  scroll-snap-align: start;
+}
+
+.scriboo-feature-page__cards {
+  height: 100%;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+}
+
+.scriboo-workflow-page {
+  height: 100%;
+  min-height: 390px;
+  padding: 26px;
+  border: 1px solid rgba(202, 211, 227, 0.86);
+  border-radius: 25px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(245,246,255,0.95) 55%, rgba(235,251,246,0.94));
+  box-shadow: 0 22px 46px rgba(36, 45, 120, 0.14), inset 0 1px 0 rgba(255,255,255,0.9);
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 2fr);
+  gap: 28px;
+  box-sizing: border-box;
+}
+
+.scriboo-workflow-page__intro {
+  align-self: center;
+}
+
+.scriboo-workflow-page__intro > small {
+  color: #6b50d7;
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+}
+
+.scriboo-workflow-page__intro h3 {
+  margin: 10px 0 12px;
+  color: #151b30;
+  font-size: clamp(28px, 3vw, 42px);
+  line-height: 1.02;
+  letter-spacing: -0.045em;
+}
+
+.scriboo-workflow-page__intro p {
+  margin: 0;
+  color: #68738b;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.scriboo-workflow-page__steps {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.scriboo-workflow-page__steps article {
+  position: relative;
+  min-width: 0;
+  padding: 22px 17px;
+  border: 1px solid rgba(207, 215, 231, 0.88);
+  border-radius: 19px;
+  background: rgba(255,255,255,0.76);
+  box-shadow: 0 14px 32px rgba(44, 54, 112, 0.08);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+
+.scriboo-workflow-page__number {
+  position: absolute;
+  top: 14px;
+  right: 15px;
+  color: #adb5c8;
+  font-size: 10px;
+  font-weight: 900;
+}
+
+.scriboo-workflow-page__icon {
+  width: 46px;
+  height: 46px;
+  border-radius: 14px;
+  color: #fff;
+  background: linear-gradient(145deg, #7244e5, #5685e6 58%, #59bc9e);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 12px 26px rgba(89, 80, 205, 0.2);
+}
+
+.scriboo-workflow-page__steps h4 {
+  margin: 22px 0 8px;
+  color: #20283e;
+  font-size: 17px;
+  line-height: 1.1;
+}
+
+.scriboo-workflow-page__steps p {
+  margin: 0;
+  color: #707a90;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.scriboo-feature-showcase__track::-webkit-scrollbar {
+  display: none;
+}
+
+@property --scriboo-login-outline-angle {
+  syntax: "<angle>";
+  inherits: false;
+  initial-value: 0deg;
+}
+
+@keyframes scriboo-login-outline-trace {
+  0% {
+    --scriboo-login-outline-angle: 0deg;
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    --scriboo-login-outline-angle: 360deg;
+    opacity: 0;
+  }
+}
+
+.scriboo-login-cta {
+  position: relative;
+  isolation: isolate;
+  overflow: hidden;
+}
+
+.scriboo-login-cta__outline-pulse {
+  display: block;
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  padding: 1.5px;
+  border-radius: inherit;
+  background: conic-gradient(
+    from var(--scriboo-login-outline-angle) at 50% 50%,
+    rgba(255,255,255,0) 0deg,
+    rgba(255,255,255,0) 302deg,
+    rgba(255,255,255,0.38) 320deg,
+    rgba(255,255,255,1) 342deg,
+    rgba(255,255,255,0) 360deg
+  );
+  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+  opacity: 0;
+  box-sizing: border-box;
+  filter: drop-shadow(0 0 4px rgba(255,255,255,0.7));
+}
+
+.scriboo-login-cta:hover .scriboo-login-cta__outline-pulse {
+  animation: scriboo-login-outline-trace 1.8s linear both;
+}
+
+.scriboo-login-cta__label {
+  position: relative;
+  z-index: 2;
+}
+
+.scriboo-feature-card {
+  position: relative;
+  min-height: 390px;
+  border-radius: 25px;
+  padding: 20px;
+  color: #fff;
+  overflow: hidden;
+  scroll-snap-align: start;
+  box-shadow: 0 22px 46px rgba(36, 45, 120, 0.22), inset 0 1px 0 rgba(255,255,255,0.22);
+  display: flex;
+  flex-direction: column;
+  transform-origin: center center;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 280ms ease, filter 280ms ease, background-position 620ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.scriboo-feature-card:hover {
+  z-index: 3;
+  transform: translateY(-10px) scale(1.026);
+  filter: saturate(1.06);
+  background-position: 100% 50% !important;
+  box-shadow: 0 38px 72px rgba(42, 45, 135, 0.38), 0 0 0 2px rgba(255,255,255,0.42), inset 0 1px 0 rgba(255,255,255,0.34);
+}
+
+@keyframes scriboo-feature-gradient-wave {
+  0% {
+    opacity: 0;
+    transform: translateX(-155%) skewX(-16deg);
+  }
+  16% {
+    opacity: 0.58;
+  }
+  82% {
+    opacity: 0.48;
+  }
+  100% {
+    opacity: 0;
+    transform: translateX(315%) skewX(-16deg);
+  }
+}
+
+.scriboo-feature-card__gradient-wave {
+  position: absolute;
+  z-index: 1;
+  top: -12%;
+  bottom: -12%;
+  left: 0;
+  width: 48%;
+  border-radius: 45%;
+  opacity: 0;
+  pointer-events: none;
+  background-size: 260% 100%;
+  background-position: 50% 50%;
+  filter: blur(13px) saturate(1.24) brightness(1.16);
+  mix-blend-mode: screen;
+  will-change: transform, opacity;
+}
+
+.scriboo-feature-card:hover .scriboo-feature-card__gradient-wave {
+  animation: scriboo-feature-gradient-wave 1.35s cubic-bezier(0.22, 0.72, 0.2, 1) both;
+}
+
+.scriboo-feature-card .scriboo-feature-visual {
+  transition: transform 260ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 260ms ease;
+}
+
+.scriboo-feature-card:hover .scriboo-feature-visual {
+  transform: scale(1.01);
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.5), 0 22px 44px rgba(16,24,80,0.23);
+}
+
+.scriboo-showcase-plan {
+  position: relative;
+  min-width: 0;
+  min-height: 390px;
+  padding: 28px 28px 24px;
+  border: 1px solid rgba(202, 211, 227, 0.9);
+  border-radius: 25px;
+  color: #171d31;
+  background: linear-gradient(145deg, #fffaf2 0%, #ffffff 54%, #f2f7ff 100%);
+  box-shadow: 0 22px 46px rgba(36, 45, 120, 0.14), inset 0 1px 0 rgba(255,255,255,0.8);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  box-sizing: border-box;
+  background-size: 185% 185%;
+  background-position: 0% 50%;
+  transform-origin: center center;
+  transition: transform 280ms cubic-bezier(0.16, 1, 0.3, 1), box-shadow 280ms ease, filter 280ms ease, border-color 280ms ease, background-position 620ms cubic-bezier(0.16, 1, 0.3, 1);
+  will-change: transform;
+}
+
+.scriboo-showcase-plan:hover {
+  z-index: 3;
+  transform: translateY(-10px) scale(1.026);
+  filter: saturate(1.06);
+  border-color: rgba(255,255,255,0.7);
+  background-position: 100% 50%;
+  box-shadow: 0 38px 72px rgba(42, 45, 135, 0.3), 0 0 0 2px rgba(255,255,255,0.48), inset 0 1px 0 rgba(255,255,255,0.38);
+}
+
+.scriboo-showcase-plan--pro {
+  color: #fff;
+  border-color: rgba(255,255,255,0.25);
+  background: linear-gradient(145deg, #743ce6 0%, #5781e7 53%, #58bd91 100%);
+  box-shadow: 0 25px 54px rgba(77, 74, 196, 0.27), inset 0 1px 0 rgba(255,255,255,0.24);
+}
+
+.scriboo-showcase-plan--pro:hover {
+  box-shadow: 0 40px 76px rgba(67, 55, 184, 0.42), 0 0 0 2px rgba(255,255,255,0.48), inset 0 1px 0 rgba(255,255,255,0.38);
+}
+
+.scriboo-showcase-plan--master {
+  background: linear-gradient(145deg, #ffffff 0%, #f8fcfa 54%, #edf8fb 100%);
+}
+
+.scriboo-showcase-plan__heading {
+  min-height: 43px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.scriboo-showcase-plan__heading h3 {
+  margin: 0;
+  font-size: 25px;
+  line-height: 1;
+  letter-spacing: -0.035em;
+}
+
+.scriboo-showcase-plan__heading > span {
+  padding: 7px 10px;
+  border: 1px solid rgba(255,255,255,0.28);
+  border-radius: 999px;
+  color: #fff;
+  background: rgba(255,255,255,0.14);
+  font-size: 9px;
+  font-weight: 800;
+  white-space: nowrap;
+}
+
+.scriboo-showcase-plan__price {
+  margin-top: 18px;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.scriboo-showcase-plan__price strong {
+  font-size: clamp(38px, 4vw, 55px);
+  line-height: 0.95;
+  letter-spacing: -0.065em;
+}
+
+.scriboo-showcase-plan__price span {
+  color: #586174;
+  font-size: 13px;
+  white-space: nowrap;
+}
+
+.scriboo-showcase-plan--pro .scriboo-showcase-plan__price span {
+  color: rgba(255,255,255,0.88);
+}
+
+.scriboo-showcase-plan ul {
+  margin: 28px 0 22px;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 13px;
+}
+
+.scriboo-showcase-plan li {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: #364054;
+  font-size: 13px;
+  line-height: 1.3;
+}
+
+.scriboo-showcase-plan--pro li {
+  color: rgba(255,255,255,0.94);
+}
+
+.scriboo-showcase-plan li svg {
+  width: 25px;
+  height: 25px;
+  padding: 6px;
+  border-radius: 999px;
+  color: #283246;
+  background: rgba(231, 238, 244, 0.86);
+  flex: 0 0 auto;
+  box-sizing: border-box;
+}
+
+.scriboo-showcase-plan--pro li svg {
+  color: #fff;
+  background: rgba(255,255,255,0.16);
+}
+
+.scriboo-showcase-plan > button {
+  width: 100%;
+  min-height: 48px;
+  margin-top: auto;
+  border: 1px solid rgba(204, 213, 228, 0.85);
+  border-radius: 14px;
+  color: #6545db;
+  background: rgba(255,255,255,0.82);
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow: 0 12px 28px rgba(39, 48, 106, 0.09);
+}
+
+.scriboo-showcase-plan--pro > button {
+  border-color: rgba(255,255,255,0.38);
+  background: rgba(255,255,255,0.92);
+}
+
+.scriboo-feature-card__topline {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 19px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+}
+
+.scriboo-feature-card__icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 11px;
+  background: rgba(21, 30, 119, 0.32);
+  display: grid;
+  place-items: center;
+}
+
+.scriboo-feature-visual {
+  position: relative;
+  z-index: 2;
+  height: 225px;
+  margin: 18px 0;
+  border-radius: 20px;
+  overflow: hidden;
+  background: rgba(255,255,255,0.94);
+  color: #182039;
+  box-shadow: inset 0 0 0 1px rgba(255,255,255,0.42), 0 18px 38px rgba(16,24,80,0.18);
+}
+
+.scriboo-feature-visual--video {
+  background: linear-gradient(145deg, #13162a 0%, #242b49 100%);
+}
+
+.scriboo-video-person {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: rgba(255,255,255,0.96);
+  background: linear-gradient(145deg, rgba(91,108,230,0.82), rgba(76,193,166,0.74));
+}
+
+.scriboo-video-person span {
+  position: absolute;
+  left: 9px;
+  bottom: 8px;
+  padding: 3px 7px;
+  border-radius: 7px;
+  background: rgba(7,12,31,0.7);
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.scriboo-video-person--primary {
+  inset: 12px 82px 50px 12px;
+  border-radius: 14px;
+}
+
+.scriboo-video-person--secondary {
+  width: 65px;
+  height: 72px;
+  right: 10px;
+  bottom: 49px;
+  border: 2px solid #6ee7b7;
+  border-radius: 13px;
+}
+
+.scriboo-video-controls {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 9px;
+}
+
+.scriboo-video-controls span {
+  width: 28px;
+  height: 28px;
+  border-radius: 999px;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  background: rgba(255,255,255,0.13);
+}
+
+.scriboo-calendar-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 18px 18px 12px;
+  color: #252d48;
+}
+
+.scriboo-calendar-heading div {
+  display: flex;
+  flex-direction: column;
+}
+
+.scriboo-calendar-heading small,
+.scriboo-calendar-event small {
+  color: #8892a8;
+  font-size: 9px;
+}
+
+.scriboo-calendar-heading strong {
+  font-size: 18px;
+}
+
+.scriboo-calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  padding: 5px 12px 14px;
+}
+
+.scriboo-calendar-grid span {
+  height: 42px;
+  border-radius: 10px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  color: #536079;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.scriboo-calendar-grid span small {
+  font-size: 7px;
+  color: #98a1b3;
+}
+
+.scriboo-calendar-grid span.is-active {
+  color: #fff;
+  background: linear-gradient(145deg, #7650ed, #5798df);
+  box-shadow: 0 8px 18px rgba(92,83,220,0.25);
+}
+
+.scriboo-calendar-grid span.is-active small {
+  color: rgba(255,255,255,0.8);
+}
+
+.scriboo-calendar-event {
+  margin: 0 14px;
+  padding: 12px;
+  border-radius: 13px;
+  background: #f1edff;
+  color: #5141b7;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scriboo-calendar-event div {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.scriboo-calendar-event strong {
+  font-size: 10px;
+}
+
+.scriboo-board-toolbar {
+  position: absolute;
+  left: 12px;
+  top: 12px;
+  display: flex;
+  gap: 4px;
+  padding: 7px;
+  border-radius: 11px;
+  color: #6246da;
+  background: #f4f1ff;
+  box-shadow: 0 9px 24px rgba(73,60,150,0.12);
+}
+
+.scriboo-board-toolbar svg {
+  width: 23px;
+  height: 23px;
+  padding: 4px;
+  border-radius: 6px;
+  box-sizing: border-box;
+}
+
+.scriboo-board-toolbar svg:first-child {
+  color: #fff;
+  background: #7248e9;
+}
+
+.scriboo-board-note {
+  position: absolute;
+  padding: 12px 15px;
+  border-radius: 13px;
+  font-size: 12px;
+  font-weight: 900;
+  box-shadow: 0 12px 30px rgba(38,50,105,0.15);
+}
+
+.scriboo-board-note--one {
+  right: 16px;
+  top: 22px;
+  color: #5240ba;
+  background: #eee9ff;
+  transform: rotate(3deg);
+}
+
+.scriboo-board-note--two {
+  left: 20px;
+  bottom: 20px;
+  color: #147d68;
+  background: #ddf8ef;
+  transform: rotate(-3deg);
+}
+
+.scriboo-board-line {
+  position: absolute;
+  inset: 60px 8px 10px;
+  width: calc(100% - 16px);
+  height: calc(100% - 70px);
+}
+
+.scriboo-board-line path {
+  fill: none;
+  stroke: #7548e8;
+  stroke-width: 6;
+  stroke-linecap: round;
+}
+
+.scriboo-board-line circle {
+  fill: #58c5a7;
+  stroke: #fff;
+  stroke-width: 4;
+}
+
+.scriboo-feature-card__copy {
+  position: relative;
+  z-index: 2;
+  margin-top: auto;
+}
+
+.scriboo-feature-card__copy small {
+  display: block;
+  color: rgba(255,255,255,0.8);
+  font-size: 10px;
+  font-weight: 900;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.scriboo-feature-card__copy p {
+  margin: 7px 0 0;
+  color: rgba(255,255,255,0.94);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.scriboo-feature-showcase__footer {
+  display: grid;
+  grid-template-columns: 46px 1fr 46px;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+}
+
+.scriboo-feature-showcase__footer > button {
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  border: 1px solid rgba(202,211,229,0.82);
+  background: rgba(255,255,255,0.84);
+  color: #34405d;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+  box-shadow: 0 8px 24px rgba(52,63,120,0.1);
+}
+
+.scriboo-feature-showcase__dots {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  gap: 9px;
+}
+
+.scriboo-feature-showcase__dots button {
+  width: 9px;
+  height: 9px;
+  padding: 0;
+  border: 0;
+  border-radius: 999px;
+  background: #d4dcef;
+  cursor: pointer;
+  transition: width 180ms ease, background 180ms ease;
+}
+
+.scriboo-feature-showcase__dots button.is-active {
+  width: 34px;
+  background: linear-gradient(90deg, #7447e8, #5792e3, #59bda5);
+}
+
+@media (max-width: 900px) {
+  .scriboo-feature-showcase {
+    right: 12px;
+    top: 58px;
+    bottom: 12px;
+    width: calc(100vw - 24px);
+    padding: 21px;
+    border-radius: 24px;
+  }
+
+  .scriboo-feature-showcase__track {
+    grid-auto-columns: 100%;
+  }
+
+  .scriboo-feature-page__cards {
+    overflow-x: auto;
+    grid-template-columns: repeat(3, minmax(260px, 78%));
+    scrollbar-width: none;
+  }
+
+  .scriboo-feature-page__cards::-webkit-scrollbar {
+    display: none;
+  }
+
+  .scriboo-feature-card {
+    min-height: 360px;
+  }
+
+  .scriboo-workflow-page {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+
+  .scriboo-workflow-page__steps {
+    grid-template-columns: repeat(3, minmax(210px, 1fr));
+    overflow-x: auto;
+  }
+
+}
+
+@media (max-width: 580px) {
+  .scriboo-feature-showcase__header p {
+    display: none;
+  }
+
+  .scriboo-feature-showcase__track {
+    grid-auto-columns: 100%;
+  }
+
+  .scriboo-feature-page__cards {
+    grid-template-columns: repeat(3, 100%);
+  }
+
+  .scriboo-feature-showcase__header h2 {
+    font-size: 25px;
+  }
+
+  .scriboo-feature-card {
+    min-height: 350px;
+  }
+
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .scriboo-discover-rail,
+  .scriboo-feature-showcase {
+    animation: none;
+  }
+
+  .scriboo-feature-showcase__track {
+    scroll-behavior: auto;
+  }
+
 }

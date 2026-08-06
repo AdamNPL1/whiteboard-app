@@ -132,6 +132,20 @@ Never point the restore test at production. Run a restore drill after schema
 changes and at least quarterly. For launch, schedule the application backup
 daily and alert if `npm run backup:check` reports a file older than 26 hours.
 
+The repository includes `.github/workflows/daily-encrypted-backup.yml`. To
+activate it, add these GitHub Actions repository secrets:
+
+- `BACKUP_SUPABASE_URL`
+- `BACKUP_SUPABASE_SERVICE_ROLE_KEY`
+- `BACKUP_ENCRYPTION_KEY`
+
+Run the workflow manually once from **GitHub → Actions → Daily encrypted
+Scriboo backup**, download its encrypted artifact, and verify that it completes
+successfully. GitHub keeps each encrypted artifact for 30 days; keep the
+encryption key in a separate password manager so a stolen artifact alone is
+not readable. This application backup complements rather than replaces
+Supabase managed backups for Auth users and complete project recovery.
+
 3. Run the Supabase SQL in this order:
 
 - [supabase/profiles.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/profiles.sql:1)
@@ -171,3 +185,25 @@ npm run build
 ## Important Note
 
 The app will not sell subscriptions correctly until all six Stripe price IDs are set in `.env.local` and in production environment variables.
+### Public registration protection
+
+Scriboo supports Cloudflare Turnstile on registration, login, password-reset
+and confirmation-email requests. Create a Turnstile widget for the production
+hostname and configure both `NEXT_PUBLIC_TURNSTILE_SITE_KEY` and
+`TURNSTILE_SECRET_KEY` in Vercel. The server begins enforcing the challenge as
+soon as the secret is present. Configure both variables together and redeploy.
+
+Google and Apple login buttons are hidden unless their provider has been fully
+configured in Supabase and the corresponding
+`NEXT_PUBLIC_GOOGLE_AUTH_ENABLED=true` or
+`NEXT_PUBLIC_APPLE_AUTH_ENABLED=true` variable is set. This prevents customers
+from seeing authentication buttons that lead to an unconfigured provider.
+
+### Billing launch check
+
+Before disabling maintenance mode, run `npm run launch:check`. The command does
+not print secret values. It verifies that production Supabase, Stripe, email and
+Turnstile variables exist, that the application URL uses HTTPS, that the Stripe
+key is live-mode, and that all six Stripe Price IDs are distinct. Dashboard
+configuration still needs a real Stripe test purchase and webhook-delivery
+test; environment validation cannot replace those external checks.

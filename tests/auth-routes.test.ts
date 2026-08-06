@@ -19,6 +19,9 @@ vi.mock("@/lib/profile-store", () => ({
 vi.mock("@/lib/supabase-auth", () => ({
   mapSupabaseUserToAppUser: vi.fn((user) => user),
 }));
+vi.mock("@/lib/turnstile", () => ({
+  verifyTurnstileToken: vi.fn().mockResolvedValue(true),
+}));
 
 import { POST as register } from "@/app/api/auth/register/route";
 import { POST as login } from "@/app/api/auth/login/route";
@@ -52,6 +55,7 @@ describe("authentication routes", () => {
         email: "person@example.com",
         password: "password1",
         confirmPassword: "password1",
+        acceptedLegal: true,
       })
     );
     expect(response.status).toBe(400);
@@ -70,6 +74,7 @@ describe("authentication routes", () => {
         email: " PERSON@EXAMPLE.COM ",
         password: "password1",
         confirmPassword: "password1",
+        acceptedLegal: true,
       })
     );
     const data = await response.json();
@@ -77,6 +82,32 @@ describe("authentication routes", () => {
     expect(data.email).toBe("person@example.com");
     expect(data.user).toBeNull();
     expect(data.message).toMatch(/confirm/i);
+    expect(mocks.client.auth.signUp).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          data: expect.objectContaining({
+            legal_accepted_at: expect.any(String),
+            terms_version: "2026-08-01",
+            privacy_version: "2026-08-01",
+          }),
+        }),
+      })
+    );
+  });
+
+  it("requires explicit legal acceptance during registration", async () => {
+    const response = await register(
+      request("/api/auth/register", {
+        name: "Person",
+        email: "person@example.com",
+        password: "password1",
+        confirmPassword: "password1",
+        acceptedLegal: false,
+      })
+    );
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({ error: expect.stringMatching(/accept/i) });
+    expect(mocks.client.auth.signUp).not.toHaveBeenCalled();
   });
 
   it("blocks login until the email is confirmed", async () => {

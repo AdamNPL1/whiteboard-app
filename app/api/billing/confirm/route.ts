@@ -4,6 +4,7 @@ import Stripe from "stripe";
 import { getWorkspaceAccess } from "@/lib/board-store";
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { getSupabaseServiceRoleClient, createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -71,6 +72,14 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
+
+  const rateLimit = await enforceRateLimit(request, {
+    action: "billing-confirm",
+    limit: 12,
+    windowSeconds: 10 * 60,
+    identifiers: [user.id],
+  });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   const profile = await ensureProfileForSupabaseUser(supabase, user);
 
@@ -145,10 +154,31 @@ export async function POST(request: NextRequest) {
     );
   }
 
+
+  if (
+    session.payment_status !== "paid" &&
+    session.payment_status !== "no_payment_required"
+  ) {
+    return NextResponse.json(
+      { error: "Stripe has not confirmed the payment yet. Try again shortly." },
+      { status: 409 }
+    );
+  }
+
   const subscription =
     typeof session.subscription === "object" && session.subscription
       ? session.subscription
       : null;
+
+  if (
+    !subscription ||
+    (subscription.status !== "active" && subscription.status !== "trialing")
+  ) {
+    return NextResponse.json(
+      { error: "The subscription is not active yet. Try again shortly." },
+      { status: 409 }
+    );
+  }
   const targetPlan = normalizePlan(
     subscription?.metadata?.targetPlan ?? session.metadata?.targetPlan
   );

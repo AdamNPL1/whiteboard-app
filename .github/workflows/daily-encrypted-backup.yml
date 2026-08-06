@@ -1,0 +1,45 @@
+name: Daily encrypted Scriboo backup
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.BACKUP_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.BACKUP_SUPABASE_SERVICE_ROLE_KEY }}
+      BACKUP_ENCRYPTION_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+      BACKUP_MAX_AGE_HOURS: "26"
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Create encrypted application backup
+        run: node scripts/backup-supabase.mjs
+
+      - name: Verify backup freshness and integrity
+        run: node scripts/check-backup-readiness.mjs
+
+      - name: Store encrypted off-device copy
+        uses: actions/upload-artifact@v4
+        with:
+          name: scriboo-encrypted-backup-${{ github.run_id }}
+          path: backups/*.scriboo-backup
+          if-no-files-found: error
+          retention-days: 30

@@ -199,11 +199,13 @@ export async function POST(request: NextRequest) {
         targetPlan?: string;
         targetCurrency?: string;
         confirmSubscriptionChange?: boolean;
+        attemptId?: string;
       }
     | null;
   const targetPlan = body?.targetPlan ?? "";
   const targetCurrency = body?.targetCurrency ?? "pln";
   const confirmSubscriptionChange = body?.confirmSubscriptionChange === true;
+  const attemptId = body?.attemptId?.trim() ?? "";
 
   if (!isBillingPlan(targetPlan)) {
     return NextResponse.json(
@@ -215,6 +217,13 @@ export async function POST(request: NextRequest) {
   if (!isBillingCurrency(targetCurrency)) {
     return NextResponse.json(
       { error: "Choose a valid billing currency." },
+      { status: 400 }
+    );
+  }
+
+  if (attemptId && !/^[a-zA-Z0-9_-]{8,100}$/.test(attemptId)) {
+    return NextResponse.json(
+      { error: "Invalid checkout attempt identifier." },
       { status: 400 }
     );
   }
@@ -550,30 +559,35 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    session = await stripe.checkout.sessions.create({
-      mode: "subscription",
-      line_items: [
-        {
-          price: stripePriceId,
-          quantity: 1,
-        },
-      ],
-      customer: profile.stripeCustomerId ?? undefined,
-      customer_email: profile.stripeCustomerId ? undefined : profile.email,
-      client_reference_id: profile.id,
-      metadata: {
-        targetPlan,
-        userId: profile.id,
-      },
-      subscription_data: {
+    session = await stripe.checkout.sessions.create(
+      {
+        mode: "subscription",
+        line_items: [
+          {
+            price: stripePriceId,
+            quantity: 1,
+          },
+        ],
+        customer: profile.stripeCustomerId ?? undefined,
+        customer_email: profile.stripeCustomerId ? undefined : profile.email,
+        client_reference_id: profile.id,
         metadata: {
           targetPlan,
           userId: profile.id,
         },
+        subscription_data: {
+          metadata: {
+            targetPlan,
+            userId: profile.id,
+          },
+        },
+        success_url: `${appOrigin}/?view=plan&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+        cancel_url: `${appOrigin}/?view=plan&checkout=cancelled&plan=${targetPlan}`,
       },
-      success_url: `${appOrigin}/?view=plan&checkout=success&session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${appOrigin}/?view=plan&checkout=cancelled&plan=${targetPlan}`,
-    });
+      attemptId
+        ? { idempotencyKey: `checkout_${profile.id}_${attemptId}` }
+        : undefined
+    );
   } catch (error) {
     return NextResponse.json(
       {

@@ -20,6 +20,7 @@ const mocks = vi.hoisted(() => ({
   customerUpdate: vi.fn(),
   priceRetrieve: vi.fn(),
   checkoutCreate: vi.fn(),
+  checkoutRetrieve: vi.fn(),
   lifecycleEmail: vi.fn(),
 }));
 
@@ -63,7 +64,12 @@ vi.mock("stripe", () => ({
       update: mocks.customerUpdate,
     };
     prices = { retrieve: mocks.priceRetrieve };
-    checkout = { sessions: { create: mocks.checkoutCreate } };
+    checkout = {
+      sessions: {
+        create: mocks.checkoutCreate,
+        retrieve: mocks.checkoutRetrieve,
+      },
+    };
     subscriptionSchedules = {
       retrieve: vi.fn(),
       release: vi.fn(),
@@ -124,6 +130,7 @@ describe("Stripe billing behavior", () => {
     mocks.customerUpdate.mockReset();
     mocks.priceRetrieve.mockReset();
     mocks.checkoutCreate.mockReset();
+    mocks.checkoutRetrieve.mockReset();
     mocks.lifecycleEmail.mockReset().mockResolvedValue(undefined);
     serviceRole.rpc.mockClear();
     serviceRole.from.mockClear();
@@ -238,5 +245,77 @@ describe("Stripe billing behavior", () => {
       expect.objectContaining({ proration_behavior: "none" })
     );
     expect(mocks.profileUpdate).toMatchObject({ plan: "master" });
+  });
+
+  it("uses a Stripe idempotency key for a new checkout attempt", async () => {
+    mocks.checkoutProfile = {
+      id: "user-1",
+      email: "person@example.com",
+      name: "Person",
+      plan: "basic",
+      subscriptionStatus: "inactive",
+      stripeCustomerId: null,
+    };
+    mocks.checkoutCreate.mockResolvedValue({
+      id: "cs_1",
+      url: "https://checkout.stripe.com/session",
+    });
+
+    const { POST } = await import("@/app/api/billing/checkout/route");
+    const response = await POST(
+      new NextRequest("https://scribooapp.com/api/billing/checkout", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          targetPlan: "master",
+          targetCurrency: "pln",
+          attemptId: "attempt_12345678",
+        }),
+      })
+    );
+
+    expect(response.status).toBe(200);
+    expect(mocks.checkoutCreate).toHaveBeenCalledWith(
+      expect.any(Object),
+      { idempotencyKey: "checkout_user-1_attempt_12345678" }
+    );
+  });
+
+  it("does not grant a plan before Stripe confirms payment", async () => {
+    mocks.checkoutProfile = {
+      id: "user-1",
+      email: "person@example.com",
+      name: "Person",
+      plan: "basic",
+      subscriptionStatus: "inactive",
+    };
+    mocks.checkoutRetrieve.mockResolvedValue({
+      id: "cs_1",
+      status: "complete",
+      payment_status: "unpaid",
+      client_reference_id: "user-1",
+      metadata: { userId: "user-1", targetPlan: "master" },
+      subscription: {
+        id: "sub_1",
+        status: "active",
+        metadata: { targetPlan: "master" },
+        items: { data: [] },
+      },
+    });
+
+    const { POST } = await import("@/app/api/billing/confirm/route");
+    const response = await POST(
+      new NextRequest("https://scribooapp.com/api/billing/confirm", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ sessionId: "cs_1" }),
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      error: expect.stringMatching(/not confirmed/i),
+    });
+    expect(mocks.profileUpdate).toBeNull();
   });
 });

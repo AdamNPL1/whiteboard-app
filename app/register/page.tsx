@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
-import { useState } from "react";
+import { useCallback, useState } from "react";
+import TurnstileWidget from "@/app/components/TurnstileWidget";
 import { useLanguage } from "@/lib/i18n";
 
 export default function RegisterPage() {
@@ -16,6 +17,12 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [isSuccess, setIsSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [acceptedLegal, setAcceptedLegal] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState("");
+  const [turnstileResetSignal, setTurnstileResetSignal] = useState(0);
+  const handleTurnstileToken = useCallback((token: string) => {
+    setTurnstileToken(token);
+  }, []);
 
   const register = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -29,7 +36,14 @@ export default function RegisterPage() {
       const response = await fetch("/api/auth/register", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, email, password, confirmPassword }),
+        body: JSON.stringify({
+          name,
+          email,
+          password,
+          confirmPassword,
+          acceptedLegal,
+          turnstileToken,
+        }),
       });
       const data = (await response.json().catch(() => ({}))) as {
         error?: string;
@@ -39,6 +53,7 @@ export default function RegisterPage() {
 
       if (!response.ok) {
         setMessage(data.error ?? t("Could not create your account.", "Nie udało się utworzyć konta."));
+        setTurnstileResetSignal((value) => value + 1);
         return;
       }
 
@@ -49,6 +64,15 @@ export default function RegisterPage() {
 
       setIsSuccess(true);
       setMessage(data.message ?? t("Check your email to confirm your account.", "Sprawdź pocztę, aby potwierdzić konto."));
+    } catch {
+      setIsSuccess(false);
+      setMessage(
+        t(
+          "The account service could not be reached. Check your connection and try again.",
+          "Nie udało się połączyć z usługą konta. Sprawdź połączenie i spróbuj ponownie."
+        )
+      );
+      setTurnstileResetSignal((value) => value + 1);
     } finally {
       setIsSubmitting(false);
     }
@@ -105,6 +129,25 @@ export default function RegisterPage() {
             style={inputStyle}
           />
         </label>
+
+        <label style={consentStyle}>
+          <input
+            type="checkbox"
+            checked={acceptedLegal}
+            onChange={(event) => setAcceptedLegal(event.currentTarget.checked)}
+            required
+            style={{ accentColor: "#7c3aed", marginTop: 2 }}
+          />
+          <span>
+            {t("I accept the", "Akceptuję")} <Link href="/terms">{t("Terms of Service", "Regulamin")}</Link>{" "}
+            {t("and confirm that I have read the", "i potwierdzam zapoznanie się z")} <Link href="/privacy">{t("Privacy Policy", "Polityką prywatności")}</Link>.
+          </span>
+        </label>
+
+        <TurnstileWidget
+          onTokenChange={handleTurnstileToken}
+          resetSignal={turnstileResetSignal}
+        />
 
         {message && <div style={isSuccess ? successStyle : errorStyle}>{message}</div>}
 
@@ -216,4 +259,14 @@ const legalStyle: CSSProperties = {
   fontSize: "12px",
   lineHeight: 1.6,
   fontWeight: 600,
+};
+
+const consentStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  gap: "9px",
+  color: "#475569",
+  fontSize: "12px",
+  lineHeight: 1.55,
+  fontWeight: 650,
 };
