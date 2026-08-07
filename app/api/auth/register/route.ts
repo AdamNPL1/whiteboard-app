@@ -102,7 +102,7 @@ export async function POST(request: NextRequest) {
     email,
     password,
     options: {
-      emailRedirectTo: `${request.nextUrl.origin}/auth/callback?next=/custom`,
+      emailRedirectTo: `${request.nextUrl.origin}/auth/callback?next=${encodeURIComponent("/custom?welcome=created")}`,
       data: {
         name,
         legal_accepted_at: legalAcceptedAt,

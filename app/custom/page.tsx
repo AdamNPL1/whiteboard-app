@@ -3,6 +3,7 @@
 import Link from "next/link";
 import NextImage from "next/image";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Pen,
   Eraser,
@@ -47,6 +48,8 @@ import {
   Underline,
   Upload,
   UserRound,
+  Crown,
+  LogOut,
   AlertTriangle,
   Video,
   X,
@@ -496,6 +499,11 @@ export default function Page() {
   const [isPanning, setIsPanning] = useState(false);
   const [penCursorPoint, setPenCursorPoint] = useState<Point | null>(null);
   const [showLoginModal, setShowLoginModal] = useState(false);
+  const [showForgotPassword, setShowForgotPassword] = useState(false);
+  const [welcomeCelebration, setWelcomeCelebration] = useState<{
+    name: string;
+    kind: "login" | "created";
+  } | null>(null);
   const [showGuestWelcome, setShowGuestWelcome] = useState(true);
   const [showGuestFeatureShowcase, setShowGuestFeatureShowcase] = useState(false);
   const [guestFeatureIndex, setGuestFeatureIndex] = useState(0);
@@ -1072,7 +1080,16 @@ export default function Page() {
     setAuthConfirmPassword("");
     setAuthMessage("");
     setCanResendConfirmation(false);
+    setShowForgotPassword(false);
     setShowLoginModal(true);
+  };
+
+  const showWelcomeCelebration = (
+    name: string | null | undefined,
+    kind: "login" | "created"
+  ) => {
+    const displayName = name?.trim() || t("Scriboo user", "Użytkowniku Scriboo");
+    setWelcomeCelebration({ name: displayName, kind });
   };
 
   const readAuthResponse = async (response: Response) => {
@@ -1149,6 +1166,7 @@ export default function Page() {
           );
           setAuthMessage("");
           setShowLoginModal(false);
+          showWelcomeCelebration(data.user.name ?? name, "created");
           return;
         }
 
@@ -1170,10 +1188,11 @@ export default function Page() {
       setCurrentAccountId(data.user?.id ?? "");
       setCurrentAccountName(data.user?.name ?? "");
       setCurrentAccountEmail(data.user?.email ?? email);
-      await loadCurrentAccount();
       setAuthPassword("");
       setAuthMessage("");
       setShowLoginModal(false);
+      showWelcomeCelebration(data.user?.name, "login");
+      void loadCurrentAccount();
     } catch (error) {
       if (authMode === "register") {
         setTurnstileResetSignal((value) => value + 1);
@@ -1373,10 +1392,21 @@ export default function Page() {
     setCurrentSubscriptionCurrentPeriodEnd(
       data.user?.subscriptionCurrentPeriodEnd ?? null
     );
+
+    if (data.user && typeof window !== "undefined") {
+      const currentUrl = new URL(window.location.href);
+      const welcome = currentUrl.searchParams.get("welcome");
+      if (welcome === "login" || welcome === "created") {
+        showWelcomeCelebration(data.user.name, welcome);
+        currentUrl.searchParams.delete("welcome");
+        window.history.replaceState({}, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+      }
+    }
   };
 
   const closeAuthModal = () => {
     setShowLoginModal(false);
+    setShowForgotPassword(false);
     setAuthMessage("");
     setCanResendConfirmation(false);
   };
@@ -3018,8 +3048,6 @@ export default function Page() {
     `linear-gradient(0deg, rgba(4,8,34,0.12), rgba(4,8,34,0.12)), ${topBarPaletteGradient}`;
   const signatureIndigoButtonGradient =
     `linear-gradient(0deg, rgba(12,19,63,0.12), rgba(12,19,63,0.12)), ${topBarPaletteGradient}`;
-  const topBarSoftCardGradient =
-    "linear-gradient(135deg, rgba(235,142,76,0.16) 0%, rgba(248,207,96,0.13) 18%, rgba(239,226,114,0.12) 34%, rgba(145,203,114,0.1) 54%, rgba(66,179,182,0.11) 76%, rgba(104,168,239,0.16) 100%)";
   const topBarWarmCardGradient =
     "linear-gradient(135deg, rgba(235,142,76,0.17) 0%, rgba(248,207,96,0.14) 30%, rgba(255,255,255,0.98) 72%, rgba(104,168,239,0.1) 100%)";
   const topBarCoolCardGradient =
@@ -4221,7 +4249,7 @@ export default function Page() {
 
     try {
       const supabase = getSupabaseBrowserClient();
-      const redirectTo = `${window.location.origin}/auth/callback?next=/custom`;
+      const redirectTo = `${window.location.origin}/auth/callback?next=${encodeURIComponent("/custom?welcome=login")}`;
       const { data, error } = await supabase.auth.signInWithOAuth({
         provider,
         options: {
@@ -4953,6 +4981,12 @@ export default function Page() {
   useEffect(() => {
     loadCurrentAccount();
   }, []);
+
+  useEffect(() => {
+    if (!welcomeCelebration) return;
+    const timeout = window.setTimeout(() => setWelcomeCelebration(null), 2_050);
+    return () => window.clearTimeout(timeout);
+  }, [welcomeCelebration]);
 
   useEffect(() => {
     if (typeof window === "undefined") {
@@ -7927,7 +7961,294 @@ export default function Page() {
         </div>
       )}
 
-      {showLoginModal && (
+      {welcomeCelebration && typeof document !== "undefined" && createPortal(
+        <section
+          className="scriboo-welcome-celebration"
+          role="status"
+          aria-live="polite"
+          aria-label={t(
+            `Welcome, ${welcomeCelebration.name}!`,
+            `Witaj, ${welcomeCelebration.name}!`
+          )}
+          onClick={() => setWelcomeCelebration(null)}
+        >
+          <div className="scriboo-welcome-celebration__glow" aria-hidden="true" />
+          <div className="scriboo-welcome-celebration__burst" aria-hidden="true">
+            <span className="scriboo-welcome-celebration__popper">🎉</span>
+            {Array.from({ length: 18 }, (_, index) => {
+              const palette = ["#7447e8", "#5792e3", "#59bda5", "#f59e7a", "#f3c969"];
+              const angle = (index / 18) * Math.PI * 2;
+              const distance = 72 + (index % 5) * 18;
+              return (
+                <i
+                  key={index}
+                  className="scriboo-welcome-celebration__confetti"
+                  style={
+                    {
+                      "--confetti-x": `${Math.cos(angle) * distance}px`,
+                      "--confetti-y": `${Math.sin(angle) * distance}px`,
+                      "--confetti-color": palette[index % palette.length],
+                      "--confetti-delay": `${(index % 6) * 35}ms`,
+                      "--confetti-rotation": `${index * 47}deg`,
+                    } as React.CSSProperties
+                  }
+                />
+              );
+            })}
+          </div>
+          <div className="scriboo-welcome-celebration__copy">
+            <span>
+              {welcomeCelebration.kind === "created"
+                ? t("Your Scriboo workspace is ready", "Twoja przestrzeń Scriboo jest gotowa")
+                : t("Welcome back", "Witaj ponownie")}
+            </span>
+            <strong>{welcomeCelebration.name}!</strong>
+          </div>
+        </section>,
+        document.body
+      )}
+
+      {showLoginModal && showForgotPassword && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeAuthModal();
+          }}
+          style={{
+            position: "fixed",
+            inset: 0,
+            display: "grid",
+            placeItems: "center",
+            padding: "20px",
+            background:
+              "radial-gradient(circle at 18% 12%, rgba(124,58,237,0.12), transparent 34%), rgba(241,245,249,0.74)",
+            backdropFilter: "blur(16px)",
+            zIndex: 151,
+          }}
+        >
+          <form
+            aria-labelledby="forgot-password-title"
+            onMouseDown={(event) => event.stopPropagation()}
+            onSubmit={(event) => {
+              event.preventDefault();
+              void requestPasswordReset();
+            }}
+            style={{
+              position: "relative",
+              width: "min(620px, calc(100vw - 32px))",
+              boxSizing: "border-box",
+              padding: "clamp(28px, 6vw, 52px)",
+              borderRadius: "28px",
+              border: "1px solid rgba(203,213,225,0.88)",
+              background:
+                "linear-gradient(180deg, rgba(255,255,255,0.99), rgba(250,252,255,0.98))",
+              boxShadow:
+                "0 32px 90px rgba(30,41,59,0.18), inset 0 1px 0 rgba(255,255,255,0.95)",
+              color: "#111827",
+              fontFamily: appSansFontFamily,
+            }}
+          >
+            <button
+              type="button"
+              aria-label={t("Close password reset", "Zamknij resetowanie hasła")}
+              onClick={closeAuthModal}
+              style={{
+                position: "absolute",
+                top: "18px",
+                right: "18px",
+                width: "38px",
+                height: "38px",
+                borderRadius: "12px",
+                border: "1px solid rgba(203,213,225,0.8)",
+                background: "rgba(248,250,252,0.92)",
+                color: "#475569",
+                display: "grid",
+                placeItems: "center",
+                cursor: "pointer",
+              }}
+            >
+              <X size={18} />
+            </button>
+
+            <div
+              aria-hidden="true"
+              style={{
+                width: "64px",
+                height: "64px",
+                borderRadius: "20px",
+                display: "grid",
+                placeItems: "center",
+                marginBottom: "34px",
+                background:
+                  "linear-gradient(145deg, rgba(124,58,237,0.1), rgba(96,165,250,0.13))",
+                color: "#6846f5",
+              }}
+            >
+              <Mail size={30} strokeWidth={2.2} />
+            </div>
+
+            <h1
+              id="forgot-password-title"
+              style={{
+                margin: 0,
+                color: "#10111c",
+                fontSize: "clamp(30px, 5vw, 42px)",
+                lineHeight: 1.08,
+                letterSpacing: "-0.045em",
+                fontWeight: 850,
+              }}
+            >
+              {t("Forgot password?", "Nie pamiętasz hasła?")}
+            </h1>
+            <p
+              style={{
+                margin: "18px 0 34px",
+                color: "#71809f",
+                fontSize: "clamp(15px, 2.5vw, 18px)",
+                lineHeight: 1.55,
+                fontWeight: 520,
+              }}
+            >
+              {t(
+                "Enter your email and we’ll send you a secure password-reset link.",
+                "Wpisz swój adres e-mail, a wyślemy Ci bezpieczny link do zresetowania hasła."
+              )}
+            </p>
+
+            <label style={{ display: "grid", gap: "10px" }}>
+              <span style={{ color: "#111827", fontSize: "14px", fontWeight: 800 }}>
+                {t("Email address", "Adres e-mail")}
+              </span>
+              <div style={{ position: "relative" }}>
+                <Mail
+                  size={19}
+                  aria-hidden="true"
+                  style={{
+                    position: "absolute",
+                    left: "18px",
+                    top: "50%",
+                    transform: "translateY(-50%)",
+                    color: "#a7b1c9",
+                    pointerEvents: "none",
+                  }}
+                />
+                <input
+                  required
+                  autoFocus
+                  type="email"
+                  autoComplete="email"
+                  inputMode="email"
+                  value={authEmail}
+                  onChange={(event) => setAuthEmail(event.currentTarget.value)}
+                  placeholder={t("you@example.com", "twoj@email.pl")}
+                  style={{
+                    width: "100%",
+                    height: "58px",
+                    boxSizing: "border-box",
+                    padding: "0 18px 0 50px",
+                    borderRadius: "18px",
+                    border: "1.5px solid rgba(203,213,225,0.9)",
+                    background: "rgba(255,255,255,0.95)",
+                    color: "#111827",
+                    outlineColor: "#7c3aed",
+                    fontSize: "16px",
+                    fontWeight: 600,
+                    boxShadow: "inset 0 1px 2px rgba(15,23,42,0.025)",
+                  }}
+                />
+              </div>
+            </label>
+
+            <div style={{ marginTop: "16px" }}>
+              <TurnstileWidget
+                onTokenChange={handleTurnstileToken}
+                resetSignal={turnstileResetSignal}
+              />
+            </div>
+
+            {authMessage && (
+              <div
+                role={isPositiveAuthMessage ? "status" : "alert"}
+                style={{
+                  marginTop: "16px",
+                  padding: "12px 14px",
+                  borderRadius: "14px",
+                  background: isPositiveAuthMessage
+                    ? "rgba(34,197,94,0.1)"
+                    : "rgba(239,68,68,0.09)",
+                  color: isPositiveAuthMessage ? "#15803d" : "#b91c1c",
+                  fontSize: "13px",
+                  fontWeight: 750,
+                  lineHeight: 1.45,
+                }}
+              >
+                {authMessage}
+              </div>
+            )}
+
+            <button
+              type="submit"
+              disabled={isAuthSubmitting}
+              style={{
+                width: "100%",
+                height: "58px",
+                marginTop: "20px",
+                border: "1px solid rgba(255,255,255,0.5)",
+                borderRadius: "18px",
+                background: signatureIndigoGradient,
+                color: "#ffffff",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "12px",
+                fontSize: "16px",
+                fontWeight: 850,
+                cursor: isAuthSubmitting ? "default" : "pointer",
+                opacity: isAuthSubmitting ? 0.7 : 1,
+                boxShadow: "0 14px 28px rgba(99,102,241,0.2)",
+                transition: "transform 0.2s ease, filter 0.2s ease",
+              }}
+            >
+              {isAuthSubmitting
+                ? t("Sending…", "Wysyłanie…")
+                : t("Send reset link", "Wyślij link resetujący")}
+              {!isAuthSubmitting && <ArrowRight size={19} />}
+            </button>
+
+            <div
+              style={{
+                marginTop: "30px",
+                textAlign: "center",
+                color: "#8a96ae",
+                fontSize: "14px",
+                fontWeight: 650,
+              }}
+            >
+              {t("Remember your password?", "Pamiętasz swoje hasło?")} {" "}
+              <button
+                type="button"
+                onClick={() => {
+                  setShowForgotPassword(false);
+                  setAuthMessage("");
+                }}
+                style={{
+                  border: 0,
+                  padding: 0,
+                  background: "transparent",
+                  color: "#6846f5",
+                  font: "inherit",
+                  fontWeight: 850,
+                  cursor: "pointer",
+                }}
+              >
+                {t("Sign in", "Zaloguj się")}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {showLoginModal && !showForgotPassword && (
         <div
           role="presentation"
           onMouseDown={(e) => {
@@ -8330,7 +8651,11 @@ export default function Page() {
               </label>
               <button
                 type="button"
-                onClick={requestPasswordReset}
+                onClick={() => {
+                  setShowForgotPassword(true);
+                  setAuthMessage("");
+                  setCanResendConfirmation(false);
+                }}
                 disabled={isAuthSubmitting}
                 style={{
                   border: "none",
@@ -13288,19 +13613,21 @@ export default function Page() {
             </button>
             {showProfileMenu && (
               <div
+                className="scriboo-account-popover"
                 style={{
                   position: "absolute",
                   top: "calc(100% + 10px)",
                   right: 0,
-                  minWidth: "232px",
-                  padding: "16px 16px 18px",
+                  width: "min(280px, calc(100vw - 24px))",
+                  boxSizing: "border-box",
+                  padding: "18px",
                   borderRadius: "24px",
-                  border: "1px solid rgba(203,213,225,0.82)",
+                  border: "1px solid rgba(214,222,239,0.92)",
                   background:
-                    `linear-gradient(180deg, rgba(255,255,255,0.985) 0%, rgba(249,251,255,0.985) 100%), ${topBarSoftCardGradient}`,
+                    "radial-gradient(circle at 18% 8%, rgba(124,58,237,0.08), transparent 34%), radial-gradient(circle at 92% 88%, rgba(74,222,128,0.09), transparent 38%), linear-gradient(145deg, rgba(255,255,255,0.99), rgba(250,252,255,0.975))",
                   boxShadow:
-                    "0 22px 48px rgba(15,23,42,0.15), 0 1px 0 rgba(255,255,255,0.92) inset",
-                  backdropFilter: "blur(14px)",
+                    "0 32px 75px rgba(66,73,120,0.19), 0 1px 0 rgba(255,255,255,0.96) inset",
+                  backdropFilter: "blur(22px)",
                   overflow: "hidden",
                   backgroundClip: "padding-box",
                   display: "grid",
@@ -13314,35 +13641,35 @@ export default function Page() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "44px minmax(0, 1fr)",
+                    gridTemplateColumns: "54px minmax(0, 1fr)",
                     alignItems: "center",
-                    gap: "11px",
+                    gap: "13px",
                   }}
                 >
                   <div
                     style={{
-                      width: "44px",
-                      height: "44px",
-                      borderRadius: "14px",
-                      border: "1px solid rgba(191,219,254,0.9)",
+                      width: "54px",
+                      height: "54px",
+                      borderRadius: "17px",
+                      border: "2px solid rgba(255,255,255,0.94)",
                       background:
-                        "linear-gradient(180deg, #eef6ff 0%, #deefff 100%)",
+                        "linear-gradient(145deg, rgba(242,238,255,0.98), rgba(218,213,255,0.94))",
                       boxShadow:
-                        "0 8px 18px rgba(96,165,250,0.16), 0 1px 0 rgba(255,255,255,0.9) inset",
-                      color: "#2563eb",
+                        "0 15px 32px rgba(116,71,232,0.16), 0 1px 0 rgba(255,255,255,0.95) inset",
+                      color: "#7048e8",
                       display: "grid",
                       placeItems: "center",
                     }}
                   >
-                    <UserRound size={18} />
+                    <UserRound size={26} strokeWidth={1.8} />
                   </div>
-                  <div style={{ display: "grid", gap: "2px", minWidth: 0 }}>
+                  <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
                     <div
                       style={{
-                        color: "#6b7a90",
-                        fontSize: "8.5px",
-                        fontWeight: 700,
-                        letterSpacing: "0.24em",
+                        color: "#7779b9",
+                        fontSize: "9px",
+                        fontWeight: 750,
+                        letterSpacing: "0.26em",
                         textTransform: "uppercase",
                       }}
                     >
@@ -13351,10 +13678,10 @@ export default function Page() {
                     <div
                       style={{
                         color: "#0f172a",
-                        fontSize: "15px",
-                        fontWeight: 700,
-                        lineHeight: 1.14,
-                        letterSpacing: "-0.02em",
+                        fontSize: "18px",
+                        fontWeight: 750,
+                        lineHeight: 1.05,
+                        letterSpacing: "-0.035em",
                         whiteSpace: "nowrap",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
@@ -13368,15 +13695,15 @@ export default function Page() {
                   style={{
                     height: "1px",
                     background:
-                      "linear-gradient(90deg, rgba(191,219,254,0.95) 0%, rgba(219,234,254,0.8) 100%)",
+                      "linear-gradient(90deg, rgba(199,210,254,0.95), rgba(219,234,254,0.7))",
                   }}
                 />
                 <div
                   style={{
-                    color: "#5f6f84",
-                    fontSize: "10.75px",
-                    fontWeight: 500,
-                    lineHeight: 1.36,
+                    color: "#667085",
+                    fontSize: "12px",
+                    fontWeight: 520,
+                    lineHeight: 1.4,
                     letterSpacing: "0.002em",
                     wordBreak: "break-word",
                   }}
@@ -13386,45 +13713,61 @@ export default function Page() {
                 <div
                   style={{
                     justifySelf: "start",
-                    height: "31px",
+                    height: "32px",
                     padding: "0 14px",
                     borderRadius: "999px",
                     border: "1px solid rgba(196,181,253,0.8)",
                     background:
-                      "linear-gradient(180deg, rgba(245,243,255,0.98) 0%, rgba(237,233,254,0.98) 100%)",
+                      "linear-gradient(180deg, rgba(250,248,255,0.98), rgba(242,239,255,0.98))",
                     color: "#6d28d9",
                     display: "inline-flex",
                     alignItems: "center",
+                    gap: "8px",
                     fontSize: "10px",
-                    fontWeight: 700,
-                    letterSpacing: "0.12em",
+                    fontWeight: 750,
+                    letterSpacing: "0.14em",
                     textTransform: "uppercase",
                     boxShadow: "0 1px 0 rgba(255,255,255,0.82) inset",
                   }}
                 >
+                      <Crown size={14} fill="currentColor" strokeWidth={1.7} />
                       {currentPlanLabel} {t("plan", "plan")}
                 </div>
                 <button
                   type="button"
                   onClick={signOut}
                   style={{
-                    marginTop: "2px",
-                    height: "44px",
-                    padding: "0 16px",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(34,197,94,0.16)",
+                    marginTop: "3px",
+                    height: "48px",
+                    padding: "0 17px",
+                    borderRadius: "14px",
+                    border: "1px solid rgba(255,255,255,0.45)",
                     background:
-                      "linear-gradient(90deg, #18c9bf 0%, #30d463 100%)",
+                      "linear-gradient(100deg, #7b4ded 0%, #5d8de5 48%, #68cf77 100%)",
                     color: "#ffffff",
-                    fontSize: "14.5px",
-                    fontWeight: 650,
+                    display: "grid",
+                    gridTemplateColumns: "24px 1fr 24px",
+                    alignItems: "center",
+                    fontSize: "15px",
+                    fontWeight: 700,
                     letterSpacing: "-0.01em",
                     boxShadow:
-                      "0 14px 26px rgba(52,211,153,0.24), 0 1px 0 rgba(255,255,255,0.18) inset",
+                      "0 18px 34px rgba(92,105,210,0.28), 0 1px 0 rgba(255,255,255,0.28) inset",
                     cursor: "pointer",
+                    transition: "transform 160ms ease, box-shadow 160ms ease, filter 160ms ease",
+                  }}
+                  onMouseEnter={(event) => {
+                    event.currentTarget.style.transform = "translateY(-2px)";
+                    event.currentTarget.style.filter = "saturate(1.08)";
+                  }}
+                  onMouseLeave={(event) => {
+                    event.currentTarget.style.transform = "translateY(0)";
+                    event.currentTarget.style.filter = "none";
                   }}
                 >
-                    {t("Log out", "Wyloguj się")}
+                    <LogOut size={20} strokeWidth={2} />
+                    <span>{t("Log out", "Wyloguj się")}</span>
+                    <span aria-hidden="true" />
                 </button>
               </div>
             )}

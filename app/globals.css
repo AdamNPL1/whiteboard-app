@@ -283,6 +283,230 @@ input.modern-range::-ms-thumb {
   animation: scriboo-welcome-rise-v2 880ms cubic-bezier(0.16, 1, 0.3, 1) 650ms both;
 }
 
+.scriboo-account-popover {
+  transform-origin: top right;
+  animation: scriboo-account-popover-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes scriboo-account-popover-enter {
+  from {
+    opacity: 0;
+    transform: translate3d(0, -10px, 0) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.scriboo-welcome-celebration {
+  position: fixed;
+  inset: 0;
+  z-index: 400;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: clamp(16px, 3vh, 30px);
+  overflow: hidden;
+  padding: 24px;
+  background:
+    radial-gradient(circle at 50% 44%, rgba(116, 71, 232, 0.08), transparent 25%),
+    rgba(255, 255, 255, 0.985);
+  cursor: pointer;
+  isolation: isolate;
+  contain: strict;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  animation: scriboo-celebration-screen 2050ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.scriboo-welcome-celebration__glow {
+  position: absolute;
+  z-index: -1;
+  width: min(620px, 80vw);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle,
+    rgba(116, 71, 232, 0.12),
+    rgba(87, 146, 227, 0.07) 34%,
+    rgba(89, 189, 165, 0.035) 54%,
+    transparent 72%
+  );
+  filter: blur(12px);
+  transform: translateZ(0);
+  animation: scriboo-celebration-glow 720ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scriboo-welcome-celebration__burst {
+  position: relative;
+  width: 190px;
+  height: 170px;
+  display: grid;
+  place-items: center;
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  animation: scriboo-celebration-burst-forward 760ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scriboo-welcome-celebration__popper {
+  position: relative;
+  z-index: 2;
+  display: block;
+  font-size: clamp(76px, 9vw, 108px);
+  line-height: 1;
+  filter: drop-shadow(0 18px 22px rgba(91, 61, 190, 0.18));
+  transform-origin: 44% 72%;
+  animation: scriboo-celebration-popper 560ms cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.scriboo-welcome-celebration__confetti {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 9px;
+  height: 14px;
+  border-radius: 3px;
+  background: var(--confetti-color);
+  opacity: 0;
+  box-shadow: 0 2px 4px rgba(30, 41, 59, 0.08);
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+  animation: scriboo-celebration-confetti 760ms cubic-bezier(0.16, 0.8, 0.25, 1)
+    var(--confetti-delay) both;
+}
+
+.scriboo-welcome-celebration__confetti:nth-of-type(3n) {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.scriboo-welcome-celebration__confetti:nth-of-type(4n) {
+  width: 13px;
+  height: 5px;
+  border-radius: 999px;
+}
+
+.scriboo-welcome-celebration__copy {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: center;
+  gap: 0.18em 0.3em;
+  max-width: min(980px, calc(100vw - 40px));
+  text-align: center;
+  font-family: var(--font-sans), ui-sans-serif, system-ui, sans-serif;
+  font-size: clamp(30px, 5vw, 66px);
+  line-height: 1.08;
+  letter-spacing: -0.045em;
+  will-change: transform, opacity;
+  transform: translateZ(0);
+  backface-visibility: hidden;
+  animation: scriboo-celebration-copy-forward 720ms cubic-bezier(0.16, 1, 0.3, 1) 150ms both;
+}
+
+.scriboo-welcome-celebration__copy span,
+.scriboo-welcome-celebration__copy strong {
+  color: transparent;
+  background: linear-gradient(
+    105deg,
+    #7447e8 0%,
+    #5792e3 24%,
+    #59bda5 48%,
+    #7447e8 72%,
+    #5792e3 86%,
+    #59bda5 100%
+  );
+  background-clip: text;
+  -webkit-background-clip: text;
+  will-change: transform, opacity;
+  backface-visibility: hidden;
+}
+
+.scriboo-welcome-celebration__copy span {
+  font-weight: 500;
+  animation: scriboo-celebration-greeting 680ms cubic-bezier(0.16, 1, 0.3, 1) 170ms both;
+}
+
+.scriboo-welcome-celebration__copy strong {
+  font-weight: 750;
+  animation: scriboo-celebration-name 720ms cubic-bezier(0.16, 1, 0.3, 1) 300ms both;
+}
+
+@keyframes scriboo-celebration-screen {
+  0% { opacity: 0; }
+  3%, 68% { opacity: 1; }
+  100% { opacity: 0; }
+}
+
+@keyframes scriboo-celebration-burst-forward {
+  0% { opacity: 0; transform: translate3d(0, 70px, 0) scale(0.12) rotate(-12deg); }
+  68% { opacity: 1; transform: translate3d(0, -10px, 0) scale(1.12) rotate(3deg); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1) rotate(0); }
+}
+
+@keyframes scriboo-celebration-copy-forward {
+  0% { opacity: 0; transform: translate3d(0, 85px, 0) scale(0.72); }
+  72% { opacity: 1; transform: translate3d(0, -5px, 0) scale(1.025); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@keyframes scriboo-celebration-glow {
+  from { opacity: 0; transform: scale(0.45); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes scriboo-celebration-popper {
+  0% { opacity: 0; transform: translateY(24px) rotate(-18deg) scale(0.35); }
+  58% { opacity: 1; transform: translateY(-8px) rotate(5deg) scale(1.12); }
+  78% { transform: translateY(2px) rotate(-2deg) scale(0.97); }
+  100% { opacity: 1; transform: translateY(0) rotate(0) scale(1); }
+}
+
+@keyframes scriboo-celebration-confetti {
+  0% { opacity: 0; transform: translate(-50%, -50%) rotate(0) scale(0.25); }
+  12% { opacity: 1; }
+  74% { opacity: 1; }
+  100% {
+    opacity: 0;
+    transform: translate(
+      calc(-50% + var(--confetti-x)),
+      calc(-50% + var(--confetti-y))
+    ) rotate(var(--confetti-rotation)) scale(1);
+  }
+}
+
+@keyframes scriboo-celebration-greeting {
+  0% { opacity: 0; transform: translate3d(-160px, 14px, 0); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0); }
+}
+
+@keyframes scriboo-celebration-name {
+  0% { opacity: 0; transform: translate3d(180px, 15px, 0) scale(0.82); }
+  66% { opacity: 1; transform: translate3d(-5px, -2px, 0) scale(1.025); }
+  100% { opacity: 1; transform: translate3d(0, 0, 0) scale(1); }
+}
+
+@media (max-width: 560px) {
+  .scriboo-welcome-celebration {
+    gap: 10px;
+    padding: 20px;
+  }
+
+  .scriboo-welcome-celebration__burst {
+    width: 150px;
+    height: 140px;
+  }
+
+  .scriboo-welcome-celebration__copy {
+    max-width: calc(100vw - 32px);
+    font-size: clamp(29px, 9vw, 42px);
+  }
+}
+
+
 @keyframes scriboo-discover-rail-enter {
   from {
     opacity: 0;
