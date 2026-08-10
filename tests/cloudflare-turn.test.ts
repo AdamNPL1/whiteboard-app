@@ -50,7 +50,7 @@ describe("Cloudflare TURN credentials", () => {
       "turn:turn.cloudflare.com:53?transport=udp"
     );
     expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining("/credentials/generate"),
+      expect.stringContaining("/credentials/generate-ice-servers"),
       expect.objectContaining({
         headers: expect.objectContaining({
           Authorization: "Bearer private-test-token",

@@ -39,15 +39,20 @@ import {
   CloudOff,
   CircleHelp,
   Monitor,
+  Moon,
   Plus,
   RefreshCw,
+  Redo2,
+  Ruler,
   Search,
   Settings,
   Share2,
   Star,
   Underline,
+  Undo2,
   Upload,
   UserRound,
+  Sun,
   Crown,
   LogOut,
   AlertTriangle,
@@ -59,7 +64,7 @@ import { useLanguage } from "@/lib/i18n";
 import { useCall } from "@/app/components/CallProvider";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 
-type ShapeTool = "circle" | "square" | "arrow" | "line";
+type ShapeTool = "circle" | "square" | "arrow" | "line" | "ruler";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
 
@@ -159,7 +164,7 @@ type TextSelection = {
   start: number;
   end: number;
 };
-type SettingsSection = "background" | "tools" | "language" | "account";
+type SettingsSection = "background" | "language" | "account";
 type GridMode = "none" | "dots" | "small" | "standard" | "large";
 type TextResizeHandle = "n" | "e" | "s" | "w" | "nw" | "ne" | "sw" | "se";
 type CanvasPointerInput = Pick<PointerEvent, "clientX" | "clientY">;
@@ -263,10 +268,14 @@ export default function Page() {
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
   const darkCanvasColor = "#111111";
+  const neonCanvasBackground = "neon";
+  const neonCanvasBaseColor = "#070816";
+  const classicRulerColor = "#d0a12b";
+  const classicRulerTextColor = "#3b2908";
   const floralCanvasBackground = "floral";
   const floralBackgroundImage = "/floral-background.png";
   const floralBackgroundTile = { width: 1600, height: 900 };
-  const penColors = [
+  const basePenColors = [
     { name: "black", value: "#000000" },
     { name: "white", value: "#ffffff" },
     { name: "grey", value: "#9ca3af" },
@@ -280,6 +289,21 @@ export default function Page() {
     { name: "green", value: "#4ade80" },
     { name: "red", value: "#fb7185" },
     { name: "red", value: "#ef4444" },
+  ];
+  const neonPenColors = [
+    { name: "neon cyan", value: "#39ffef" },
+    { name: "electric blue", value: "#38bdf8" },
+    { name: "neon violet", value: "#a855f7" },
+    { name: "hot pink", value: "#ff4fd8" },
+    { name: "laser red", value: "#ff416c" },
+    { name: "neon orange", value: "#ff8a1f" },
+    { name: "acid yellow", value: "#f5ff3b" },
+    { name: "neon lime", value: "#9dff3b" },
+    { name: "bright green", value: "#35ff8a" },
+    { name: "white", value: "#ffffff" },
+    { name: "soft lavender", value: "#d8b4fe" },
+    { name: "aqua", value: "#67e8f9" },
+    { name: "magenta", value: "#f472ff" },
   ];
   const textColorPalette = [
     { name: "White", value: "#ffffff" },
@@ -456,6 +480,7 @@ export default function Page() {
     startImage: ImageElement;
     startDistance?: number;
     startAngle?: number;
+    didRecordHistory?: boolean;
   } | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
@@ -465,9 +490,25 @@ export default function Page() {
   >("pen");
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
+  const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  const [isInterfaceDarkMode, setIsInterfaceDarkMode] = useState(false);
   const [, setShowTextMenu] = useState(false);
   const textBoxOpacity = 0.75;
   const [showEraserMenu, setShowEraserMenu] = useState(false);
+
+  useEffect(() => {
+    const savedTheme = window.localStorage.getItem("scriboo-interface-theme");
+    setIsInterfaceDarkMode(
+      savedTheme === "dark" ||
+        (savedTheme === null && window.matchMedia("(prefers-color-scheme: dark)").matches)
+    );
+  }, []);
+
+  useEffect(() => {
+    const theme = isInterfaceDarkMode ? "dark" : "light";
+    document.documentElement.dataset.scribooTheme = theme;
+    window.localStorage.setItem("scriboo-interface-theme", theme);
+  }, [isInterfaceDarkMode]);
   const [shapeStart, setShapeStart] = useState<Point | null>(null);
   const [snapshot, setSnapshot] = useState<ImageData | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -479,6 +520,8 @@ export default function Page() {
   const [textFontFamily, setTextFontFamily] = useState(textFonts[0].family);
   const [textFontWeight, setTextFontWeight] = useState(textFonts[0].weight);
   const [canvasBackground, setCanvasBackground] = useState(lightCanvasColor);
+  const penColors =
+    canvasBackground === neonCanvasBackground ? neonPenColors : basePenColors;
   const [customCanvasBackground, setCustomCanvasBackground] =
     useState("#131619");
   const [gridMode, setGridMode] = useState<GridMode>("none");
@@ -678,6 +721,77 @@ export default function Page() {
 
   const [elements, setElements] = useState<CanvasElement[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const undoStackRef = useRef<CanvasElement[][]>([]);
+  const redoStackRef = useRef<CanvasElement[][]>([]);
+  const [undoDepth, setUndoDepth] = useState(0);
+  const [redoDepth, setRedoDepth] = useState(0);
+
+  const recordCanvasHistory = (snapshot = elements) => {
+    undoStackRef.current = [...undoStackRef.current.slice(-99), snapshot];
+    redoStackRef.current = [];
+    setUndoDepth(undoStackRef.current.length);
+    setRedoDepth(0);
+  };
+
+  const undoCanvasChange = () => {
+    const previous = undoStackRef.current.at(-1);
+    if (!previous) return;
+    undoStackRef.current = undoStackRef.current.slice(0, -1);
+    redoStackRef.current = [...redoStackRef.current, elements];
+    setElements(previous);
+    setUndoDepth(undoStackRef.current.length);
+    setRedoDepth(redoStackRef.current.length);
+    setActiveText(null);
+    setSelectedImageIndex(null);
+    setSelectionBox(null);
+    setSelectionMenu(null);
+  };
+
+  const redoCanvasChange = () => {
+    const next = redoStackRef.current.at(-1);
+    if (!next) return;
+    redoStackRef.current = redoStackRef.current.slice(0, -1);
+    undoStackRef.current = [...undoStackRef.current, elements];
+    setElements(next);
+    setUndoDepth(undoStackRef.current.length);
+    setRedoDepth(redoStackRef.current.length);
+    setActiveText(null);
+    setSelectedImageIndex(null);
+    setSelectionBox(null);
+    setSelectionMenu(null);
+  };
+
+  const handleUndoRedoShortcut = useEffectEvent((event: KeyboardEvent) => {
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.isContentEditable ||
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA"
+    ) {
+      return;
+    }
+
+    const hasCommandKey = event.ctrlKey || event.metaKey;
+    if (!hasCommandKey) return;
+
+    if (event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      if (event.shiftKey) {
+        redoCanvasChange();
+      } else {
+        undoCanvasChange();
+      }
+    } else if (event.key.toLowerCase() === "y") {
+      event.preventDefault();
+      redoCanvasChange();
+    }
+  });
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => handleUndoRedoShortcut(event);
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, []);
 
   const currentStroke = useRef<Stroke | null>(null);
   const isDrawingRef = useRef(false);
@@ -1424,6 +1538,10 @@ export default function Page() {
     setSelectedImageIndex(null);
     setSelectionBox(null);
     setSelectionMenu(null);
+    undoStackRef.current = [];
+    redoStackRef.current = [];
+    setUndoDepth(0);
+    setRedoDepth(0);
     setElements(Array.isArray(document.elements) ? document.elements : []);
     setCanvasBackground(document.canvasBackground);
     setCustomCanvasBackground(document.customCanvasBackground);
@@ -2062,9 +2180,26 @@ export default function Page() {
     const background =
       documentToExport.canvasBackground === floralCanvasBackground
         ? lightCanvasColor
-        : documentToExport.canvasBackground || lightCanvasColor;
+        : documentToExport.canvasBackground === neonCanvasBackground
+          ? neonCanvasBaseColor
+          : documentToExport.canvasBackground || lightCanvasColor;
     context.fillStyle = background;
     context.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    if (documentToExport.canvasBackground === neonCanvasBackground) {
+      const glow = context.createRadialGradient(
+        exportCanvas.width * 0.2,
+        exportCanvas.height * 0.18,
+        0,
+        exportCanvas.width * 0.2,
+        exportCanvas.height * 0.18,
+        Math.max(exportCanvas.width, exportCanvas.height) * 0.72
+      );
+      glow.addColorStop(0, "rgba(124,58,237,0.3)");
+      glow.addColorStop(0.5, "rgba(14,165,233,0.09)");
+      glow.addColorStop(1, "rgba(7,8,22,0)");
+      context.fillStyle = glow;
+      context.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+    }
     context.save();
     context.scale(renderScale, renderScale);
     context.translate(-contentBounds.x, -contentBounds.y);
@@ -2101,7 +2236,10 @@ export default function Page() {
           : documentToExport.gridMode === "large"
           ? 72
           : 40;
-      const lightGrid = background === darkCanvasColor || background === greyCanvasColor;
+      const lightGrid =
+        background === darkCanvasColor ||
+        background === greyCanvasColor ||
+        documentToExport.canvasBackground === neonCanvasBackground;
       const exportGridColor = lightGrid
         ? `rgba(255,255,255,${documentToExport.gridOpacity / 100})`
         : `rgba(15,23,42,${documentToExport.gridOpacity / 100})`;
@@ -3054,7 +3192,9 @@ export default function Page() {
     "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,226,114,0.1) 24%, rgba(66,179,182,0.12) 68%, rgba(104,168,239,0.15) 100%)";
   const topBarFeaturedChipGradient =
     "linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)";
-  const topBarGradient = topBarPaletteGradient;
+  const topBarGradient = isInterfaceDarkMode
+    ? "linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%)"
+    : topBarPaletteGradient;
   const premiumHeadingStyle = {
     letterSpacing: "-0.045em",
     fontWeight: 650,
@@ -3617,6 +3757,40 @@ export default function Page() {
               strokeLinecap="round"
               strokeLinejoin="round"
             />
+          </g>
+        );
+      }
+
+      if (element.tool === "ruler") {
+        const length = Math.hypot(
+          element.end.x - element.start.x,
+          element.end.y - element.start.y
+        );
+        const labelX = (element.start.x + element.end.x) / 2;
+        const labelY = (element.start.y + element.end.y) / 2 - 12;
+        return (
+          <g key={index}>
+            <line
+              x1={element.start.x}
+              y1={element.start.y}
+              x2={element.end.x}
+              y2={element.end.y}
+              stroke={classicRulerColor}
+              strokeWidth={element.width}
+              strokeLinecap="round"
+            />
+            <circle cx={element.start.x} cy={element.start.y} r={3} fill={classicRulerColor} />
+            <circle cx={element.end.x} cy={element.end.y} r={3} fill={classicRulerColor} />
+            <text
+              x={labelX}
+              y={labelY}
+              fill={classicRulerColor}
+              fontSize="12"
+              fontWeight="700"
+              textAnchor="middle"
+            >
+              {Math.round(length)} px
+            </text>
           </g>
         );
       }
@@ -4417,6 +4591,54 @@ export default function Page() {
       ctx.stroke();
       return;
     }
+
+    if (shape === "ruler") {
+      const length = Math.hypot(shapeWidth, height);
+      if (length < 1) return;
+
+      const angle = Math.atan2(height, shapeWidth);
+      const capHeight = 14;
+      const tickSpacing = 10;
+
+      ctx.save();
+      ctx.translate(startX, startY);
+      ctx.rotate(angle);
+      ctx.setLineDash([]);
+      ctx.lineCap = "round";
+      ctx.strokeStyle = classicRulerColor;
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(length, 0);
+      ctx.moveTo(0, -capHeight);
+      ctx.lineTo(0, capHeight);
+      ctx.moveTo(length, -capHeight);
+      ctx.lineTo(length, capHeight);
+
+      const tickCount = Math.min(Math.floor(length / tickSpacing), 500);
+      for (let index = 1; index < tickCount; index += 1) {
+        const x = index * tickSpacing;
+        const tickHeight = index % 5 === 0 ? 8 : 4;
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, tickHeight);
+      }
+      ctx.stroke();
+
+      const label = `${Math.round(length)} px`;
+      ctx.font = "600 12px Inter, system-ui, sans-serif";
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      const labelWidth = ctx.measureText(label).width + 14;
+      const labelX = length / 2;
+      const labelY = -19;
+      ctx.fillStyle = classicRulerColor;
+      ctx.beginPath();
+      ctx.roundRect(labelX - labelWidth / 2, labelY - 10, labelWidth, 20, 7);
+      ctx.fill();
+      ctx.fillStyle = classicRulerTextColor;
+      ctx.fillText(label, labelX, labelY + 0.5);
+      ctx.restore();
+      return;
+    }
   };
 
   const getSelectionBounds = (selection: SelectionBox): Bounds => ({
@@ -4713,8 +4935,15 @@ export default function Page() {
   };
 
   const isFloralCanvas = canvasBackground === floralCanvasBackground;
-  const canvasFillColor = isFloralCanvas ? lightCanvasColor : canvasBackground;
-  const canvasCssBackground = canvasFillColor;
+  const isNeonCanvas = canvasBackground === neonCanvasBackground;
+  const canvasFillColor = isFloralCanvas
+    ? lightCanvasColor
+    : isNeonCanvas
+      ? neonCanvasBaseColor
+      : canvasBackground;
+  const canvasCssBackground = isNeonCanvas
+    ? "radial-gradient(circle at 18% 16%, rgba(124,58,237,0.3), transparent 38%), radial-gradient(circle at 82% 78%, rgba(6,182,212,0.18), transparent 42%), #070816"
+    : canvasFillColor;
 
   const drawCanvasBackground = (
     ctx: CanvasRenderingContext2D,
@@ -4723,6 +4952,35 @@ export default function Page() {
   ) => {
     ctx.fillStyle = canvasFillColor;
     ctx.fillRect(0, 0, width, height);
+
+    if (isNeonCanvas) {
+      const violetGlow = ctx.createRadialGradient(
+        width * 0.18,
+        height * 0.16,
+        0,
+        width * 0.18,
+        height * 0.16,
+        Math.max(width, height) * 0.62
+      );
+      violetGlow.addColorStop(0, "rgba(124,58,237,0.3)");
+      violetGlow.addColorStop(0.5, "rgba(59,130,246,0.08)");
+      violetGlow.addColorStop(1, "rgba(7,8,22,0)");
+      ctx.fillStyle = violetGlow;
+      ctx.fillRect(0, 0, width, height);
+
+      const cyanGlow = ctx.createRadialGradient(
+        width * 0.84,
+        height * 0.82,
+        0,
+        width * 0.84,
+        height * 0.82,
+        Math.max(width, height) * 0.48
+      );
+      cyanGlow.addColorStop(0, "rgba(6,182,212,0.2)");
+      cyanGlow.addColorStop(1, "rgba(7,8,22,0)");
+      ctx.fillStyle = cyanGlow;
+      ctx.fillRect(0, 0, width, height);
+    }
 
     const floralImage = floralBackgroundRef.current;
     if (isFloralCanvas && floralImage?.complete) {
@@ -4766,7 +5024,9 @@ export default function Page() {
     const gridStartX = Math.floor(gridVisibleLeft / gridSpacing) * gridSpacing;
     const gridStartY = Math.floor(gridVisibleTop / gridSpacing) * gridSpacing;
     const shouldUseLightGrid =
-      canvasBackground === darkCanvasColor || canvasBackground === greyCanvasColor;
+      canvasBackground === darkCanvasColor ||
+      canvasBackground === greyCanvasColor ||
+      canvasBackground === neonCanvasBackground;
     const gridColor =
       shouldUseLightGrid
         ? `rgba(255,255,255,${(gridOpacity / 100).toFixed(2)})`
@@ -4828,7 +5088,13 @@ export default function Page() {
     ctx.translate(offset.x, offset.y);
     ctx.scale(zoom, zoom);
 
-    for (const [index, element] of elements.entries()) {
+    const activeEraserStroke =
+      currentStroke.current?.tool === "eraser" ? currentStroke.current : null;
+    const visibleElements = activeEraserStroke
+      ? eraseElements(elements, activeEraserStroke)
+      : elements;
+
+    for (const [index, element] of visibleElements.entries()) {
       if (activeText?.editingIndex === index) {
         continue;
       }
@@ -4888,13 +5154,13 @@ export default function Page() {
       drawStrokePath(ctx, element.points, element.width, element.style);
     }
 
-    if (currentStroke.current && currentStroke.current.points.length > 0) {
+    if (
+      currentStroke.current?.tool === "pen" &&
+      currentStroke.current.points.length > 0
+    ) {
       const stroke = currentStroke.current;
-
-      ctx.strokeStyle =
-        stroke.tool === "pen" ? stroke.color ?? "black" : canvasFillColor;
-      ctx.fillStyle =
-        stroke.tool === "pen" ? stroke.color ?? "black" : canvasFillColor;
+      ctx.strokeStyle = stroke.color ?? "black";
+      ctx.fillStyle = stroke.color ?? "black";
       drawStrokePath(ctx, stroke.points, stroke.width, stroke.style);
     }
 
@@ -5555,6 +5821,7 @@ export default function Page() {
     }
 
     const firstImportedIndex = elements.length;
+    recordCanvasHistory();
     setElements((previous) => [...previous, ...validImages]);
     setSelectedImageIndex(firstImportedIndex);
     setTool("cursor");
@@ -5744,6 +6011,7 @@ export default function Page() {
         backgroundColor: activeText.backgroundColor,
       };
 
+      recordCanvasHistory();
       setElements((prev) => {
         if (activeText.editingIndex === undefined) {
           return [...prev, nextText];
@@ -5787,6 +6055,8 @@ export default function Page() {
     if (!selectionBox) return;
 
     const selectedIndexes = getSelectedPenElementIndexes(selectionBox);
+    if (selectedIndexes.size === 0) return;
+    recordCanvasHistory();
     setElements((prev) => prev.filter((_, index) => !selectedIndexes.has(index)));
     setSelectionBox(null);
     setSelectionMenu(null);
@@ -5926,7 +6196,8 @@ export default function Page() {
       tool === "circle" ||
       tool === "square" ||
       tool === "arrow" ||
-      tool === "line"
+      tool === "line" ||
+      tool === "ruler"
     ) {
       isDrawingRef.current = true;
       setIsDrawing(true);
@@ -6081,7 +6352,8 @@ export default function Page() {
         tool === "circle" ||
         tool === "square" ||
         tool === "arrow" ||
-        tool === "line"
+        tool === "line" ||
+        tool === "ruler"
       ) &&
       shapeStart &&
       snapshot
@@ -6144,6 +6416,7 @@ export default function Page() {
     );
     if (!confirmed) return;
 
+    recordCanvasHistory();
     setElements([]);
     setActiveText(null);
     setSelectedImageIndex(null);
@@ -6221,13 +6494,15 @@ export default function Page() {
         tool === "circle" ||
         tool === "square" ||
         tool === "arrow" ||
-        tool === "line"
+        tool === "line" ||
+        tool === "ruler"
       ) &&
       shapeStart &&
       shapeEnd.current
     ) {
       const finalShapeEnd = shapeEnd.current;
 
+      recordCanvasHistory();
       setElements((prev) => [
         ...prev,
         {
@@ -6236,7 +6511,7 @@ export default function Page() {
           start: shapeStart,
           end: finalShapeEnd,
           width: penWidth,
-          color: penColor,
+          color: tool === "ruler" ? classicRulerColor : penColor,
           style: strokeStyle,
         },
       ]);
@@ -6249,6 +6524,7 @@ export default function Page() {
           points: [...currentStroke.current.points],
         };
 
+        recordCanvasHistory();
         setElements((prev) => eraseElements(prev, eraserStroke));
         currentStroke.current = null;
         isDrawingRef.current = false;
@@ -6269,6 +6545,7 @@ export default function Page() {
         style: currentStroke.current.style,
       };
 
+      recordCanvasHistory();
       setElements((prev) => [...prev, finishedStroke]);
       currentStroke.current = null;
       renderedLiveStrokePointCountRef.current = 0;
@@ -6317,6 +6594,10 @@ export default function Page() {
     const gesture = imageTransformRef.current;
     if (!gesture || gesture.pointerId !== e.pointerId) return;
     e.preventDefault();
+    if (!gesture.didRecordHistory) {
+      recordCanvasHistory();
+      gesture.didRecordHistory = true;
+    }
     const image = gesture.startImage;
     const centerX = image.point.x + image.width / 2;
     const centerY = image.point.y + image.height / 2;
@@ -6380,7 +6661,7 @@ export default function Page() {
     }
   };
 
-  const selectShapeTool = (nextTool: "circle" | "square" | "arrow" | "line") => {
+  const selectShapeTool = (nextTool: ShapeTool) => {
     // A shape popover closes underneath the pointer. Clear any drawing/panning
     // cursor left behind by the previous tool before revealing the canvas.
     isPanningRef.current = false;
@@ -6400,14 +6681,21 @@ export default function Page() {
   const isCursorActive = tool === "cursor";
   const isTextActive = tool === "text";
   const isPenActive = tool === "pen";
-  const isDarkCanvas = canvasBackground === darkCanvasColor;
+  const isDarkCanvas =
+    isInterfaceDarkMode ||
+    canvasBackground === darkCanvasColor ||
+    canvasBackground === neonCanvasBackground;
   const isGreyCanvas = canvasBackground === greyCanvasColor;
-  const toolbarBackground = isDarkCanvas
+  const toolbarBackground = isInterfaceDarkMode
+    ? "linear-gradient(180deg, rgba(32,37,65,0.97) 0%, rgba(24,28,53,0.97) 100%)"
+    : isDarkCanvas
     ? "rgba(30,30,30,0.94)"
     : isGreyCanvas
     ? "rgba(75,85,99,0.94)"
     : "rgba(255,255,255,0.92)";
-  const popoverBackground = isDarkCanvas
+  const popoverBackground = isInterfaceDarkMode
+    ? "rgba(31,36,63,0.98)"
+    : isDarkCanvas
     ? "rgba(34,34,34,0.96)"
     : isGreyCanvas
     ? "rgba(82,92,106,0.96)"
@@ -6553,6 +6841,7 @@ export default function Page() {
 
   return (
     <div
+      className={isInterfaceDarkMode ? "scriboo-dark-interface" : undefined}
       onMouseDown={() => {
         setSelectionMenu(null);
         setTextSizeMenu(null);
@@ -6593,6 +6882,8 @@ export default function Page() {
           height: `calc(100vh - ${topBarHeight}px)`,
           display: "block",
           background: canvasCssBackground,
+          filter: isInterfaceDarkMode ? "brightness(0.91)" : "none",
+          transition: "filter 180ms ease",
           cursor: canvasCursor,
           touchAction: "none",
           userSelect: "none",
@@ -9342,6 +9633,39 @@ export default function Page() {
         </section>
       )}
 
+      {isToolbarCollapsed && (
+        <button
+          type="button"
+          aria-label={t("Show drawing toolbar", "Pokaż pasek narzędzi")}
+          title={t("Show toolbar", "Pokaż pasek")}
+          onClick={() => setIsToolbarCollapsed(false)}
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: 0,
+            width: "28px",
+            height: "58px",
+            transform: "translateY(-50%)",
+            borderTop: `1px solid ${panelBorderColor}`,
+            borderRight: `1px solid ${panelBorderColor}`,
+            borderBottom: `1px solid ${panelBorderColor}`,
+            borderLeftWidth: 0,
+            borderRadius: "0 12px 12px 0",
+            background: toolbarBackground,
+            color: panelTextColor,
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            backdropFilter: "blur(10px)",
+            boxShadow: "4px 8px 18px rgba(0,0,0,0.14)",
+            zIndex: 20,
+          }}
+        >
+          <ChevronRight size={18} />
+        </button>
+      )}
+
       <div
         onPointerEnter={hidePenCursor}
         onPointerMove={hidePenCursor}
@@ -9436,32 +9760,61 @@ export default function Page() {
             <button
             aria-label={t("Boards", "Tablice")}
               onClick={() => {
-                setShowBoardsMenu((prev) => !prev);
+                setShowBoardsMenu((prev) =>
+                  boardBrowserView === "calendar" ? true : !prev
+                );
+                setBoardBrowserView("all");
                 setShowSettingsMenu(false);
               }}
               style={{
                 width: "34px",
                 height: "34px",
                 borderRadius: "10px",
-                border: showBoardsMenu
-                  ? "1.5px solid rgba(255,255,255,0.78)"
-                  : "1.5px solid rgba(255,255,255,0.34)",
-                background: showBoardsMenu
-                  ? "rgba(255,255,255,0.16)"
-                  : "rgba(255,255,255,0.08)",
+                border: "none",
+                background: "transparent",
                 color: "#ffffff",
                 display: "grid",
                 placeItems: "center",
                 cursor: "pointer",
                 padding: 0,
-                backdropFilter: "blur(8px)",
+                backdropFilter: "none",
                 }}
               >
                 <LayoutGrid size={16} />
               </button>
 
+              <button
+                type="button"
+                aria-label={t("Calendar", "Kalendarz")}
+                title={t("Calendar", "Kalendarz")}
+                onClick={() => {
+                  setBillingNotice(null);
+                  setBoardBrowserView("calendar");
+                  setShowBoardsMenu(true);
+                  setShowSettingsMenu(false);
+                }}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: "90px",
+                  width: "34px",
+                  height: "34px",
+                  border: "none",
+                  borderRadius: "10px",
+                  background: "transparent",
+                  color: "#ffffff",
+                  display: "grid",
+                  placeItems: "center",
+                  padding: 0,
+                  cursor: "pointer",
+                }}
+              >
+                <CalendarDays size={17} />
+              </button>
+
           {showBoardsMenu && (
               <div
+                className="scriboo-workspace-panel"
                 style={{
                   position: "absolute",
                   top: "calc(100% + 10px)",
@@ -9474,7 +9827,10 @@ export default function Page() {
                   border: "1px solid rgba(205,218,236,0.92)",
                   boxShadow: premiumShellShadow,
                   display: "grid",
-                  gridTemplateColumns: "300px minmax(0, 1fr)",
+                  gridTemplateColumns:
+                    boardBrowserView === "calendar"
+                      ? "minmax(0, 1fr)"
+                      : "300px minmax(0, 1fr)",
                   overflow: "hidden",
                   zIndex: 90,
                   fontFamily: appSansFontFamily,
@@ -9483,7 +9839,8 @@ export default function Page() {
                   MozOsxFontSmoothing: "grayscale",
                 }}
               >
-                <aside
+                {boardBrowserView !== "calendar" && <aside
+                  className="scriboo-workspace-sidebar"
                   style={{
                     background:
                       "linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%)",
@@ -9496,6 +9853,7 @@ export default function Page() {
                   }}
                 >
                   <div
+                    className="scriboo-workspace-header"
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -9536,6 +9894,7 @@ export default function Page() {
                   </div>
 
                     <button
+                      className="scriboo-new-board-button"
                       aria-label={t("Create board", "Utwórz tablicę")}
                       onClick={createBoard}
                       onMouseEnter={() => {
@@ -9548,13 +9907,21 @@ export default function Page() {
                       minHeight: "46px",
                       width: "100%",
                       borderRadius: "12px",
-                      border:
-                        isNewBoardButtonHovered &&
+                      border: isInterfaceDarkMode
+                        ? "1px solid rgba(255,255,255,0.76)"
+                        : isNewBoardButtonHovered &&
                         !isBoardsLoading &&
                         liveBoardsCount < currentMaxBoards
                           ? "1px solid rgba(255,255,255,0.74)"
                           : "1px solid rgba(255,255,255,0.58)",
-                      background: signatureIndigoGradient,
+                      backgroundColor: isInterfaceDarkMode
+                        ? isNewBoardButtonHovered
+                          ? "#394263"
+                          : "#303853"
+                        : "transparent",
+                      backgroundImage: isInterfaceDarkMode
+                        ? "none"
+                        : signatureIndigoGradient,
                       backgroundSize: "145% 145%",
                       backgroundPosition:
                         isNewBoardButtonHovered &&
@@ -9574,8 +9941,9 @@ export default function Page() {
                           ? "default"
                           : "pointer",
                       opacity: liveBoardsCount >= currentMaxBoards ? 0.55 : 1,
-                      boxShadow:
-                        isNewBoardButtonHovered &&
+                      boxShadow: isInterfaceDarkMode
+                        ? "0 9px 22px rgba(5,8,24,0.24), inset 0 1px 0 #ffffff"
+                        : isNewBoardButtonHovered &&
                         !isBoardsLoading &&
                         liveBoardsCount < currentMaxBoards
                           ? "0 14px 28px rgba(15,23,42,0.18), 0 0 0 1px rgba(255,255,255,0.08), inset 0 1px 0 rgba(255,255,255,0.22)"
@@ -9654,28 +10022,18 @@ export default function Page() {
                         icon: <Trash2 size={15} />,
                       },
                       {
-                        label: t("Calendar", "Kalendarz"),
-                        value: "calendar" as const,
-                        icon: <CalendarDays size={15} />,
-                        locked: !canUseCalendar,
-                      },
-                      {
                         label: t("Your plan", "Twój plan"),
                         value: "plan" as const,
                         icon: <Star size={15} />,
                       },
                     ].map((item) => {
                       const isActive = boardBrowserView === item.value;
-                      const isLocked = item.locked === true;
 
                       return (
                       <button
                         key={item.label}
                         type="button"
                         onClick={() => {
-                          if (item.value === "calendar") {
-                            setBillingNotice(null);
-                          }
                           setBoardBrowserView(item.value);
                         }}
                         style={{
@@ -9696,7 +10054,7 @@ export default function Page() {
                           fontSize: "14px",
                           fontWeight: isActive ? 560 : 460,
                           cursor: "pointer",
-                          opacity: isLocked ? 0.82 : 1,
+                          opacity: 1,
                           boxShadow: isActive
                             ? "0 8px 18px rgba(71,127,189,0.08), 0 1px 0 rgba(255,255,255,0.58) inset"
                             : "none",
@@ -9712,7 +10070,6 @@ export default function Page() {
                           {item.icon}
                           {item.label}
                         </span>
-                        {isLocked && <Lock size={14} color="#64748b" />}
                       </button>
                       );
                     })}
@@ -9726,6 +10083,7 @@ export default function Page() {
                     }}
                   >
                     <div
+                      className="scriboo-board-usage-card"
                       style={{
                         padding: "16px",
                         borderRadius: "14px",
@@ -9794,11 +10152,16 @@ export default function Page() {
                       </Link>
                     </div>
                   </div>
-                </aside>
+                </aside>}
 
                 <section
+                  className="scriboo-workspace-main"
                   style={{
-                    padding: "34px 28px 28px",
+                    position: "relative",
+                    padding:
+                      boardBrowserView === "calendar"
+                        ? "34px 72px 28px 28px"
+                        : "34px 28px 28px",
                     display: "grid",
                     gridTemplateRows: "auto auto auto 1fr",
                     gap: "16px",
@@ -9809,7 +10172,33 @@ export default function Page() {
                     ...premiumBodyStyle,
                   }}
                 >
+                  {boardBrowserView === "calendar" && (
+                    <button
+                      type="button"
+                      aria-label={t("Close calendar", "Zamknij kalendarz")}
+                      onClick={() => setShowBoardsMenu(false)}
+                      style={{
+                        position: "absolute",
+                        top: "14px",
+                        right: "14px",
+                        width: "34px",
+                        height: "34px",
+                        borderRadius: "10px",
+                        border: `1px solid ${panelBorderColor}`,
+                        background: controlBackground,
+                        color: panelTextColor,
+                        display: "grid",
+                        placeItems: "center",
+                        padding: 0,
+                        cursor: "pointer",
+                        zIndex: 2,
+                      }}
+                    >
+                      <X size={16} />
+                    </button>
+                  )}
                   <div
+                    className="scriboo-workspace-header"
                     style={{
                       display: "flex",
                       alignItems: "center",
@@ -9842,6 +10231,7 @@ export default function Page() {
                       {boardBrowserView === "plan" && (
                         <>
                           <div
+                            className="scriboo-plan-status"
                             style={{
                               marginTop: "10px",
                               color: "#4f46e5",
@@ -9932,6 +10322,7 @@ export default function Page() {
 
                   {boardBrowserView !== "plan" && (
                     <div
+                      className="scriboo-workspace-controls"
                       style={{
                         display: "flex",
                         flexWrap: "wrap",
@@ -10181,6 +10572,7 @@ export default function Page() {
                         }}
                       >
                         <div
+                          className="scriboo-plan-stats"
                           style={{
                             display: "grid",
                             gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
@@ -10211,6 +10603,7 @@ export default function Page() {
                           ].map((item) => (
                             <div
                               key={item.label}
+                              className="scriboo-plan-stat"
                               style={{
                                 minHeight: "70px",
                                 borderRadius: "0",
@@ -10259,6 +10652,7 @@ export default function Page() {
                           }}
                         >
                           <div
+                            className="scriboo-plan-hero"
                             style={{
                               minHeight: "240px",
                               borderRadius: "20px",
@@ -10388,6 +10782,7 @@ export default function Page() {
                           </div>
 
                           <div
+                            className="scriboo-plan-summary"
                             style={{
                               minHeight: "240px",
                               borderRadius: "20px",
@@ -10457,6 +10852,7 @@ export default function Page() {
                             >
                               {(["pln"] as const).map((currency) => (
                                 <button
+                                  className="scriboo-plan-currency"
                                   key={currency}
                                   type="button"
                                   onClick={() => setBillingCurrency(currency)}
@@ -10531,6 +10927,9 @@ export default function Page() {
                           {billingPlans.map((plan) => (
                             <div
                               key={plan.name}
+                              className={`scriboo-plan-card${
+                                plan.featured ? " is-featured" : ""
+                              }`}
                               style={{
                                 minHeight: "384px",
                                 borderRadius: "20px",
@@ -10700,6 +11099,7 @@ export default function Page() {
                               </div>
 
                               <button
+                                className="scriboo-plan-action"
                                 type="button"
                                 onClick={() => startPlanCheckout(plan.value)}
                                 disabled={
@@ -10771,6 +11171,7 @@ export default function Page() {
                           ))}
                         </div>
                         <div
+                          className="scriboo-plan-legal"
                           style={{
                             marginTop: "16px",
                             padding: "14px 16px",
@@ -11147,6 +11548,7 @@ export default function Page() {
                             {calendarWeekdayLabels.map((label) => (
                               <div
                                 key={label}
+                                className="scriboo-calendar-weekday"
                                 style={{
                                   padding: "0 8px",
                                   color: "#64748b",
@@ -11172,6 +11574,7 @@ export default function Page() {
                           {calendarDays.map((day) => (
                             <div
                               key={day.key}
+                              className="scriboo-calendar-day"
                               style={{
                                 minHeight: "206px",
                                 borderRadius: "8px",
@@ -11608,6 +12011,7 @@ export default function Page() {
                                 ))}
 
                                 <button
+                                  className="scriboo-calendar-add"
                                   type="button"
                                   disabled={!canUseCalendar}
                                   onClick={() =>
@@ -12205,6 +12609,7 @@ export default function Page() {
 
                       {visibleBoards.length === 0 && (
                         <div
+                          className="scriboo-workspace-empty"
                           style={{
                             gridColumn: "1 / -1",
                             minHeight: "260px",
@@ -12266,6 +12671,7 @@ export default function Page() {
             }}
           >
             <div
+              className="scriboo-settings-panel"
               onMouseDown={(e) => e.stopPropagation()}
               style={{
                 width: "min(920px, calc(100vw - 32px))",
@@ -12285,6 +12691,7 @@ export default function Page() {
               }}
             >
               <aside
+                className="scriboo-settings-sidebar"
                 style={{
                   padding: "22px 18px",
                   borderRight: `1px solid ${panelDividerColor}`,
@@ -12310,7 +12717,6 @@ export default function Page() {
                 <nav style={{ display: "grid", gap: "8px" }}>
                   {[
                     { id: "background", label: t("Background & appearance", "Tło i wygląd") },
-                    { id: "tools", label: t("Tools", "Narzędzia") },
                     { id: "language", label: t("Languages", "Języki") },
                     { id: "account", label: t("Account", "Konto") },
                   ].map((item) => {
@@ -12358,6 +12764,7 @@ export default function Page() {
               </aside>
 
               <main
+                className="scriboo-settings-main"
                 style={{
                   position: "relative",
                   padding: "56px 36px 34px",
@@ -12457,6 +12864,12 @@ export default function Page() {
                           preview: `#ffffff url(${floralBackgroundImage}) center / cover no-repeat`,
                         },
                         {
+                          label: "Neon",
+                          value: neonCanvasBackground,
+                          preview:
+                            "radial-gradient(circle at 25% 20%, #7c3aed 0%, rgba(124,58,237,0.28) 28%, transparent 52%), radial-gradient(circle at 78% 76%, rgba(34,211,238,0.72), transparent 46%), #070816",
+                        },
+                        {
                           label: "Kolor",
                           value: customCanvasBackground,
                           preview:
@@ -12479,6 +12892,9 @@ export default function Page() {
                               }
 
                               setCanvasBackground(option.value);
+                              if (option.value === neonCanvasBackground) {
+                                setPenColor("#39ffef");
+                              }
                             }}
                             style={{
                               minHeight: "128px",
@@ -12737,60 +13153,6 @@ export default function Page() {
                           }}
                         />
                       </div>
-                    </div>
-                  </>
-                )}
-
-                {activeSettingsSection === "tools" && (
-                  <>
-                    <h2
-                      style={{
-                        margin: "0 0 24px",
-                        fontSize: "24px",
-                        fontWeight: 700,
-                        letterSpacing: "0",
-                        lineHeight: 1.15,
-                      }}
-                    >
-                      {t("Tools", "Narzędzia")}
-                    </h2>
-                    <div style={{ display: "grid", gap: "12px" }}>
-                      {[
-                        { label: t("Cursor", "Kursor"), value: "cursor" },
-                        { label: t("Pen", "Pióro"), value: "pen" },
-                        { label: t("Eraser", "Gumka"), value: "eraser" },
-                      ].map((option) => {
-                        const isActive = tool === option.value;
-
-                        return (
-                          <button
-                            key={option.value}
-                            onClick={() =>
-                              setTool(option.value as "cursor" | "pen" | "eraser")
-                            }
-                            style={{
-                              minHeight: "58px",
-                              padding: "0 16px",
-                              borderRadius: "10px",
-                              border: `1px solid ${panelBorderColor}`,
-                              background: isActive
-                                ? selectedControlBackground
-                                : controlBackground,
-                              color: panelTextColor,
-                              display: "flex",
-                              alignItems: "center",
-                              justifyContent: "space-between",
-                              fontSize: "15px",
-                              fontWeight: 600,
-                              lineHeight: 1,
-                              cursor: "pointer",
-                            }}
-                          >
-                            {option.label}
-                            {isActive && <Check size={18} />}
-                          </button>
-                        );
-                      })}
                     </div>
                   </>
                 )}
@@ -13195,6 +13557,7 @@ export default function Page() {
             }}
           >
             <div
+              className="scriboo-theme-dialog"
               role="dialog"
               aria-modal="true"
               aria-labelledby="delete-account-title"
@@ -13451,31 +13814,21 @@ export default function Page() {
             style={{
               position: "absolute",
               top: "50%",
-              left: "154px",
+              left: "202px",
               transform: "translateY(-50%)",
               minHeight: "30px",
               padding: "0 10px",
               borderRadius: "999px",
-              border:
-                boardSaveState === "error" || boardSaveState === "conflict"
-                  ? "1px solid rgba(254,202,202,0.74)"
-                  : boardSaveState === "offline" || !isOnline
-                    ? "1px solid rgba(253,230,138,0.78)"
-                    : "1px solid rgba(255,255,255,0.3)",
-              background:
-                boardSaveState === "error" || boardSaveState === "conflict"
-                  ? "rgba(153,27,27,0.34)"
-                  : boardSaveState === "offline" || !isOnline
-                    ? "rgba(146,64,14,0.34)"
-                    : "rgba(255,255,255,0.12)",
+              border: "none",
+              background: "transparent",
               color: "#ffffff",
               display: "inline-flex",
               alignItems: "center",
               gap: "7px",
               fontSize: "12px",
               fontWeight: 700,
-              backdropFilter: "blur(8px)",
-              boxShadow: "0 4px 14px rgba(15,23,42,0.08)",
+              backdropFilter: "none",
+              boxShadow: "none",
             }}
           >
             {boardSaveState === "offline" || !isOnline ? (
@@ -13647,6 +14000,7 @@ export default function Page() {
                   }}
                 >
                   <div
+                    className="scriboo-account-avatar"
                     style={{
                       width: "54px",
                       height: "54px",
@@ -13711,6 +14065,7 @@ export default function Page() {
                   {currentAccountEmail}
                 </div>
                 <div
+                  className="scriboo-plan-chip"
                   style={{
                     justifySelf: "start",
                     height: "32px",
@@ -13734,6 +14089,62 @@ export default function Page() {
                       {currentPlanLabel} {t("plan", "plan")}
                 </div>
                 <button
+                  className="scriboo-theme-toggle"
+                  type="button"
+                  onClick={() => setIsInterfaceDarkMode((previous) => !previous)}
+                  aria-label={
+                    isInterfaceDarkMode
+                      ? t("Use light mode", "Włącz jasny motyw")
+                      : t("Use dark mode", "Włącz ciemny motyw")
+                  }
+                  style={{
+                    height: "42px",
+                    padding: "0 14px",
+                    borderRadius: "13px",
+                    border: "1px solid rgba(196,181,253,0.62)",
+                    background: "rgba(124,58,237,0.07)",
+                    color: "#5b3fd1",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: "12px",
+                    fontSize: "13px",
+                    fontWeight: 700,
+                    cursor: "pointer",
+                  }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "9px" }}>
+                    {isInterfaceDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+                    {isInterfaceDarkMode
+                      ? t("Light mode", "Jasny motyw")
+                      : t("Dark mode", "Ciemny motyw")}
+                  </span>
+                  <span
+                    aria-hidden="true"
+                    style={{
+                      width: "34px",
+                      height: "20px",
+                      padding: "2px",
+                      borderRadius: "999px",
+                      background: isInterfaceDarkMode ? "#7c3aed" : "#cbd5e1",
+                      display: "flex",
+                      justifyContent: isInterfaceDarkMode ? "flex-end" : "flex-start",
+                      boxSizing: "border-box",
+                    }}
+                  >
+                    <span
+                      style={{
+                        width: "16px",
+                        height: "16px",
+                        borderRadius: "999px",
+                        background: "#ffffff",
+                        boxShadow: "0 1px 4px rgba(15,23,42,0.25)",
+                      }}
+                    />
+                  </span>
+                </button>
+                <button
+                  className="scriboo-logout-button"
                   type="button"
                   onClick={signOut}
                   style={{
@@ -13792,6 +14203,7 @@ export default function Page() {
             }}
           >
             <div
+              className="scriboo-theme-dialog"
               onClick={(event) => event.stopPropagation()}
               style={{
                 width: "min(620px, 100%)",
@@ -13958,6 +14370,7 @@ export default function Page() {
             }}
           >
             <div
+              className="scriboo-theme-dialog"
               onClick={(event) => event.stopPropagation()}
               style={{
                 width: "min(590px, 100%)",
@@ -14166,6 +14579,7 @@ export default function Page() {
             }}
           >
             <div
+              className="scriboo-theme-dialog"
               onClick={(event) => event.stopPropagation()}
               style={{
                 width: "min(520px, 100%)",
@@ -14565,7 +14979,7 @@ export default function Page() {
 
       </div>
 
-      <div
+      {!isToolbarCollapsed && <div
         onPointerEnter={hidePenCursor}
         onPointerMove={hidePenCursor}
         style={{
@@ -14585,6 +14999,42 @@ export default function Page() {
           zIndex: 20,
         }}
       >
+        <button
+          type="button"
+          aria-label={t("Hide drawing toolbar", "Ukryj pasek narzędzi")}
+          title={t("Hide toolbar", "Ukryj pasek")}
+          onClick={() => {
+            setShowPenMenu(false);
+            setShowTextMenu(false);
+            setShowEraserMenu(false);
+            setShowShapesMenu(false);
+            setIsToolbarCollapsed(true);
+          }}
+          style={{
+            position: "absolute",
+            top: "50%",
+            right: "-15px",
+            width: "26px",
+            height: "48px",
+            transform: "translateY(-50%)",
+            borderTop: `1px solid ${panelBorderColor}`,
+            borderRight: `1px solid ${panelBorderColor}`,
+            borderBottom: `1px solid ${panelBorderColor}`,
+            borderLeftWidth: 0,
+            borderRadius: "0 11px 11px 0",
+            background: toolbarBackground,
+            color: panelTextColor,
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            boxShadow: "5px 6px 14px rgba(0,0,0,0.1)",
+            zIndex: -1,
+          }}
+        >
+          <ChevronLeft size={17} />
+        </button>
+
         <input
           ref={fileUploadRef}
           type="file"
@@ -14599,6 +15049,52 @@ export default function Page() {
           }}
           style={{ display: "none" }}
         />
+
+        <button
+          type="button"
+          aria-label={t("Undo last change", "Cofnij ostatnią zmianę")}
+          title={t("Undo", "Cofnij")}
+          disabled={undoDepth === 0}
+          onClick={undoCanvasChange}
+          style={{
+            width: "38px",
+            height: "38px",
+            borderRadius: "8px",
+            border: "none",
+            background: inactiveToolBackground,
+            color: panelTextColor,
+            display: "grid",
+            placeItems: "center",
+            cursor: undoDepth > 0 ? "pointer" : "default",
+            opacity: undoDepth > 0 ? 1 : 0.3,
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Undo2 size={19} strokeWidth={2.1} />
+        </button>
+
+        <button
+          type="button"
+          aria-label={t("Redo last change", "Ponów ostatnią zmianę")}
+          title={t("Redo", "Ponów")}
+          disabled={redoDepth === 0}
+          onClick={redoCanvasChange}
+          style={{
+            width: "38px",
+            height: "38px",
+            borderRadius: "8px",
+            border: "none",
+            background: inactiveToolBackground,
+            color: panelTextColor,
+            display: "grid",
+            placeItems: "center",
+            cursor: redoDepth > 0 ? "pointer" : "default",
+            opacity: redoDepth > 0 ? 1 : 0.3,
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Redo2 size={19} strokeWidth={2.1} />
+        </button>
 
         <button
           aria-label={t("Upload files", "Prześlij pliki")}
@@ -15024,6 +15520,37 @@ export default function Page() {
         </div>
 
         <button
+          type="button"
+          aria-label={t("Ruler — drag to measure", "Linijka — przeciągnij, aby zmierzyć")}
+          title={t("Ruler — drag to measure", "Linijka — przeciągnij, aby zmierzyć")}
+          onClick={() => {
+            if (activeText) {
+              commitActiveText();
+            }
+            setTool("ruler");
+            setShowPenMenu(false);
+            setShowTextMenu(false);
+            setShowEraserMenu(false);
+            setShowShapesMenu(false);
+          }}
+          style={{
+            width: "38px",
+            height: "38px",
+            borderRadius: "8px",
+            border: "none",
+            background: tool === "ruler" ? "#7c3aed" : inactiveToolBackground,
+            color: tool === "ruler" ? "white" : panelTextColor,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            cursor: "pointer",
+            transition: "all 0.2s ease",
+          }}
+        >
+          <Ruler size={18} />
+        </button>
+
+        <button
           onClick={clearCanvas}
           style={{
             width: "38px",
@@ -15160,7 +15687,7 @@ export default function Page() {
           )}
         </div>
 
-      </div>
+      </div>}
     </div>
   );
 }

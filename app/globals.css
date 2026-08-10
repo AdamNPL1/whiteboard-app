@@ -1435,3 +1435,410 @@ input.modern-range::-ms-thumb {
   }
 
 }
+
+/* Interface theme: the board background remains an independent user choice. */
+[data-scriboo-theme="dark"] {
+  color-scheme: dark;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-panel {
+  background: linear-gradient(180deg, #1c203a 0%, #171a31 100%) !important;
+  border-color: rgba(142, 154, 211, 0.3) !important;
+  box-shadow: 0 30px 90px rgba(2, 6, 23, 0.56) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar {
+  background: linear-gradient(180deg, #202541 0%, #181c35 100%) !important;
+  border-color: rgba(142, 154, 211, 0.2) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar * {
+  color: #b9c3df !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar > div:first-child > div:first-child,
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar > div:first-child > div:first-child * {
+  color: #f4f6ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar > button {
+  color: #ffffff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar > div:first-child button {
+  background: rgba(255,255,255,0.1) !important;
+  border-color: rgba(174,184,220,0.34) !important;
+  color: #e8edff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-main {
+  background: linear-gradient(180deg, #1f233f 0%, #191d35 100%) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-sidebar h2,
+[data-scriboo-theme="dark"] .scriboo-workspace-main h2,
+[data-scriboo-theme="dark"] .scriboo-workspace-main h3 {
+  color: #f4f6ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-header,
+[data-scriboo-theme="dark"] .scriboo-workspace-header * {
+  color: #e8edff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-header > div:first-child > div {
+  color: #aeb8d5 !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-controls,
+[data-scriboo-theme="dark"] .scriboo-workspace-controls * {
+  color: #aeb8d5 !important;
+  border-color: rgba(165,176,215,0.46) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-empty,
+[data-scriboo-theme="dark"] .scriboo-workspace-empty * {
+  color: #c8d0e8 !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-empty > div > div:first-child {
+  color: #f4f6ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-main input {
+  color: #eef2ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-workspace-main input::placeholder {
+  color: #939dbd !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-settings-panel,
+[data-scriboo-theme="dark"] .scriboo-settings-sidebar,
+[data-scriboo-theme="dark"] .scriboo-settings-main {
+  background: linear-gradient(180deg, #20243f 0%, #191d34 100%) !important;
+  border-color: rgba(142, 154, 211, 0.22) !important;
+  color: #f4f6ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-settings-panel h2,
+[data-scriboo-theme="dark"] .scriboo-settings-panel label,
+[data-scriboo-theme="dark"] .scriboo-settings-panel input {
+  color: #eef2ff !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-call-panel {
+  background: rgba(29, 33, 60, 0.97) !important;
+  border-color: rgba(142, 154, 211, 0.34) !important;
+  color: #f4f6ff !important;
+  box-shadow: 0 26px 76px rgba(2, 6, 23, 0.55) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-call-dialog {
+  background: #202541 !important;
+  color: #f4f6ff !important;
+  box-shadow: 0 28px 86px rgba(2, 6, 23, 0.58) !important;
+}
+
+[data-scriboo-theme="dark"] .scriboo-call-dialog > span {
+  color: #aeb8d5 !important;
+}
+
+/* High-contrast fallback tied directly to the rendered dark interface. */
+.scriboo-dark-interface .scriboo-workspace-sidebar,
+.scriboo-dark-interface .scriboo-workspace-sidebar * {
+  color: #f4f6ff !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-sidebar svg {
+  color: #f4f6ff !important;
+  stroke: currentColor;
+}
+
+.scriboo-dark-interface .scriboo-workspace-sidebar > div:first-child button {
+  color: #263047 !important;
+  background: #e8ecf5 !important;
+  border-color: rgba(255,255,255,0.72) !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-sidebar > button {
+  color: #ffffff !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-header,
+.scriboo-dark-interface .scriboo-workspace-header * {
+  color: #f4f6ff !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-header > div:first-child > div {
+  color: #c5cee8 !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-controls,
+.scriboo-dark-interface .scriboo-workspace-controls * {
+  color: #e7ebf8 !important;
+  border-color: rgba(210,218,242,0.58) !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-controls input::placeholder {
+  color: #d8def1 !important;
+  opacity: 1;
+}
+
+.scriboo-dark-interface .scriboo-workspace-empty,
+.scriboo-dark-interface .scriboo-workspace-empty * {
+  color: #dbe2f5 !important;
+}
+
+.scriboo-dark-interface .scriboo-workspace-empty > div > div:first-child {
+  color: #ffffff !important;
+}
+
+.scriboo-dark-interface .scriboo-settings-panel,
+.scriboo-dark-interface .scriboo-settings-panel h2,
+.scriboo-dark-interface .scriboo-settings-panel label,
+.scriboo-dark-interface .scriboo-settings-panel input {
+  color: #f4f6ff !important;
+}
+
+.scriboo-dark-interface .scriboo-settings-panel input::placeholder {
+  color: #c5cee8 !important;
+}
+
+.scriboo-dark-interface .scriboo-account-popover {
+  background: radial-gradient(circle at 16% 8%, rgba(124,58,237,0.2), transparent 38%), radial-gradient(circle at 92% 90%, rgba(34,197,94,0.12), transparent 40%), linear-gradient(145deg, #242947, #1b1f38) !important;
+  border-color: rgba(166,176,215,0.34) !important;
+  color: #f4f6ff !important;
+  box-shadow: 0 32px 78px rgba(2,6,23,0.58), inset 0 1px 0 rgba(255,255,255,0.08) !important;
+}
+
+.scriboo-dark-interface .scriboo-account-popover > div:not(.scriboo-plan-chip),
+.scriboo-dark-interface .scriboo-account-popover > div:not(.scriboo-plan-chip) * {
+  color: #eef2ff !important;
+}
+
+.scriboo-dark-interface .scriboo-account-avatar {
+  background: linear-gradient(145deg, #343a62, #252a4b) !important;
+  border-color: rgba(216,210,255,0.44) !important;
+  color: #b9a8ff !important;
+  box-shadow: 0 15px 34px rgba(4,8,28,0.38), inset 0 1px 0 rgba(255,255,255,0.1) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-chip {
+  background: rgba(124,58,237,0.18) !important;
+  border-color: rgba(167,139,250,0.5) !important;
+  color: #d8ccff !important;
+  box-shadow: none !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-toggle {
+  background: rgba(129,140,248,0.14) !important;
+  border-color: rgba(165,180,252,0.36) !important;
+  color: #eef2ff !important;
+}
+
+.scriboo-dark-interface .scriboo-logout-button {
+  background: linear-gradient(180deg, #ffffff 0%, #e9edf7 100%) !important;
+  border-color: rgba(255,255,255,0.78) !important;
+  color: #252a48 !important;
+  box-shadow: 0 16px 34px rgba(2,6,23,0.34), inset 0 1px 0 #ffffff !important;
+}
+
+.scriboo-dark-interface .scriboo-logout-button svg,
+.scriboo-dark-interface .scriboo-logout-button span {
+  color: #252a48 !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-dialog {
+  background: linear-gradient(180deg, #252a48 0%, #1c2039 100%) !important;
+  border-color: rgba(157,168,209,0.32) !important;
+  color: #eef2ff !important;
+  box-shadow: 0 32px 92px rgba(2,6,23,0.58) !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-dialog > div:first-child > div:first-child,
+.scriboo-dark-interface .scriboo-theme-dialog > div:first-child > div:first-child * {
+  color: #f4f6ff !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-dialog > div:first-child > button {
+  background: #303653 !important;
+  border-color: rgba(174,184,220,0.34) !important;
+  color: #eef2ff !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-dialog input,
+.scriboo-dark-interface .scriboo-theme-dialog textarea,
+.scriboo-dark-interface .scriboo-theme-dialog select {
+  background: #292e4d !important;
+  border-color: rgba(165,176,215,0.38) !important;
+  color: #f4f6ff !important;
+}
+
+.scriboo-dark-interface .scriboo-theme-dialog input::placeholder,
+.scriboo-dark-interface .scriboo-theme-dialog textarea::placeholder {
+  color: #aeb8d5 !important;
+  opacity: 1;
+}
+
+.scriboo-dark-interface [aria-labelledby="delete-account-title"] #delete-account-title {
+  color: #fca5a5 !important;
+}
+
+.scriboo-dark-interface .scriboo-calendar-weekday {
+  color: #c9d1e8 !important;
+}
+
+.scriboo-dark-interface .scriboo-calendar-day {
+  background: linear-gradient(180deg, #292e4d 0%, #232741 100%) !important;
+  border-color: rgba(156,168,211,0.32) !important;
+  box-shadow: 0 9px 22px rgba(2,6,23,0.22) !important;
+}
+
+.scriboo-dark-interface .scriboo-calendar-day > div:first-child,
+.scriboo-dark-interface .scriboo-calendar-day > div:first-child * {
+  color: #f5f7ff !important;
+}
+
+.scriboo-dark-interface .scriboo-calendar-add {
+  background: rgba(129,140,248,0.16) !important;
+  color: #c7d2fe !important;
+  border: 1px solid rgba(165,180,252,0.16) !important;
+}
+
+.scriboo-dark-interface .scriboo-calendar-add svg {
+  color: #c7d2fe !important;
+}
+
+/* Plan view: keep every pricing surface readable against the dark workspace. */
+.scriboo-dark-interface .scriboo-plan-stats .scriboo-plan-stat {
+  border-left-color: rgba(190, 200, 235, 0.24) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-stat > div:first-child {
+  color: #aab5d8 !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-stat > div:last-child {
+  color: #f1f4ff !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-hero {
+  background: linear-gradient(145deg, #343858 0%, #2c304e 58%, #272c47 100%) !important;
+  border-color: rgba(205, 213, 255, 0.22) !important;
+  box-shadow: 0 18px 42px rgba(5, 8, 24, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-summary {
+  background-color: #282e48 !important;
+  background-image: linear-gradient(145deg, #2d344f 0%, #282e48 55%, #232940 100%) !important;
+  border-color: rgba(205, 213, 255, 0.2) !important;
+  box-shadow: 0 18px 42px rgba(5, 8, 24, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-summary > div:nth-child(-n + 3) {
+  color: #f3f5ff !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-summary > div:first-child {
+  color: #b9c3e5 !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-summary > div:nth-child(3) {
+  color: #c6cee9 !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) {
+  background: linear-gradient(145deg, #303751 0%, #282f49 52%, #222840 100%) !important;
+  border-color: rgba(205, 213, 255, 0.2) !important;
+  box-shadow: 0 18px 42px rgba(5, 8, 24, 0.25), inset 0 1px 0 rgba(255, 255, 255, 0.06) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card.is-featured {
+  background:
+    radial-gradient(circle at 86% 12%, rgba(106, 139, 211, 0.24), transparent 38%),
+    linear-gradient(145deg, #4b3f91 0%, #394f8e 48%, #2c5f7d 100%) !important;
+  border-color: rgba(181, 194, 255, 0.34) !important;
+  box-shadow: 0 22px 48px rgba(5, 8, 24, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.12) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card.is-featured > div:first-child > div:last-child > div {
+  background: rgba(235, 239, 255, 0.13) !important;
+  border-color: rgba(225, 231, 255, 0.28) !important;
+  color: #f5f7ff !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-currency {
+  background: linear-gradient(135deg, #6255c7, #357195) !important;
+  border-color: rgba(225, 231, 255, 0.3) !important;
+  box-shadow: 0 7px 18px rgba(5, 8, 24, 0.28) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card.is-featured .scriboo-plan-action span {
+  background: none !important;
+  color: #34406a !important;
+  -webkit-text-fill-color: #34406a !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) > div,
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) > div span,
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) > div > div {
+  color: #f3f5ff !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) .scriboo-plan-action {
+  background: #f3f5fb !important;
+  border-color: rgba(255, 255, 255, 0.68) !important;
+  color: #28304b !important;
+  box-shadow: 0 10px 24px rgba(5, 8, 24, 0.22) !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-card:not(.is-featured) .scriboo-plan-action span {
+  background: none !important;
+  color: #34406a !important;
+  -webkit-text-fill-color: #34406a !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-legal {
+  background: #292f48 !important;
+  border-color: rgba(205, 213, 255, 0.2) !important;
+  color: #d8def3 !important;
+}
+
+.scriboo-dark-interface .scriboo-plan-legal a {
+  color: #aebcff !important;
+}
+
+.scriboo-dark-interface .scriboo-new-board-button {
+  background-color: #303853 !important;
+  background-image: none !important;
+  border-color: rgba(190, 202, 242, 0.32) !important;
+  color: #f5f7ff !important;
+  box-shadow: 0 9px 22px rgba(5, 8, 24, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.07) !important;
+}
+
+.scriboo-dark-interface .scriboo-new-board-button:hover:not(:disabled) {
+  background-color: #394263 !important;
+  background-image: none !important;
+  border-color: rgba(218, 225, 255, 0.5) !important;
+}
+
+.scriboo-dark-interface .scriboo-new-board-button,
+.scriboo-dark-interface .scriboo-new-board-button svg {
+  color: #f5f7ff !important;
+}
+
+.scriboo-dark-interface .scriboo-board-usage-card {
+  background-color: #282f49 !important;
+  background-image: none !important;
+  border-color: rgba(190, 202, 242, 0.24) !important;
+  box-shadow: 0 12px 28px rgba(5, 8, 24, 0.2), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-usage-card > div:first-child {
+  color: #f3f5ff !important;
+}
+
+.scriboo-dark-interface .scriboo-board-usage-card > div:last-child {
+  color: #c7cee8 !important;
+}

@@ -789,13 +789,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             width: "34px",
             height: "34px",
             borderRadius: "10px",
-            border: "1.5px solid rgba(255,255,255,0.42)",
-            background: "rgba(255,255,255,0.1)",
+            border: "none",
+            background: "transparent",
+            backgroundColor: "transparent",
+            backgroundImage: "none",
             color: "#ffffff",
             display: "grid",
             placeItems: "center",
             cursor: "pointer",
-            backdropFilter: "blur(8px)",
+            backdropFilter: "none",
+            boxShadow: "none",
+            outline: "none",
+            appearance: "none",
+            padding: 0,
+            lineHeight: 0,
           }}
         >
           <Phone size={16} />
@@ -804,7 +811,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       {phase === "choosing" && participants.length === 0 && (
         <div style={overlayStyle}>
-          <div style={dialogStyle} role="status" aria-live="polite">
+          <div className="scriboo-call-dialog" style={dialogStyle} role="status" aria-live="polite">
             <LoaderCircle size={22} className="scriboo-call-spinner" />
             <span>{t("Preparing call…", "Przygotowywanie połączenia…")}</span>
           </div>
@@ -813,7 +820,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       {phase === "choosing" && participants.length > 0 && (
         <div style={overlayStyle} role="presentation">
-          <div style={{ ...dialogStyle, width: "min(420px, calc(100vw - 32px))" }} role="dialog" aria-modal="true">
+          <div className="scriboo-call-dialog" style={{ ...dialogStyle, width: "min(420px, calc(100vw - 32px))" }} role="dialog" aria-modal="true">
             <button type="button" aria-label={t("Close", "Zamknij")} onClick={resetToIdle} style={closeButtonStyle}>
               <X size={17} />
             </button>
@@ -833,6 +840,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       {phase !== "idle" && phase !== "choosing" && (
         <section
+          className="scriboo-call-panel"
           aria-label={t("Audio call", "Połączenie audio")}
           style={{
             position: "fixed",

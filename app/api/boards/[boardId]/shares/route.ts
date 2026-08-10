@@ -12,6 +12,46 @@ import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
+const getPublicAppOrigin = (request: NextRequest) => {
+  const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL
+    ?.trim()
+    .replace(/\/+$/, "");
+  const configuredHostname = configuredOrigin
+    ? (() => {
+        try {
+          return new URL(configuredOrigin).hostname;
+        } catch {
+          return "";
+        }
+      })()
+    : "";
+
+  if (
+    configuredOrigin &&
+    (process.env.NODE_ENV !== "production" ||
+      !["localhost", "127.0.0.1"].includes(configuredHostname))
+  ) {
+    return configuredOrigin;
+  }
+
+  const forwardedHost = request.headers.get("x-forwarded-host")?.split(",")[0]?.trim();
+  const forwardedProtocol =
+    request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim() || "https";
+  if (
+    forwardedHost &&
+    !forwardedHost.startsWith("localhost") &&
+    !forwardedHost.startsWith("127.0.0.1")
+  ) {
+    return `${forwardedProtocol}://${forwardedHost}`;
+  }
+
+  if (process.env.NODE_ENV === "production") {
+    return "https://scribooapp.com";
+  }
+
+  return request.nextUrl.origin;
+};
+
 export async function GET(
   request: NextRequest,
   context: { params: Promise<{ boardId: string }> }
@@ -113,7 +153,7 @@ export async function POST(
 
     try {
       await sendBoardShareInviteEmail({
-        appOrigin: request.nextUrl.origin,
+        appOrigin: getPublicAppOrigin(request),
         ownerEmail: user.email,
         recipientEmail: result.share.email,
         invitationToken: result.invitationToken,

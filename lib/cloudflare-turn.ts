@@ -56,7 +56,7 @@ export const generateCloudflareTurnCredentials = async ({
     .slice(0, 32);
 
   const response = await fetch(
-    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate`,
+    `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(keyId)}/credentials/generate-ice-servers`,
     {
       method: "POST",
       headers: {
