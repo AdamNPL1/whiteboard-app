@@ -109,6 +109,14 @@ const isSignalEnvelope = (value: unknown): value is SignalEnvelope => {
   );
 };
 
+const readCandidateType = (candidate: RTCIceCandidateInit | RTCIceCandidate) => {
+  if ("type" in candidate && typeof candidate.type === "string") {
+    return candidate.type;
+  }
+  return candidate.candidate?.match(/\btyp\s+(host|srflx|prflx|relay)\b/i)?.[1]
+    ?.toLowerCase();
+};
+
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const { text: t } = useLanguage();
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -136,7 +144,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
+  const connectionRetryRef = useRef<number | null>(null);
+  const connectionTimeoutRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
+  const localCandidateTypesRef = useRef(new Set<string>());
+  const remoteCandidateTypesRef = useRef(new Set<string>());
 
   useEffect(() => {
     userRef.current = user;
@@ -161,10 +173,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(turnRefreshRef.current);
       turnRefreshRef.current = null;
     }
+    if (connectionRetryRef.current !== null) {
+      window.clearTimeout(connectionRetryRef.current);
+      connectionRetryRef.current = null;
+    }
+    if (connectionTimeoutRef.current !== null) {
+      window.clearTimeout(connectionTimeoutRef.current);
+      connectionTimeoutRef.current = null;
+    }
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
     queuedCandidatesRef.current = [];
     reconnectAttemptsRef.current = 0;
+    localCandidateTypesRef.current.clear();
+    remoteCandidateTypesRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
     if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
@@ -360,6 +382,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       };
       connection.onicecandidate = (event) => {
         if (event.candidate) {
+          const candidateType = readCandidateType(event.candidate);
+          if (candidateType) localCandidateTypesRef.current.add(candidateType);
           void sendSignal({
             kind: "ice-candidate",
             candidate: event.candidate.toJSON(),
@@ -369,6 +393,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       connection.onconnectionstatechange = () => {
         setConnectionState(connection.connectionState);
         if (connection.connectionState === "connected") {
+          if (connectionRetryRef.current !== null) {
+            window.clearTimeout(connectionRetryRef.current);
+            connectionRetryRef.current = null;
+          }
+          if (connectionTimeoutRef.current !== null) {
+            window.clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
           setPhase("connected");
           setMessage("");
         } else if (connection.connectionState === "failed") {
@@ -392,6 +424,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       };
 
+      connection.oniceconnectionstatechange = () => {
+        setConnectionState(connection.iceConnectionState);
+      };
+
       const refreshIn = Math.max(
         60_000,
         new Date(credentials.expiresAt).getTime() - Date.now() - 10 * 60 * 1000
@@ -405,9 +441,68 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         await connection.setLocalDescription(offer);
         await sendSignal({ kind: "offer", description: offer });
       }
+
+      if (connectionRetryRef.current === null) {
+        connectionRetryRef.current = window.setTimeout(() => {
+          const latestConnection = peerConnectionRef.current;
+          const latestCall = callRef.current;
+          if (
+            !latestConnection ||
+            !latestCall ||
+            latestConnection.connectionState === "connected" ||
+            userRef.current?.id !== latestCall.callerUserId
+          ) {
+            return;
+          }
+          reconnectAttemptsRef.current += 1;
+          void refreshTurnConfiguration(latestCall)
+            .then(async () => {
+              latestConnection.restartIce();
+              const retryOffer = await latestConnection.createOffer({ iceRestart: true });
+              await latestConnection.setLocalDescription(retryOffer);
+              await sendSignal({ kind: "offer", description: retryOffer });
+            })
+            .catch(() => undefined);
+        }, 10_000);
+      }
+
+      if (connectionTimeoutRef.current === null) {
+        connectionTimeoutRef.current = window.setTimeout(() => {
+          const latestConnection = peerConnectionRef.current;
+          const latestCall = callRef.current;
+          if (!latestCall || latestConnection?.connectionState === "connected") return;
+
+          const relayAvailable = localCandidateTypesRef.current.has("relay");
+          const remoteRelayReceived = remoteCandidateTypesRef.current.has("relay");
+          void sendSignal({ kind: "ended" }).catch(() => undefined);
+          void apiRequest(`/api/calls/${latestCall.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ action: "end" }),
+            keepalive: true,
+          }).catch(() => undefined);
+          clearCallResources();
+          setMessage(
+            !relayAvailable
+              ? t(
+                  "The call could not reach the network relay. Check the network and try again. (ICE-R0)",
+                  "PoÅ‚Ä…czenie nie mogÅ‚o dotrzeÄ‡ do przekaÅºnika sieciowego. SprawdÅº sieÄ‡ i sprÃ³buj ponownie. (ICE-R0)"
+                )
+              : !remoteRelayReceived
+                ? t(
+                    "The network relay was available, but relay information was not received from the other device. Please try again. (ICE-R1)",
+                    "PrzekaÅºnik sieciowy byÅ‚ dostÄ™pny, ale nie otrzymano informacji o przekaÅºniku z drugiego urzÄ…dzenia. SprÃ³buj ponownie. (ICE-R1)"
+                  )
+                : t(
+                    "Both devices reached the network relay, but the call could not connect. Please try again. (ICE-R2)",
+                    "Oba urzÄ…dzenia dotarÅ‚y do przekaÅºnika sieciowego, ale nie udaÅ‚o siÄ™ poÅ‚Ä…czyÄ‡. SprÃ³buj ponownie. (ICE-R2)"
+                  )
+          );
+          setPhase("error");
+        }, 25_000);
+      }
       return connection;
     },
-    [getMicrophone, refreshTurnConfiguration, sendSignal, t]
+    [clearCallResources, getMicrophone, refreshTurnConfiguration, sendSignal, t]
   );
 
   const finishRemoteCall = useCallback(
@@ -478,6 +573,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (signal.kind === "ice-candidate") {
+        const candidateType = readCandidateType(signal.candidate);
+        if (candidateType) remoteCandidateTypesRef.current.add(candidateType);
         const connection = peerConnectionRef.current;
         if (!connection?.remoteDescription) {
           queuedCandidatesRef.current.push(signal.candidate);
@@ -530,7 +627,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const current = callRef.current;
     if (current) {
       const refreshed = data.calls.find((candidate) => candidate.id === current.id);
-      if (refreshed) setCall(refreshed);
+      if (refreshed) {
+        setCall(refreshed);
+      } else if (["incoming", "outgoing"].includes(phaseRef.current)) {
+        clearCallResources();
+        setMessage(t("No answer.", "Brak odpowiedzi."));
+        setPhase("ended");
+      }
       return;
     }
     const incoming = data.calls.find(
@@ -538,7 +641,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         candidate.recipientUserId === userRef.current?.id && candidate.status === "ringing"
     );
     if (incoming) await showIncomingCall(incoming);
-  }, [showIncomingCall]);
+  }, [clearCallResources, showIncomingCall, t]);
 
   const refreshIdentity = useCallback(async () => {
     try {
@@ -612,6 +715,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           .then(async ({ call: refreshed }) => {
             setCall(refreshed);
             if (
+              refreshed.status === "ringing" &&
+              new Date(refreshed.ringExpiresAt).getTime() <= Date.now()
+            ) {
+              if (userRef.current?.id === refreshed.callerUserId) {
+                void apiRequest(`/api/calls/${refreshed.id}`, {
+                  method: "PATCH",
+                  body: JSON.stringify({ action: "cancel" }),
+                }).catch(() => undefined);
+              }
+              finishRemoteCall(t("No answer.", "Brak odpowiedzi."));
+            } else if (
               refreshed.status === "accepted" &&
               userRef.current?.id === refreshed.callerUserId &&
               !peerConnectionRef.current
