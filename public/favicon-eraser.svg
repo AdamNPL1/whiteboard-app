@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48">
+  <defs>
+    <linearGradient id="eraserGradient" x1="11" y1="38" x2="38" y2="10" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#9b4df1"/>
+      <stop offset="0.5" stop-color="#7969ef"/>
+      <stop offset="1" stop-color="#58b9df"/>
+    </linearGradient>
+  </defs>
+  <rect width="48" height="48" rx="12" fill="#fff"/>
+  <g transform="rotate(-45 24 24)" fill="none" stroke="url(#eraserGradient)" stroke-width="4.25" stroke-linejoin="round">
+    <rect x="13" y="6" width="22" height="36" rx="7"/>
+    <path d="M13 28h22"/>
+  </g>
+</svg>
