@@ -130,6 +130,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isMuted, setIsMuted] = useState(false);
   const [remoteMuted, setRemoteMuted] = useState(false);
   const [connectionState, setConnectionState] = useState("");
+  const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
 
   const userRef = useRef<CurrentUser | null>(null);
   const callRef = useRef<CallRecord | null>(null);
@@ -189,7 +190,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     remoteCandidateTypesRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
-    if (remoteAudioRef.current) remoteAudioRef.current.srcObject = null;
+    if (remoteAudioRef.current) {
+      remoteAudioRef.current.onloadedmetadata = null;
+      remoteAudioRef.current.srcObject = null;
+    }
+    setIsRemoteAudioBlocked(false);
     const channel = callChannelRef.current;
     callChannelRef.current = null;
     if (channel) void getSupabaseBrowserClient().removeChannel(channel);
@@ -258,24 +263,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
-      const supportedConstraints =
-        navigator.mediaDevices.getSupportedConstraints() as MediaTrackSupportedConstraints & {
-          voiceIsolation?: boolean;
-        };
-      const speechConstraints: MediaTrackConstraints & {
-        voiceIsolation?: boolean;
-        latency?: number | { ideal: number };
-      } = {
-        echoCancellation: { ideal: true },
-        noiseSuppression: { ideal: true },
-        autoGainControl: { ideal: true },
+      const speechConstraints: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
         channelCount: { ideal: 1 },
-        sampleRate: { ideal: 48_000 },
-        latency: { ideal: 0.02 },
       };
-      if (supportedConstraints.voiceIsolation) {
-        speechConstraints.voiceIsolation = true;
-      }
 
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: speechConstraints,
@@ -398,9 +391,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       stream.getTracks().forEach((track) => connection.addTrack(track, stream));
 
       connection.ontrack = (event) => {
-        if (!remoteAudioRef.current) return;
-        remoteAudioRef.current.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        void remoteAudioRef.current.play().catch(() => undefined);
+        const audio = remoteAudioRef.current;
+        if (!audio) return;
+        audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
+        audio.muted = false;
+        audio.volume = 1;
+        const playRemoteAudio = () => {
+          void audio
+            .play()
+            .then(() => setIsRemoteAudioBlocked(false))
+            .catch(() => setIsRemoteAudioBlocked(true));
+        };
+        audio.onloadedmetadata = playRemoteAudio;
+        event.track.onunmute = playRemoteAudio;
+        playRemoteAudio();
       };
       connection.onicecandidate = (event) => {
         if (event.candidate) {
@@ -1040,6 +1044,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           <div aria-live="polite" style={{ color: phase === "error" ? "#b91c1c" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {statusText || connectionState}
           </div>
+
+          {phase === "connected" && isRemoteAudioBlocked && (
+            <button
+              type="button"
+              onClick={() => {
+                const audio = remoteAudioRef.current;
+                if (!audio) return;
+                void audio
+                  .play()
+                  .then(() => setIsRemoteAudioBlocked(false))
+                  .catch(() => setIsRemoteAudioBlocked(true));
+              }}
+              style={{
+                ...callActionStyle,
+                background: "#ede9fe",
+                color: "#6d28d9",
+              }}
+            >
+              <Phone size={17} /> {t("Play audio", "Włącz dźwięk")}
+            </button>
+          )}
 
           {phase === "incoming" ? (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
