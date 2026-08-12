@@ -15,7 +15,10 @@ export const metadata: Metadata = {
     canonical: "/",
   },
   icons: {
-    icon: [{ url: "/favicon.ico", type: "image/x-icon", sizes: "256x256" }],
+    icon: [
+      { url: "/favicon-48.png", type: "image/png", sizes: "48x48" },
+      { url: "/favicon.ico", type: "image/x-icon", sizes: "256x256" },
+    ],
   },
 };
 
