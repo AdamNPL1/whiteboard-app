@@ -556,11 +556,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     void refreshIdentity();
+    const handleAppAuthChange = () => {
+      void refreshIdentity();
+    };
+    window.addEventListener("scriboo-auth-changed", handleAppAuthChange);
     const supabase = getSupabaseBrowserClient();
     const { data } = supabase.auth.onAuthStateChange(() => {
       window.setTimeout(() => void refreshIdentity(), 0);
     });
-    return () => data.subscription.unsubscribe();
+    return () => {
+      window.removeEventListener("scriboo-auth-changed", handleAppAuthChange);
+      data.subscription.unsubscribe();
+    };
   }, [refreshIdentity]);
 
   useEffect(() => {
@@ -774,6 +781,32 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     <CallContext.Provider value={contextValue}>
       {children}
       <audio ref={remoteAudioRef} autoPlay playsInline hidden />
+
+      {user && !board && phase === "idle" && (
+        <button
+          type="button"
+          aria-label="Audio call is loading"
+          disabled
+          style={{
+            position: "fixed",
+            top: "7px",
+            left: "112px",
+            zIndex: 72,
+            width: "34px",
+            height: "34px",
+            border: "none",
+            borderRadius: "10px",
+            background: "transparent",
+            color: "#ffffff",
+            display: "grid",
+            placeItems: "center",
+            opacity: 0.72,
+            padding: 0,
+          }}
+        >
+          <Phone size={16} />
+        </button>
+      )}
 
       {user && board && phase === "idle" && (
         <button

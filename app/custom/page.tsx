@@ -37,7 +37,6 @@ import {
   Clock3,
   History,
   CloudOff,
-  CircleHelp,
   Monitor,
   Moon,
   Plus,
@@ -63,6 +62,7 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
 import { useCall } from "@/app/components/CallProvider";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
+import SupportChatbot from "@/app/components/SupportChatbot";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line" | "ruler";
 type StrokeTool = "pen" | "eraser";
@@ -70,6 +70,9 @@ type Point = { x: number; y: number };
 
 const BLACK_CROSSHAIR_CURSOR =
   'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22white%22 stroke-width=%224%22/%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22black%22 stroke-width=%222%22/%3E%3C/svg%3E") 12 12, crosshair';
+
+const ERASER_CURSOR =
+  'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%225%22 y1=%2219%22 x2=%2219%22 y2=%225%22 gradientUnits=%22userSpaceOnUse%22%3E%3Cstop stop-color=%22%239b4df1%22/%3E%3Cstop offset=%221%22 stop-color=%22%2358b9df%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cg transform=%22rotate(45 12 12)%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%222.5%22 stroke-linejoin=%22round%22%3E%3Crect x=%226.5%22 y=%222.5%22 width=%2211%22 height=%2219%22 rx=%223.5%22/%3E%3Cpath d=%22M6.5 14.5h11%22/%3E%3C/g%3E%3C/svg%3E") 12 12, auto';
 
 type Stroke = {
   kind: "stroke";
@@ -496,19 +499,6 @@ export default function Page() {
   const textBoxOpacity = 0.75;
   const [showEraserMenu, setShowEraserMenu] = useState(false);
 
-  useEffect(() => {
-    const savedTheme = window.localStorage.getItem("scriboo-interface-theme");
-    setIsInterfaceDarkMode(
-      savedTheme === "dark" ||
-        (savedTheme === null && window.matchMedia("(prefers-color-scheme: dark)").matches)
-    );
-  }, []);
-
-  useEffect(() => {
-    const theme = isInterfaceDarkMode ? "dark" : "light";
-    document.documentElement.dataset.scribooTheme = theme;
-    window.localStorage.setItem("scriboo-interface-theme", theme);
-  }, [isInterfaceDarkMode]);
   const [shapeStart, setShapeStart] = useState<Point | null>(null);
   const [snapshot, setSnapshot] = useState<ImageData | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
@@ -568,6 +558,27 @@ export default function Page() {
   const [currentAccountName, setCurrentAccountName] = useState("");
   const [currentAccountEmail, setCurrentAccountEmail] = useState("");
   const [currentAccountId, setCurrentAccountId] = useState("");
+
+  useEffect(() => {
+    if (!currentAccountId) {
+      setIsInterfaceDarkMode(false);
+      return;
+    }
+
+    setIsInterfaceDarkMode(
+      window.localStorage.getItem("scriboo-interface-theme") === "dark"
+    );
+  }, [currentAccountId]);
+
+  useEffect(() => {
+    const theme = currentAccountId && isInterfaceDarkMode ? "dark" : "light";
+    document.documentElement.dataset.scribooTheme = theme;
+
+    if (currentAccountId) {
+      window.localStorage.setItem("scriboo-interface-theme", theme);
+    }
+  }, [currentAccountId, isInterfaceDarkMode]);
+
   const [currentAccountPlan, setCurrentAccountPlan] = useState<
     "basic" | "pro" | "master"
   >(
@@ -607,6 +618,7 @@ export default function Page() {
   const [isBillingPortalLoading, setIsBillingPortalLoading] = useState(false);
   const [showSettingsMenu, setShowSettingsMenu] = useState(false);
   const [showProfileMenu, setShowProfileMenu] = useState(false);
+  const [showSupportChat, setShowSupportChat] = useState(false);
   const [showDeleteAccountModal, setShowDeleteAccountModal] = useState(false);
   const [deleteAccountPassword, setDeleteAccountPassword] = useState("");
   const [deleteAccountConfirmation, setDeleteAccountConfirmation] =
@@ -654,6 +666,16 @@ export default function Page() {
   const [boardSaveState, setBoardSaveState] =
     useState<BoardSaveState>("saved");
   const [isOnline, setIsOnline] = useState(true);
+
+  useEffect(() => {
+    const isObsoleteLoadingNotice =
+      boardActionMessage.startsWith("Boards are still loading") ||
+      boardActionMessage.startsWith("Tablice nadal się ładują");
+
+    if (!isBoardsLoading && isObsoleteLoadingNotice) {
+      setBoardActionMessage("");
+    }
+  }, [boardActionMessage, isBoardsLoading]);
 
   useEffect(() => {
     const activeBoard = boards.find(
@@ -1280,6 +1302,7 @@ export default function Page() {
           );
           setAuthMessage("");
           setShowLoginModal(false);
+          window.dispatchEvent(new Event("scriboo-auth-changed"));
           showWelcomeCelebration(data.user.name ?? name, "created");
           return;
         }
@@ -1305,6 +1328,7 @@ export default function Page() {
       setAuthPassword("");
       setAuthMessage("");
       setShowLoginModal(false);
+      window.dispatchEvent(new Event("scriboo-auth-changed"));
       showWelcomeCelebration(data.user?.name, "login");
       void loadCurrentAccount();
     } catch (error) {
@@ -1371,6 +1395,7 @@ export default function Page() {
     }
 
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    window.dispatchEvent(new Event("scriboo-auth-changed"));
     setCurrentAccountId("");
     setCurrentAccountName("");
     setCurrentAccountEmail("");
@@ -1721,6 +1746,7 @@ export default function Page() {
   const loadBoards = async () => {
     if (!currentAccountId) return;
 
+    setBoardActionMessage("");
     setIsBoardsLoading(true);
 
     try {
@@ -1811,9 +1837,6 @@ export default function Page() {
     }
 
     if (isBoardsLoading) {
-      setBoardActionMessage(
-        t("Boards are still loading. Try again in a moment.", "Tablice nadal się ładują. Spróbuj ponownie za chwilę.")
-      );
       return;
     }
 
@@ -3648,9 +3671,9 @@ export default function Page() {
 
   const renderBoardPreviewContent = (board: BoardSummary) => {
     const previewWidth = 320;
-    const previewHeight = 160;
+    const previewHeight = 180;
     const previewPadding = 18;
-    const previewElements = board.previewDocument.elements.slice(-18);
+    const previewElements = board.previewDocument.elements;
     const previewBounds = getBoardPreviewBounds(previewElements);
 
     if (!previewBounds || previewElements.length === 0) {
@@ -6563,7 +6586,7 @@ export default function Page() {
   };
 
   const canvasCursor: string =
-    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? BLACK_CROSSHAIR_CURSOR : "default" : tool === "eraser" ? "cell" : tool === "text" || tool === "textbox" ? "text" : BLACK_CROSSHAIR_CURSOR;
+    isPanning || tool === "pen" ? "none" : tool === "cursor" ? isSelecting ? BLACK_CROSSHAIR_CURSOR : "default" : tool === "eraser" ? ERASER_CURSOR : tool === "text" || tool === "textbox" ? "text" : BLACK_CROSSHAIR_CURSOR;
 
   const beginImageTransform = (
     e: React.PointerEvent<HTMLDivElement>,
@@ -9780,7 +9803,16 @@ export default function Page() {
                 backdropFilter: "none",
                 }}
               >
-                <LayoutGrid size={16} />
+                <svg
+                  width="18"
+                  height="18"
+                  viewBox="0 0 18 18"
+                  fill="none"
+                  aria-hidden="true"
+                >
+                  <rect x="2.25" y="3" width="13.5" height="13" rx="2.5" stroke="currentColor" strokeWidth="1.5" />
+                  <rect x="6" y="1.5" width="6" height="3.25" rx="1.2" fill="currentColor" />
+                </svg>
               </button>
 
               <button
@@ -9847,7 +9879,9 @@ export default function Page() {
                     borderRight: "1px solid rgba(203,213,225,0.74)",
                     padding: "30px 22px 24px",
                     display: "grid",
-                    gridTemplateRows: "auto auto 1fr auto",
+                    gridTemplateRows: boardActionMessage
+                      ? "auto auto auto 1fr auto"
+                      : "auto auto 1fr auto",
                     gap: "18px",
                     ...premiumBodyStyle,
                   }}
@@ -10655,7 +10689,7 @@ export default function Page() {
                             className="scriboo-plan-hero"
                             style={{
                               minHeight: "240px",
-                              borderRadius: "20px",
+                              borderRadius: "12px",
                               border: "1px solid rgba(89,171,168,0.2)",
                               background: signatureIndigoGradient,
                               color: "#ffffff",
@@ -11615,14 +11649,16 @@ export default function Page() {
                                           height: "28px",
                                           padding: "0 9px",
                                           borderRadius: "999px",
-                                          background:
-                                            signatureIndigoButtonGradient,
+                                          background: isInterfaceDarkMode
+                                            ? "#5f6596"
+                                            : signatureIndigoButtonGradient,
                                           color: "#ffffff",
                                           display: "inline-flex",
                                           alignItems: "center",
                                           justifyContent: "center",
-                                          boxShadow:
-                                            "0 10px 18px rgba(59,130,246,0.22)",
+                                          boxShadow: isInterfaceDarkMode
+                                            ? "0 5px 12px rgba(8,10,28,0.24)"
+                                            : "0 10px 18px rgba(59,130,246,0.22)",
                                           fontWeight: 700,
                                         }
                                       : undefined
@@ -12120,11 +12156,12 @@ export default function Page() {
                       </>
                     ) : (
                     <div
+                      className="scriboo-board-grid"
                       style={{
                         display: "grid",
                         gridTemplateColumns:
-                          "repeat(auto-fill, minmax(220px, 1fr))",
-                        gap: "18px",
+                          "repeat(auto-fill, minmax(250px, 280px))",
+                        gap: "24px",
                         alignContent: "start",
                       }}
                     >
@@ -12137,6 +12174,7 @@ export default function Page() {
                         return (
                           <div
                             key={board.id}
+                            className={`scriboo-board-card has-real-clip${isActive ? " is-active" : ""}`}
                             style={{
                               borderRadius: "20px",
                               border: isActive
@@ -12157,8 +12195,9 @@ export default function Page() {
                             }}
                           >
                             <div
+                              className="scriboo-board-card-preview"
                               style={{
-                                height: "132px",
+                                height: "180px",
                                 padding: "14px",
                                 background: isActive
                                   ? "linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%)"
@@ -12172,6 +12211,7 @@ export default function Page() {
                             </div>
 
                             <div
+                              className="scriboo-board-card-body"
                               style={{
                                 padding: "16px 16px 15px",
                                 display: "grid",
@@ -12230,6 +12270,7 @@ export default function Page() {
                                     }}
                                   >
                                     <button
+                                      className="scriboo-board-card-title"
                                       type="button"
                                       onDoubleClick={(e) => {
                                         e.stopPropagation();
@@ -12273,6 +12314,7 @@ export default function Page() {
                                       {board.name || `Board ${index + 1}`}
                                     </button>
                                     <div
+                                      className="scriboo-board-card-statuses"
                                       style={{
                                         display: "flex",
                                         flexWrap: "wrap",
@@ -12346,6 +12388,7 @@ export default function Page() {
                                   </div>
                                   {!isInTrash && (
                                     <div
+                                      className="scriboo-board-card-actions"
                                       style={{
                                         display: "flex",
                                         alignItems: "center",
@@ -12564,6 +12607,7 @@ export default function Page() {
                               )}
 
                               <div
+                                className="scriboo-board-card-footer"
                                 style={{
                                   display: "flex",
                                   alignItems: "center",
@@ -12574,9 +12618,21 @@ export default function Page() {
                                   fontWeight: 600,
                                 }}
                               >
-                                <span>{formatBoardDate(board.updatedAt)}</span>
                                 <span
                                   style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "7px",
+                                  }}
+                                >
+                                  <CalendarDays size={14} />
+                                  {formatBoardDate(board.updatedAt)}
+                                </span>
+                                <span
+                                  style={{
+                                    display: "inline-flex",
+                                    alignItems: "center",
+                                    gap: "5px",
                                     color: isInTrash
                                       ? "#b45309"
                                       : board.starred
@@ -12595,11 +12651,7 @@ export default function Page() {
                                             30 * 24 * 60 * 60 * 1000
                                         ).toISOString()
                                       )}`
-                                    : board.starred
-                                    ? "In starred"
-                                    : isActive
-                                    ? "Open now"
-                                    : ""}
+                                    : <>{t("Open now", "Otwórz teraz")} <ArrowRight size={14} /></>}
                                 </span>
                               </div>
                             </div>
@@ -13901,33 +13953,11 @@ export default function Page() {
           </div>
         )}
 
-        <Link
-          href="/support"
-            aria-label={t("Help and Support", "Pomoc i wsparcie")}
-            title={t("Help & Support", "Pomoc i wsparcie")}
-          style={{
-            position: "absolute",
-            top: "50%",
-            right: currentAccountEmail ? "56px" : "16px",
-            transform: "translateY(-50%)",
-            height: "32px",
-            padding: "0 12px",
-            borderRadius: "999px",
-            border: "1px solid rgba(255,255,255,0.42)",
-            background: "rgba(255,255,255,0.12)",
-            color: "#ffffff",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "7px",
-            textDecoration: "none",
-            fontSize: "12px",
-            fontWeight: 750,
-            backdropFilter: "blur(8px)",
-          }}
-        >
-          <CircleHelp size={16} />
-                {t("Help & Support", "Pomoc i wsparcie")}
-        </Link>
+        <SupportChatbot
+          open={showSupportChat}
+          onOpen={() => setShowSupportChat(true)}
+          onClose={() => setShowSupportChat(false)}
+        />
 
         {currentAccountEmail && (
           <div

@@ -1842,3 +1842,1624 @@ input.modern-range::-ms-thumb {
 .scriboo-dark-interface .scriboo-board-usage-card > div:last-child {
   color: #c7cee8 !important;
 }
+
+/* Board library cards — compact clipboard-style board previews. */
+.scriboo-board-card {
+  position: relative;
+  isolation: isolate;
+  transition: transform 180ms ease, box-shadow 180ms ease;
+}
+
+.scriboo-board-card::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  border: 7px solid #46506f;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.16),
+    inset 0 0 0 2px rgba(19, 25, 48, 0.18);
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  content: "";
+  position: absolute;
+  top: 13px;
+  bottom: 13px;
+  left: 0;
+  z-index: 6;
+  width: 25px;
+  background:
+    radial-gradient(
+      circle at 50% 9px,
+      #303851 0 2.7px,
+      #ffffff 3px 6.8px,
+      rgba(177, 190, 238, 0.7) 7px 7.8px,
+      transparent 8px
+    ) center top / 22px 25px repeat-y;
+  filter: drop-shadow(1px 2px 2px rgba(15, 23, 42, 0.3));
+  pointer-events: none;
+}
+
+.scriboo-board-card:hover {
+  transform: translateY(-2px);
+}
+
+.scriboo-board-card-preview {
+  margin: 7px 7px 0 18px;
+  border-radius: 13px 13px 0 0;
+  box-shadow:
+    inset 0 0 0 3px rgba(255, 255, 255, 0.72),
+    inset 0 -8px 16px rgba(15, 23, 42, 0.04);
+}
+
+.scriboo-board-card-preview::before,
+.scriboo-board-card-preview::after {
+  content: "";
+  position: absolute;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.scriboo-board-card-preview::before {
+  inset: 7px;
+  border: 1px solid rgba(30, 41, 59, 0.08);
+  border-radius: 8px 8px 2px 2px;
+  box-shadow:
+    0 0 0 1px rgba(255, 255, 255, 0.3),
+    inset 0 1px 4px rgba(15, 23, 42, 0.05);
+}
+
+.scriboo-board-card-preview::after {
+  display: none;
+}
+
+.scriboo-board-card-body {
+  margin: 0 7px 7px 18px;
+  background:
+    linear-gradient(90deg, transparent 0 20px, rgba(123, 143, 190, 0.11) 20px 21px, transparent 21px),
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(123, 143, 190, 0.08) 27px 28px),
+    linear-gradient(180deg, #fbfcff 0%, #f4f6fb 100%);
+  border-radius: 0 0 13px 13px;
+  border-top: 1px solid rgba(52, 59, 86, 0.1);
+  min-height: 250px;
+  align-content: space-between;
+}
+
+.scriboo-board-card-actions button {
+  border-radius: 999px !important;
+  box-shadow: 0 4px 10px rgba(30, 41, 59, 0.08);
+}
+
+.scriboo-board-card-title {
+  font-size: 23px !important;
+  line-height: 1.12 !important;
+}
+
+.scriboo-board-card-statuses {
+  min-height: 26px;
+  align-items: center;
+}
+
+.scriboo-board-card-actions {
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+  gap: 10px !important;
+  padding: 14px 0;
+  border-top: 1px solid rgba(96, 108, 148, 0.15);
+  border-bottom: 1px solid rgba(96, 108, 148, 0.15);
+}
+
+.scriboo-board-card-actions button {
+  width: 38px !important;
+  height: 38px !important;
+  flex: 0 0 38px;
+}
+
+.scriboo-board-card-footer {
+  min-height: 28px;
+  padding-top: 4px;
+}
+
+.scriboo-board-card.is-active::before {
+  border-color: #7257c8;
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.26),
+    inset 0 0 0 2px rgba(48, 35, 77, 0.12),
+    0 0 0 2px rgba(123, 101, 181, 0.13);
+}
+
+.scriboo-board-card.is-active::after {
+  background:
+    radial-gradient(
+      circle at 50% 9px,
+      #7257c8 0 2.7px,
+      #ffffff 3px 6.8px,
+      rgba(184, 168, 255, 0.8) 7px 7.8px,
+      transparent 8px
+    ) center top / 22px 25px repeat-y;
+}
+
+.scriboo-dark-interface .scriboo-board-card {
+  background: #252b45 !important;
+  border-color: transparent !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card::before {
+  border-color: #46506f;
+}
+
+.scriboo-dark-interface .scriboo-board-card.is-active::before {
+  border-color: #7d72bd;
+}
+
+.scriboo-dark-interface .scriboo-board-card-body {
+  background:
+    linear-gradient(90deg, transparent 0 20px, rgba(157, 170, 219, 0.1) 20px 21px, transparent 21px),
+    repeating-linear-gradient(180deg, transparent 0 27px, rgba(157, 170, 219, 0.055) 27px 28px),
+    linear-gradient(180deg, #333b58 0%, #2b324d 100%) !important;
+  border-top-color: rgba(210, 219, 255, 0.15);
+}
+
+.scriboo-dark-interface .scriboo-board-card-body button:not(.scriboo-board-card-actions button),
+.scriboo-dark-interface .scriboo-board-card-body > div {
+  color: #f3f5ff;
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  background: #39415f !important;
+  border-color: rgba(210, 219, 255, 0.18) !important;
+}
+
+/* Polished digital notebook treatment. */
+.scriboo-board-card {
+  overflow: visible !important;
+  background:
+    radial-gradient(circle at 85% 8%, rgba(91, 83, 190, 0.17), transparent 32%),
+    linear-gradient(155deg, #171a38 0%, #10142e 56%, #151936 100%) !important;
+  border-color: transparent !important;
+  box-shadow:
+    0 22px 44px rgba(6, 8, 28, 0.3),
+    10px 8px 0 -3px #252b55 !important;
+}
+
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before {
+  border: 2px solid rgba(130, 112, 255, 0.72);
+  box-shadow:
+    inset 0 0 0 2px rgba(197, 190, 255, 0.08),
+    0 0 12px rgba(124, 92, 255, 0.36),
+    inset 0 0 24px rgba(75, 64, 164, 0.08);
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  top: 18px;
+  bottom: 18px;
+  left: -15px;
+  width: 42px;
+  background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2242%22 height=%2248%22 viewBox=%220 0 42 48%22%3E%3Cellipse cx=%2231%22 cy=%2224%22 rx=%228%22 ry=%229%22 fill=%22%23111630%22 stroke=%22%235d54b8%22 stroke-width=%222%22/%3E%3Crect x=%221%22 y=%2219%22 width=%2232%22 height=%2210%22 rx=%225%22 fill=%22%237c62db%22 stroke=%22%23ad98ff%22 stroke-width=%221.5%22/%3E%3Cpath d=%22M5 21.5h22%22 stroke=%22%23d1c8ff%22 stroke-opacity=%22.55%22 stroke-width=%221.2%22/%3E%3C/svg%3E") center top / 42px 48px repeat-y;
+  filter: drop-shadow(0 0 4px rgba(126, 96, 255, 0.55));
+}
+
+.scriboo-board-card-preview {
+  margin: 16px 16px 0 30px;
+  height: 190px !important;
+  border: 5px solid #2a2e53;
+  border-radius: 15px;
+  background: #f4f5fb !important;
+  box-shadow:
+    0 10px 22px rgba(4, 7, 25, 0.34),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72);
+}
+
+.scriboo-board-card-preview::before {
+  inset: 5px;
+  border-color: rgba(52, 58, 96, 0.14);
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 300px;
+  margin: 0 16px 14px 30px;
+  padding: 22px 4px 10px !important;
+  background: transparent !important;
+  border-top: 0;
+}
+
+.scriboo-board-card-title,
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #f5f6ff !important;
+  font-size: 27px !important;
+  letter-spacing: -0.035em;
+}
+
+.scriboo-board-card-statuses {
+  gap: 8px !important;
+  margin-top: 4px;
+}
+
+.scriboo-board-card-statuses > div {
+  min-height: 30px !important;
+  height: auto !important;
+  padding: 3px 12px !important;
+  background: rgba(45, 50, 87, 0.78) !important;
+  border-color: rgba(131, 112, 255, 0.36) !important;
+  color: #b8c8ff !important;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.scriboo-board-card-actions {
+  display: flex !important;
+  justify-content: center !important;
+  flex-wrap: wrap !important;
+  gap: 12px !important;
+  padding: 20px 0 18px;
+  border-color: rgba(144, 153, 205, 0.13);
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 48px !important;
+  height: 48px !important;
+  flex: 0 0 48px;
+  background: linear-gradient(145deg, #242947, #1a1f3c) !important;
+  border: 1px solid rgba(136, 147, 205, 0.24) !important;
+  box-shadow:
+    0 8px 18px rgba(3, 6, 23, 0.24),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.scriboo-board-card-actions button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.scriboo-board-card-actions button:last-child {
+  margin-left: calc(50% - 24px);
+  margin-right: calc(50% - 24px);
+  margin-top: 4px;
+}
+
+.scriboo-board-card-footer {
+  min-height: 42px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(144, 153, 205, 0.13);
+  color: #9da7ca !important;
+  font-size: 13px !important;
+}
+
+.scriboo-board-card-footer > span:last-child {
+  color: #7f70ff !important;
+  font-weight: 700;
+}
+
+/* Keep notebook bindings, shadows, and controls inside the board browser. */
+.scriboo-board-grid {
+  padding: 12px 24px 26px 18px;
+  box-sizing: border-box;
+  overflow: visible;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  top: 22px;
+  bottom: 22px;
+  left: -10px;
+  width: 34px;
+  background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2234%22 height=%2254%22 viewBox=%220 0 34 54%22%3E%3Cellipse cx=%2226%22 cy=%2227%22 rx=%226%22 ry=%227%22 fill=%22%23111630%22 stroke=%22%235d54b8%22 stroke-width=%221.6%22/%3E%3Crect x=%221%22 y=%2223%22 width=%2226%22 height=%228%22 rx=%224%22 fill=%22%237c62db%22 stroke=%22%23ad98ff%22 stroke-width=%221.2%22/%3E%3Cpath d=%22M5 25h17%22 stroke=%22%23d1c8ff%22 stroke-opacity=%22.55%22 stroke-width=%221%22/%3E%3C/svg%3E") center top / 34px 54px repeat-y;
+}
+
+.scriboo-board-card-preview {
+  margin-right: 13px;
+  margin-left: 24px;
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 286px;
+  margin-right: 13px;
+  margin-left: 24px;
+}
+
+.scriboo-board-card-actions {
+  gap: 10px !important;
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 44px !important;
+  height: 44px !important;
+  flex-basis: 44px;
+}
+
+.scriboo-board-card-actions button:last-child {
+  margin-left: calc(50% - 22px);
+  margin-right: calc(50% - 22px);
+}
+
+/* Compact notebook scale: preserve the original board-card footprint. */
+.scriboo-board-grid {
+  padding: 6px 12px 14px 10px;
+}
+
+.scriboo-board-card {
+  box-shadow:
+    0 12px 26px rgba(6, 8, 28, 0.24),
+    6px 5px 0 -2px #252b55 !important;
+}
+
+.scriboo-board-card::before {
+  border-width: 1px;
+  box-shadow:
+    inset 0 0 0 1px rgba(197, 190, 255, 0.07),
+    0 0 7px rgba(124, 92, 255, 0.28);
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  top: 13px;
+  bottom: 13px;
+  left: -5px;
+  width: 20px;
+  background: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2238%22 viewBox=%220 0 20 38%22%3E%3Cellipse cx=%2215%22 cy=%2219%22 rx=%224%22 ry=%224.5%22 fill=%22%23111630%22 stroke=%22%235d54b8%22 stroke-width=%221.1%22/%3E%3Crect x=%221%22 y=%2216.5%22 width=%2215%22 height=%225%22 rx=%222.5%22 fill=%22%237c62db%22 stroke=%22%23ad98ff%22 stroke-width=%22.8%22/%3E%3C/svg%3E") center top / 20px 38px repeat-y;
+  filter: drop-shadow(0 0 2px rgba(126, 96, 255, 0.44));
+}
+
+.scriboo-board-card-preview {
+  height: 132px !important;
+  margin: 8px 8px 0 14px;
+  border-width: 3px;
+  border-radius: 12px;
+  box-shadow:
+    0 6px 13px rgba(4, 7, 25, 0.25),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.66);
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 0;
+  margin: 0 8px 8px 14px;
+  padding: 14px 8px 10px !important;
+  align-content: start;
+}
+
+.scriboo-board-card-title,
+.scriboo-dark-interface .scriboo-board-card-title {
+  font-size: 19px !important;
+  line-height: 1.15 !important;
+}
+
+.scriboo-board-card-statuses {
+  min-height: 24px;
+  gap: 6px !important;
+  margin-top: 0;
+}
+
+.scriboo-board-card-statuses > div {
+  min-height: 24px !important;
+  padding: 1px 9px !important;
+  font-size: 10px !important;
+}
+
+.scriboo-board-card-actions {
+  justify-content: flex-end !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  padding: 10px 0;
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 32px !important;
+  height: 32px !important;
+  flex: 0 0 32px;
+}
+
+.scriboo-board-card-actions button svg {
+  width: 15px;
+  height: 15px;
+}
+
+.scriboo-board-card-actions button:last-child {
+  margin: 0;
+}
+
+.scriboo-board-card-footer {
+  min-height: 28px;
+  padding-top: 8px;
+  font-size: 12px !important;
+}
+
+/* Final compact clipboard card — matched to the supplied reference. */
+.scriboo-board-grid {
+  padding: 10px 12px 18px;
+}
+
+.scriboo-board-card {
+  min-height: 470px;
+  overflow: hidden !important;
+  background:
+    radial-gradient(circle at 52% 8%, rgba(86, 71, 170, 0.16), transparent 34%),
+    linear-gradient(160deg, #171a38 0%, #11142f 58%, #151832 100%) !important;
+  border-radius: 18px !important;
+  box-shadow: 0 16px 34px rgba(5, 7, 27, 0.3) !important;
+}
+
+.scriboo-board-card::before {
+  border: 1.5px solid rgba(132, 103, 242, 0.7);
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 0 1px rgba(201, 192, 255, 0.05),
+    0 0 8px rgba(121, 86, 240, 0.24);
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  content: "";
+  top: 0;
+  bottom: auto;
+  left: 50%;
+  width: 104px;
+  height: 22px;
+  border: 1px solid rgba(128, 111, 211, 0.42);
+  border-radius: 0 0 9px 9px;
+  background: linear-gradient(180deg, #403967 0%, #322d57 100%);
+  box-shadow:
+    0 5px 10px rgba(4, 6, 23, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.07);
+  filter: none;
+  transform: translateX(-50%);
+}
+
+.scriboo-board-card-preview {
+  height: 160px !important;
+  margin: 28px 16px 0;
+  padding: 10px !important;
+  border: 2px solid #2d3157;
+  border-radius: 12px;
+  background: #f4f5fa !important;
+  box-shadow:
+    0 9px 18px rgba(4, 7, 25, 0.26),
+    inset 0 0 0 1px rgba(255, 255, 255, 0.7);
+}
+
+.scriboo-board-card-preview::before {
+  inset: 7px;
+  border-color: rgba(70, 74, 113, 0.1);
+  border-radius: 8px;
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 264px;
+  margin: 0 16px 12px;
+  padding: 18px 6px 8px !important;
+  background: transparent !important;
+  align-content: space-between;
+}
+
+.scriboo-board-card-title,
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #f6f6ff !important;
+  font-size: 26px !important;
+  line-height: 1.08 !important;
+}
+
+.scriboo-board-card-statuses {
+  min-height: 28px;
+  gap: 7px !important;
+  margin-top: 7px;
+}
+
+.scriboo-board-card-statuses > div {
+  min-height: 28px !important;
+  padding: 2px 10px !important;
+  background: rgba(40, 43, 77, 0.76) !important;
+  border-color: rgba(124, 92, 238, 0.36) !important;
+  color: #a891ff !important;
+  font-size: 10px !important;
+}
+
+.scriboo-board-card-actions {
+  justify-content: space-between !important;
+  flex-wrap: nowrap !important;
+  gap: 7px !important;
+  padding: 15px 0;
+  border-color: rgba(145, 151, 197, 0.14);
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 38px !important;
+  height: 38px !important;
+  flex: 0 0 38px;
+  background: linear-gradient(145deg, #242845, #1a1e39) !important;
+  border-color: rgba(139, 145, 194, 0.24) !important;
+  box-shadow:
+    0 6px 12px rgba(3, 5, 20, 0.22),
+    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.scriboo-board-card-actions button svg {
+  width: 18px;
+  height: 18px;
+}
+
+.scriboo-board-card-actions button:last-child {
+  margin: 0;
+}
+
+.scriboo-board-card-footer {
+  min-height: 38px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(145, 151, 197, 0.14);
+  color: #959dbd !important;
+  font-size: 12px !important;
+}
+
+.scriboo-board-card-footer > span:last-child {
+  color: #8b70ff !important;
+}
+
+/* Light-mode counterpart for the compact clipboard cards. */
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card {
+  background:
+    radial-gradient(circle at 52% 8%, rgba(124, 92, 238, 0.08), transparent 34%),
+    linear-gradient(160deg, #f8f9ff 0%, #edf1fb 58%, #f5f7fd 100%) !important;
+  box-shadow: 0 16px 32px rgba(49, 55, 92, 0.15) !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::before {
+  border-color: rgba(111, 83, 202, 0.56);
+  box-shadow:
+    inset 0 0 0 1px rgba(255, 255, 255, 0.72),
+    0 0 7px rgba(111, 83, 202, 0.16);
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  background: linear-gradient(180deg, #ddd9f5 0%, #c9c4e9 100%);
+  border-color: rgba(103, 86, 171, 0.3);
+  box-shadow:
+    0 5px 10px rgba(56, 48, 96, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.72);
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-title {
+  color: #18203a !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-statuses > div {
+  background: rgba(238, 236, 253, 0.94) !important;
+  border-color: rgba(111, 83, 202, 0.24) !important;
+  color: #6046bd !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-actions {
+  border-color: rgba(99, 108, 146, 0.14);
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-actions button {
+  background: linear-gradient(145deg, #ffffff, #eef1f8) !important;
+  border-color: rgba(112, 122, 163, 0.2) !important;
+  box-shadow:
+    0 5px 11px rgba(51, 59, 95, 0.1),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-footer {
+  border-top-color: rgba(99, 108, 146, 0.14);
+  color: #66708f !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-footer > span:last-child {
+  color: #6548d8 !important;
+}
+
+/* Clean Scriboo board tiles: content-first, compact, and theme-aware. */
+.scriboo-board-grid {
+  padding: 10px 4px 18px;
+  gap: 20px !important;
+}
+
+.scriboo-board-card {
+  min-height: 0;
+  overflow: hidden !important;
+  border: 1px solid rgba(210, 218, 234, 0.95) !important;
+  border-radius: 18px !important;
+  background: #ffffff !important;
+  box-shadow:
+    0 12px 30px rgba(40, 49, 82, 0.09),
+    0 2px 8px rgba(40, 49, 82, 0.05) !important;
+  transition: transform 180ms ease, border-color 180ms ease, box-shadow 180ms ease;
+}
+
+.scriboo-board-card:hover {
+  transform: translateY(-3px);
+  border-color: rgba(124, 92, 238, 0.3) !important;
+  box-shadow:
+    0 18px 38px rgba(40, 49, 82, 0.13),
+    0 3px 10px rgba(40, 49, 82, 0.06) !important;
+}
+
+.scriboo-board-card.is-active {
+  border-color: rgba(124, 92, 238, 0.48) !important;
+  box-shadow:
+    0 14px 34px rgba(89, 72, 177, 0.14),
+    0 0 0 2px rgba(124, 92, 238, 0.07) !important;
+}
+
+.scriboo-board-card::before,
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  display: none;
+}
+
+.scriboo-board-card-preview {
+  height: 150px !important;
+  margin: 0;
+  padding: 14px !important;
+  border: 0;
+  border-bottom: 1px solid rgba(210, 218, 234, 0.8);
+  border-radius: 0;
+  background: linear-gradient(145deg, #f4f7fd 0%, #e9eff9 100%) !important;
+  box-shadow: none;
+}
+
+.scriboo-board-card-preview::before {
+  inset: 13px;
+  border: 1px solid rgba(149, 160, 187, 0.16);
+  border-radius: 11px;
+  box-shadow: 0 5px 13px rgba(48, 58, 92, 0.06);
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 204px;
+  margin: 0;
+  padding: 18px !important;
+  border: 0;
+  border-radius: 0;
+  background: #ffffff !important;
+  align-content: start;
+}
+
+.scriboo-board-card-title,
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #18203a !important;
+  font-size: 21px !important;
+  line-height: 1.16 !important;
+  letter-spacing: -0.025em;
+}
+
+.scriboo-board-card-statuses {
+  min-height: 25px;
+  gap: 6px !important;
+  margin-top: 1px;
+}
+
+.scriboo-board-card-statuses > div {
+  min-height: 24px !important;
+  padding: 1px 9px !important;
+  border-color: rgba(124, 92, 238, 0.19) !important;
+  background: #f3f0ff !important;
+  color: #6548c7 !important;
+  box-shadow: none;
+  font-size: 10px !important;
+}
+
+.scriboo-board-card-actions {
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+  gap: 8px !important;
+  padding: 13px 0 0;
+  border-top: 1px solid rgba(216, 223, 237, 0.8);
+  border-bottom: 0;
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 34px !important;
+  height: 34px !important;
+  flex: 0 0 34px;
+  border: 1px solid rgba(205, 214, 231, 0.9) !important;
+  background: #ffffff !important;
+  box-shadow: 0 4px 10px rgba(45, 55, 88, 0.07);
+}
+
+.scriboo-board-card-actions button:hover:not(:disabled) {
+  border-color: rgba(124, 92, 238, 0.34) !important;
+  background: #f8f7ff !important;
+}
+
+.scriboo-board-card-actions button svg {
+  width: 16px;
+  height: 16px;
+}
+
+.scriboo-board-card-footer {
+  min-height: 31px;
+  margin-top: 3px;
+  padding-top: 13px;
+  border-top: 1px solid rgba(216, 223, 237, 0.8);
+  color: #6f7895 !important;
+  font-size: 11px !important;
+}
+
+.scriboo-board-card-footer > span:last-child {
+  color: #6548d8 !important;
+  font-weight: 700;
+}
+
+.scriboo-dark-interface .scriboo-board-card {
+  border-color: rgba(114, 126, 171, 0.27) !important;
+  background: #252b45 !important;
+  box-shadow: 0 14px 34px rgba(5, 8, 25, 0.27) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card:hover {
+  border-color: rgba(151, 129, 255, 0.48) !important;
+  box-shadow: 0 18px 40px rgba(5, 8, 25, 0.34) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card.is-active {
+  border-color: rgba(151, 129, 255, 0.62) !important;
+  box-shadow:
+    0 16px 36px rgba(5, 8, 25, 0.32),
+    0 0 0 2px rgba(126, 101, 232, 0.09) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-preview {
+  border-bottom-color: rgba(114, 126, 171, 0.22);
+  background: linear-gradient(145deg, #323a58 0%, #2b324d 100%) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-preview::before {
+  border-color: rgba(207, 215, 247, 0.1);
+  box-shadow: 0 5px 14px rgba(3, 5, 19, 0.18);
+}
+
+.scriboo-dark-interface .scriboo-board-card-body {
+  background: #252b45 !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #f2f4ff !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-statuses > div {
+  border-color: rgba(151, 129, 255, 0.3) !important;
+  background: rgba(112, 83, 211, 0.13) !important;
+  color: #c4b7ff !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions,
+.scriboo-dark-interface .scriboo-board-card-footer {
+  border-color: rgba(122, 133, 177, 0.2);
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  border-color: rgba(122, 133, 177, 0.25) !important;
+  background: #303752 !important;
+  box-shadow: 0 5px 12px rgba(3, 5, 19, 0.17);
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions button:hover:not(:disabled) {
+  border-color: rgba(151, 129, 255, 0.48) !important;
+  background: #373f5f !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-footer {
+  color: #aeb6d2 !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-footer > span:last-child {
+  color: #a996ff !important;
+}
+
+.scriboo-support-chat {
+  position: fixed;
+  right: 22px;
+  bottom: 22px;
+  z-index: 1000;
+  width: min(370px, calc(100vw - 32px));
+  height: min(580px, calc(100vh - 92px));
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid rgba(201, 210, 229, 0.88);
+  border-radius: 24px;
+  background: rgba(255, 255, 255, 0.98);
+  color: #172036;
+  box-shadow: 0 28px 75px rgba(30, 41, 83, 0.25), 0 1px 0 #fff inset;
+  animation: scriboo-support-chat-in 260ms cubic-bezier(.2,.8,.2,1) both;
+}
+
+@keyframes scriboo-support-chat-in {
+  from { opacity: 0; transform: translateY(20px) scale(.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.scriboo-support-chat__header {
+  min-height: 76px;
+  padding: 14px 16px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  background: linear-gradient(105deg, #7541e8 0%, #5880e7 53%, #63bd93 100%);
+  color: #fff;
+}
+
+.scriboo-support-chat__avatar {
+  width: 40px;
+  height: 40px;
+  display: grid;
+  place-items: center;
+  flex: 0 0 auto;
+  border: 1px solid rgba(255,255,255,.42);
+  border-radius: 13px;
+  background: rgba(255,255,255,.16);
+  box-shadow: 0 8px 20px rgba(35,37,100,.16);
+}
+
+.scriboo-support-chat__header > div:nth-child(2) { display: grid; gap: 2px; }
+.scriboo-support-chat__header strong { font-size: 16px; line-height: 1.1; }
+.scriboo-support-chat__header span { display: flex; align-items: center; gap: 6px; font-size: 11px; color: rgba(255,255,255,.86); }
+.scriboo-support-chat__header span i { width: 7px; height: 7px; border-radius: 50%; background: #b9f6ce; box-shadow: 0 0 0 3px rgba(185,246,206,.16); }
+.scriboo-support-chat__header > button {
+  margin-left: auto;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid rgba(255,255,255,.35);
+  border-radius: 11px;
+  background: rgba(255,255,255,.13);
+  color: #fff;
+  cursor: pointer;
+}
+
+.scriboo-support-chat__messages {
+  flex: 1;
+  overflow-y: auto;
+  padding: 18px 16px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  background: linear-gradient(180deg, #f8f9ff 0%, #fff 48%);
+}
+
+.scriboo-support-chat__message {
+  max-width: 86%;
+  padding: 11px 13px;
+  border-radius: 16px;
+  font-size: 13px;
+  line-height: 1.5;
+  box-shadow: 0 5px 15px rgba(35, 45, 85, .06);
+}
+
+.scriboo-support-chat__message.is-assistant { align-self: flex-start; border: 1px solid #e2e7f2; border-bottom-left-radius: 5px; background: #fff; color: #3c4863; }
+.scriboo-support-chat__message.is-user { align-self: flex-end; border-bottom-right-radius: 5px; background: linear-gradient(110deg, #7440e6, #5b82e5); color: #fff; }
+
+.scriboo-support-chat__topics { padding: 8px 14px; display: flex; gap: 6px; overflow-x: auto; border-top: 1px solid #edf0f7; }
+.scriboo-support-chat__topics button { flex: 0 0 auto; padding: 7px 10px; border: 1px solid #dce2ef; border-radius: 999px; background: #fafbff; color: #58647e; font: inherit; font-size: 11px; font-weight: 700; cursor: pointer; }
+.scriboo-support-chat__topics button:hover { border-color: #aa9af3; color: #6546d7; background: #f7f4ff; }
+
+.scriboo-support-chat__composer { margin: 4px 14px 9px; padding: 5px 5px 5px 13px; display: flex; align-items: center; gap: 8px; border: 1px solid #d9dfec; border-radius: 15px; background: #fff; box-shadow: 0 5px 18px rgba(36,46,80,.06); }
+.scriboo-support-chat__composer:focus-within { border-color: #8a6ee8; box-shadow: 0 0 0 3px rgba(124,88,224,.1); }
+.scriboo-support-chat__composer input { width: 100%; min-width: 0; border: 0; outline: 0; background: transparent; color: #172036; font: inherit; font-size: 13px; }
+.scriboo-support-chat__composer button { width: 35px; height: 35px; flex: 0 0 auto; display: grid; place-items: center; border: 0; border-radius: 11px; background: linear-gradient(120deg, #7440e6, #5688df); color: #fff; cursor: pointer; }
+.scriboo-support-chat__composer button:disabled { opacity: .4; cursor: default; }
+
+.scriboo-support-chat__contact { margin: 0 14px 12px; display: flex; align-items: center; justify-content: center; gap: 6px; color: #667089; font-size: 11px; font-weight: 700; text-decoration: none; }
+.scriboo-support-chat__contact:hover { color: #6546d7; }
+
+@media (max-width: 560px) {
+  .scriboo-support-chat { right: 10px; bottom: 10px; width: calc(100vw - 20px); height: min(620px, calc(100vh - 72px)); border-radius: 20px; }
+}
+
+/* The board clip is rendered as a real element; suppress all legacy pseudo clips. */
+.scriboo-board-card.has-real-clip.has-real-clip::after,
+.scriboo-board-card.has-real-clip.has-real-clip.is-active::after,
+.scriboo-dark-interface .scriboo-board-card.has-real-clip.has-real-clip::after,
+.scriboo-dark-interface .scriboo-board-card.has-real-clip.has-real-clip.is-active::after {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+  box-shadow: none !important;
+}
+
+/* Definitive board binding: reference-style violet pins, with no top clipboard tab. */
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::before,
+.scriboo-dark-interface .scriboo-board-card::before,
+.scriboo-dark-interface .scriboo-board-card.is-active::before {
+  content: none !important;
+  display: none !important;
+  background: none !important;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 5 !important;
+  top: 15px !important;
+  right: auto !important;
+  bottom: 15px !important;
+  left: -10px !important;
+  width: 24px !important;
+  height: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2260%22 viewBox=%220 0 24 60%22%3E%3Ccircle cx=%2218%22 cy=%2230%22 r=%226%22 fill=%22%23f8fafc%22 stroke=%22%23cbd2df%22 stroke-width=%221.25%22/%3E%3Crect x=%220.75%22 y=%2226.25%22 width=%2218.5%22 height=%227.5%22 rx=%223.75%22 fill=%22url(%23g)%22 stroke=%22%23b8c0ce%22 stroke-width=%221%22/%3E%3Cpath d=%22M3 28.2h13%22 stroke=%22%23ffffff%22 stroke-width=%221%22 stroke-linecap=%22round%22 opacity=%22.82%22/%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%221%22 y1=%2227%22 x2=%2219%22 y2=%2234%22 gradientUnits=%22userSpaceOnUse%22%3E%3Cstop stop-color=%22%23f4f6fa%22/%3E%3Cstop offset=%22.52%22 stop-color=%22%23d8dde7%22/%3E%3Cstop offset=%221%22 stop-color=%22%23b7c0cf%22/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-position: center top !important;
+  background-size: 24px 60px !important;
+  box-shadow: none !important;
+  filter: drop-shadow(0 1px 2px rgba(65, 76, 96, 0.14)) !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  background-color: transparent !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2260%22 viewBox=%220 0 24 60%22%3E%3Ccircle cx=%2218%22 cy=%2230%22 r=%226%22 fill=%22%23252b45%22 stroke=%22%237b68b8%22 stroke-width=%221.25%22/%3E%3Crect x=%220.75%22 y=%2226.25%22 width=%2218.5%22 height=%227.5%22 rx=%223.75%22 fill=%22url(%23g)%22 stroke=%22%23927be0%22 stroke-width=%221%22/%3E%3Cpath d=%22M3 28.2h13%22 stroke=%22%23ded4ff%22 stroke-width=%221%22 stroke-linecap=%22round%22 opacity=%22.78%22/%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%221%22 y1=%2227%22 x2=%2219%22 y2=%2234%22 gradientUnits=%22userSpaceOnUse%22%3E%3Cstop stop-color=%22%23c4b5fd%22/%3E%3Cstop offset=%22.52%22 stop-color=%22%238b6de0%22/%3E%3Cstop offset=%221%22 stop-color=%22%2356469b%22/%3E%3C/linearGradient%3E%3C/defs%3E%3C/svg%3E") !important;
+  filter: drop-shadow(0 0 4px rgba(145, 112, 238, 0.42)) !important;
+}
+
+/* Single-outline clipboard hierarchy. */
+.scriboo-board-card,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card,
+.scriboo-dark-interface .scriboo-board-card {
+  outline: 0 !important;
+  box-shadow: 0 5px 16px rgba(47, 56, 88, 0.055) !important;
+}
+
+.scriboo-board-card.is-active,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active {
+  border-color: rgba(112, 87, 204, 0.54) !important;
+  box-shadow: 0 7px 19px rgba(83, 67, 159, 0.105) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card {
+  box-shadow: 0 8px 22px rgba(4, 7, 23, 0.22) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card.is-active {
+  border-color: rgba(151, 129, 255, 0.62) !important;
+  box-shadow: 0 10px 25px rgba(4, 7, 23, 0.28) !important;
+}
+
+.scriboo-board-card-body,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  margin: 0 !important;
+  border: 0 !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+  border-radius: 0 0 19px 19px !important;
+}
+
+.scriboo-board-card-preview {
+  border: 0 !important;
+  border-bottom: 1px solid rgba(215, 221, 234, 0.72) !important;
+  outline: 0 !important;
+  box-shadow: none !important;
+}
+
+.scriboo-board-card-preview::before {
+  display: none !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-preview {
+  border-bottom-color: rgba(114, 126, 171, 0.18) !important;
+}
+
+/* Board cards no longer use a top tab or circular cutout. */
+.scriboo-board-grid {
+  padding-top: 10px;
+}
+
+.scriboo-board-card::before,
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::before,
+.scriboo-board-card.is-active::after,
+.scriboo-dark-interface .scriboo-board-card::before,
+.scriboo-dark-interface .scriboo-board-card::after {
+  display: none !important;
+  content: none !important;
+}
+
+/* Minimal left-edge spiral binding for every board card. */
+.scriboo-board-grid {
+  padding-left: 12px;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute;
+  top: 13px;
+  bottom: 13px;
+  left: -8px;
+  z-index: 5;
+  width: 19px;
+  height: auto;
+  border: 0;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2219%22 height=%2232%22 viewBox=%220 0 19 32%22%3E%3Ccircle cx=%2215%22 cy=%2216%22 r=%223.2%22 fill=%22%23f7f8fb%22 stroke=%22%23c4cad6%22 stroke-width=%221%22/%3E%3Cpath d=%22M15 11.5C6 11.5 2.5 12.7 2.5 16S6 20.5 15 20.5%22 fill=%22none%22 stroke=%22%238c95a8%22 stroke-width=%221.35%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M4.5 13.2c-1.2.8-1.7 1.7-1.7 2.8s.5 2 1.7 2.8%22 fill=%22none%22 stroke=%22%23d7dbe4%22 stroke-width=%22.8%22/%3E%3C/svg%3E");
+  background-repeat: repeat-y;
+  background-position: center top;
+  background-size: 19px 32px;
+  box-shadow: none;
+  filter: none;
+  pointer-events: none;
+  transform: none;
+}
+
+html[data-scriboo-theme="dark"] .scriboo-dark-interface .scriboo-board-card::after,
+html[data-scriboo-theme="dark"] .scriboo-dark-interface .scriboo-board-card.is-active::after {
+  display: block !important;
+  content: "" !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2219%22 height=%2232%22 viewBox=%220 0 19 32%22%3E%3Ccircle cx=%2215%22 cy=%2216%22 r=%223.2%22 fill=%22%23252b45%22 stroke=%22%235b6484%22 stroke-width=%221%22/%3E%3Cpath d=%22M15 11.5C6 11.5 2.5 12.7 2.5 16S6 20.5 15 20.5%22 fill=%22none%22 stroke=%22%238b84b4%22 stroke-width=%221.35%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M4.5 13.2c-1.2.8-1.7 1.7-1.7 2.8s.5 2 1.7 2.8%22 fill=%22none%22 stroke=%22%235a627f%22 stroke-width=%22.8%22/%3E%3C/svg%3E");
+}
+
+/* Final binding override: no top tab, only compact left-side loops. */
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::before,
+.scriboo-dark-interface .scriboo-board-card::before,
+.scriboo-dark-interface .scriboo-board-card.is-active::before {
+  display: none !important;
+  content: none !important;
+  background: none !important;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  top: 15px !important;
+  right: auto !important;
+  bottom: 15px !important;
+  left: -7px !important;
+  width: 18px !important;
+  height: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2218%22 height=%2236%22 viewBox=%220 0 18 36%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop stop-color=%22%23f7f8fb%22/%3E%3Cstop offset=%22.42%22 stop-color=%22%23aab1c0%22/%3E%3Cstop offset=%221%22 stop-color=%22%236f788b%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cellipse cx=%2214%22 cy=%2218%22 rx=%223.4%22 ry=%224.2%22 fill=%22%23f4f6fa%22 stroke=%22%23b9c0ce%22 stroke-width=%22.9%22/%3E%3Cpath d=%22M14 13.4C6.2 13.4 2 14.8 2 18s4.2 4.6 12 4.6%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%222%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M4.2 15.4c-1 .7-1.4 1.6-1.4 2.6%22 fill=%22none%22 stroke=%22%23ffffff%22 stroke-opacity=%22.8%22 stroke-width=%22.7%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-position: center top !important;
+  background-size: 18px 36px !important;
+  box-shadow: none !important;
+  filter: drop-shadow(0 1px 1px rgba(48, 56, 82, 0.16)) !important;
+  pointer-events: none !important;
+  transform: none !important;
+}
+
+.scriboo-dark-interface.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  top: 15px !important;
+  bottom: 15px !important;
+  left: -7px !important;
+  width: 18px !important;
+  height: auto !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background-color: transparent !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2218%22 height=%2236%22 viewBox=%220 0 18 36%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%221%22 y2=%221%22%3E%3Cstop stop-color=%22%23c4b7ff%22/%3E%3Cstop offset=%22.44%22 stop-color=%22%238779c7%22/%3E%3Cstop offset=%221%22 stop-color=%22%234f477f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cellipse cx=%2214%22 cy=%2218%22 rx=%223.4%22 ry=%224.2%22 fill=%22%23252b45%22 stroke=%22%235e6688%22 stroke-width=%22.9%22/%3E%3Cpath d=%22M14 13.4C6.2 13.4 2 14.8 2 18s4.2 4.6 12 4.6%22 fill=%22none%22 stroke=%22url(%23g)%22 stroke-width=%222%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M4.2 15.4c-1 .7-1.4 1.6-1.4 2.6%22 fill=%22none%22 stroke=%22%23e2dcff%22 stroke-opacity=%22.55%22 stroke-width=%22.7%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-position: center top !important;
+  background-size: 18px 36px !important;
+  box-shadow: none !important;
+  filter: drop-shadow(0 1px 1px rgba(3, 5, 19, 0.28)) !important;
+  transform: none !important;
+}
+
+/* Double-wire spiral: thin loops entering compact rectangular slots. */
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  top: 12px !important;
+  bottom: 12px !important;
+  left: -8px !important;
+  width: 20px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2230%22 viewBox=%220 0 20 30%22%3E%3Crect x=%2215%22 y=%2211%22 width=%224%22 height=%228%22 rx=%221%22 fill=%22%23434b5c%22/%3E%3Cpath d=%22M17 12.5C7 12.5 2 13.5 2 16s5 3.5 15 3.5%22 fill=%22none%22 stroke=%22%23434b5c%22 stroke-width=%221.15%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M17 14.5C8 14.5 4 15 4 16.5s4 2 13 2%22 fill=%22none%22 stroke=%22%23747d90%22 stroke-width=%22.8%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-size: 20px 30px !important;
+  filter: drop-shadow(0 1px .5px rgba(35, 42, 60, 0.12)) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  top: 12px !important;
+  bottom: 12px !important;
+  left: -8px !important;
+  width: 20px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2220%22 height=%2230%22 viewBox=%220 0 20 30%22%3E%3Crect x=%2215%22 y=%2211%22 width=%224%22 height=%228%22 rx=%221%22 fill=%22%23454d6c%22/%3E%3Cpath d=%22M17 12.5C7 12.5 2 13.5 2 16s5 3.5 15 3.5%22 fill=%22none%22 stroke=%22%23a39bbb%22 stroke-width=%221.15%22 stroke-linecap=%22round%22/%3E%3Cpath d=%22M17 14.5C8 14.5 4 15 4 16.5s4 2 13 2%22 fill=%22none%22 stroke=%22%236f789b%22 stroke-width=%22.8%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-size: 20px 30px !important;
+  filter: drop-shadow(0 1px .5px rgba(3, 5, 19, 0.24)) !important;
+}
+
+/* Reference-matched binding: rounded violet pin entering a circular socket. */
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  top: 15px !important;
+  bottom: 15px !important;
+  left: -9px !important;
+  width: 22px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2222%22 height=%2248%22 viewBox=%220 0 22 48%22%3E%3Cdefs%3E%3ClinearGradient id=%22p%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23ddd6fe%22/%3E%3Cstop offset=%22.48%22 stop-color=%22%23a78bfa%22/%3E%3Cstop offset=%221%22 stop-color=%22%237c6bc0%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx=%2217%22 cy=%2224%22 r=%225%22 fill=%22%23f8f9fd%22 stroke=%22%239b8bd2%22 stroke-width=%221.1%22/%3E%3Crect x=%220%22 y=%2220.5%22 width=%2218%22 height=%227%22 rx=%223.5%22 fill=%22url(%23p)%22 stroke=%22%238b78c8%22 stroke-width=%22.8%22/%3E%3Cpath d=%22M3 22h12%22 stroke=%22%23ffffff%22 stroke-opacity=%22.55%22 stroke-width=%22.8%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-position: center top !important;
+  background-size: 22px 48px !important;
+  filter: drop-shadow(0 1px 1px rgba(77, 64, 128, 0.14)) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  top: 15px !important;
+  bottom: 15px !important;
+  left: -9px !important;
+  width: 22px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2222%22 height=%2248%22 viewBox=%220 0 22 48%22%3E%3Cdefs%3E%3ClinearGradient id=%22p%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23c4b5fd%22/%3E%3Cstop offset=%22.48%22 stop-color=%22%238b6de0%22/%3E%3Cstop offset=%221%22 stop-color=%22%2356469b%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Ccircle cx=%2217%22 cy=%2224%22 r=%225%22 fill=%22%23252b45%22 stroke=%22%236f60aa%22 stroke-width=%221.1%22/%3E%3Crect x=%220%22 y=%2220.5%22 width=%2218%22 height=%227%22 rx=%223.5%22 fill=%22url(%23p)%22 stroke=%22%23917bea%22 stroke-width=%22.8%22/%3E%3Cpath d=%22M3 22h12%22 stroke=%22%23e9e3ff%22 stroke-opacity=%22.45%22 stroke-width=%22.8%22 stroke-linecap=%22round%22/%3E%3C/svg%3E") !important;
+  background-repeat: repeat-y !important;
+  background-position: center top !important;
+  background-size: 22px 48px !important;
+  filter: drop-shadow(0 1px 2px rgba(86, 65, 174, 0.24)) !important;
+}
+
+/* Notebook-shell board card with a centered hanging tab. */
+.scriboo-board-grid {
+  padding-top: 28px;
+}
+
+.scriboo-board-card {
+  overflow: visible !important;
+  padding-top: 1px;
+  background: linear-gradient(155deg, #eef1fb 0%, #e5e9f7 100%) !important;
+  border-color: rgba(119, 94, 205, 0.34) !important;
+  box-shadow:
+    0 14px 32px rgba(46, 52, 88, 0.13),
+    0 0 0 1px rgba(124, 92, 238, 0.05) !important;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  z-index: 7;
+  width: 94px;
+  height: 27px;
+  border: 1px solid rgba(106, 87, 176, 0.3);
+  border-radius: 8px 8px 6px 6px;
+  background: linear-gradient(180deg, #dcd8f2 0%, #c9c4e7 100%);
+  box-shadow:
+    0 5px 11px rgba(50, 43, 88, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.64);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before {
+  content: "";
+  display: block;
+  position: absolute;
+  top: -23px;
+  left: 50%;
+  z-index: 8;
+  width: 38px;
+  height: 34px;
+  border: 1px solid rgba(106, 87, 176, 0.3);
+  border-radius: 20px 20px 8px 8px;
+  background: radial-gradient(circle at 50% 48%, #f7f9fd 0 5px, #d6d1ee 5.5px 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.58);
+  pointer-events: none;
+  transform: translateX(-50%);
+}
+
+.scriboo-board-card-preview {
+  margin: 21px 20px 0;
+  border: 1px solid rgba(166, 174, 201, 0.28);
+  border-radius: 12px 12px 0 0;
+  box-shadow: 0 8px 18px rgba(43, 50, 84, 0.09);
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 204px;
+  margin: 0 20px 20px;
+  border: 1px solid rgba(166, 174, 201, 0.22);
+  border-top: 0;
+  border-radius: 0 0 13px 13px;
+  background: #ffffff !important;
+  box-shadow: 0 10px 22px rgba(43, 50, 84, 0.08);
+}
+
+.scriboo-dark-interface .scriboo-board-card {
+  background:
+    radial-gradient(circle at 52% 4%, rgba(101, 81, 198, 0.16), transparent 30%),
+    linear-gradient(155deg, #171a37 0%, #131630 100%) !important;
+  border-color: rgba(134, 105, 245, 0.58) !important;
+  box-shadow:
+    0 17px 38px rgba(3, 5, 20, 0.31),
+    0 0 0 1px rgba(124, 92, 238, 0.07) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  border-color: rgba(151, 129, 255, 0.33);
+  background: linear-gradient(180deg, #49416f 0%, #3a355f 100%);
+  box-shadow:
+    0 6px 13px rgba(3, 5, 19, 0.28),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.scriboo-dark-interface .scriboo-board-card::before,
+.scriboo-dark-interface .scriboo-board-card.is-active::before {
+  border-color: rgba(151, 129, 255, 0.33);
+  background: radial-gradient(circle at 50% 48%, #171b34 0 5px, #443d69 5.5px 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+.scriboo-dark-interface .scriboo-board-card-preview {
+  border-color: rgba(126, 136, 180, 0.2);
+}
+
+.scriboo-dark-interface .scriboo-board-card-body {
+  border-color: rgba(126, 136, 180, 0.2);
+  background: #20253f !important;
+  box-shadow: 0 12px 25px rgba(3, 5, 19, 0.24);
+}
+
+/* One-piece minimal tab: raised center and base share one continuous silhouette. */
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before {
+  display: none;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after {
+  top: -17px;
+  width: 110px;
+  height: 35px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22110%22 height=%2235%22 viewBox=%220 0 110 35%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23e2def4%22/%3E%3Cstop offset=%221%22 stop-color=%22%23cdc8e9%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M8 12h26c3 0 4-1 5-4 2-5 6-7 11-7h10c5 0 9 2 11 7 1 3 3 4 6 4h25c5 0 7 3 7 7v8c0 5-3 7-8 7H8c-5 0-7-3-7-7v-8c0-4 3-7 7-7Z%22 fill=%22url(%23g)%22 stroke=%22%237d70ae%22 stroke-opacity=%22.38%22/%3E%3Ccircle cx=%2255%22 cy=%2210%22 r=%225%22 fill=%22%23f7f9fd%22 stroke=%22%237d70ae%22 stroke-opacity=%22.28%22/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 110px 35px;
+  box-shadow: none;
+  filter: drop-shadow(0 4px 5px rgba(50, 43, 88, 0.1));
+}
+
+.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  border: 0;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22110%22 height=%2235%22 viewBox=%220 0 110 35%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%234b446f%22/%3E%3Cstop offset=%221%22 stop-color=%22%233b365f%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M8 12h26c3 0 4-1 5-4 2-5 6-7 11-7h10c5 0 9 2 11 7 1 3 3 4 6 4h25c5 0 7 3 7 7v8c0 5-3 7-8 7H8c-5 0-7-3-7-7v-8c0-4 3-7 7-7Z%22 fill=%22url(%23g)%22 stroke=%22%239783ee%22 stroke-opacity=%22.34%22/%3E%3Ccircle cx=%2255%22 cy=%2210%22 r=%225%22 fill=%22%23171b34%22 stroke=%22%239783ee%22 stroke-opacity=%22.26%22/%3E%3C/svg%3E");
+  box-shadow: none;
+  filter: drop-shadow(0 5px 6px rgba(3, 5, 19, 0.2));
+}
+
+/* Preserve the same unified tab in light mode with neutral gray framing. */
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active {
+  border-color: #d5dae5 !important;
+  background: linear-gradient(155deg, #f5f7fb 0%, #edf1f7 100%) !important;
+  box-shadow: 0 2px 7px rgba(53, 62, 91, 0.035) !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card:hover,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active:hover {
+  border-color: #c8cedb !important;
+  box-shadow: 0 5px 14px rgba(53, 62, 91, 0.065) !important;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::before {
+  display: none;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  display: block;
+  top: -17px;
+  width: 110px;
+  height: 35px;
+  border: 0;
+  border-radius: 0;
+  background-color: transparent;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%22110%22 height=%2235%22 viewBox=%220 0 110 35%22%3E%3Cdefs%3E%3ClinearGradient id=%22g%22 x1=%220%22 y1=%220%22 x2=%220%22 y2=%221%22%3E%3Cstop stop-color=%22%23eef0f5%22/%3E%3Cstop offset=%221%22 stop-color=%22%23dfe3eb%22/%3E%3C/linearGradient%3E%3C/defs%3E%3Cpath d=%22M8 12h26c3 0 4-1 5-4 2-5 6-7 11-7h10c5 0 9 2 11 7 1 3 3 4 6 4h25c5 0 7 3 7 7v8c0 5-3 7-8 7H8c-5 0-7-3-7-7v-8c0-4 3-7 7-7Z%22 fill=%22url(%23g)%22 stroke=%22%23b8c0cf%22 stroke-opacity=%22.9%22/%3E%3Ccircle cx=%2255%22 cy=%2210%22 r=%225%22 fill=%22%23ffffff%22 stroke=%22%23b8c0cf%22 stroke-opacity=%22.75%22/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: center;
+  background-size: 110px 35px;
+  box-shadow: none;
+  filter: drop-shadow(0 4px 5px rgba(53, 62, 91, 0.09));
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-preview {
+  border-color: #d8dde7;
+  box-shadow: none;
+}
+
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card-body {
+  border-color: #d8dde7;
+  box-shadow: none;
+}
+
+/* Unified, flat clipboard cards aligned with the Scriboo workspace language. */
+.scriboo-board-grid {
+  padding: 20px 4px 18px;
+  gap: 24px !important;
+}
+
+.scriboo-board-card,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active {
+  min-height: 0;
+  padding: 0;
+  overflow: visible !important;
+  border: 1px solid #d9dee8 !important;
+  border-radius: 12px !important;
+  background: #ffffff !important;
+  box-shadow: 0 5px 16px rgba(47, 56, 88, 0.055) !important;
+}
+
+.scriboo-board-card:hover,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card:hover,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active:hover {
+  transform: translateY(-3px);
+  border-color: rgba(112, 87, 204, 0.34) !important;
+  box-shadow: 0 11px 24px rgba(47, 56, 88, 0.1) !important;
+}
+
+.scriboo-board-card.is-active,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active {
+  border-color: rgba(112, 87, 204, 0.48) !important;
+  box-shadow:
+    0 7px 20px rgba(83, 67, 159, 0.1),
+    0 0 0 2px rgba(112, 87, 204, 0.07) !important;
+}
+
+.scriboo-board-card::before,
+.scriboo-board-card.is-active::before,
+.scriboo-dark-interface .scriboo-board-card::before,
+.scriboo-dark-interface .scriboo-board-card.is-active::before,
+html[data-scriboo-theme="dark"] .scriboo-dark-interface .scriboo-board-card::before,
+html[data-scriboo-theme="dark"] .scriboo-dark-interface .scriboo-board-card.is-active::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::before,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::before {
+  content: none !important;
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
+  background: none !important;
+  background-image: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+}
+
+.scriboo-board-card::after,
+.scriboo-board-card.is-active::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card::after,
+html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 20 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  width: 104px !important;
+  height: 26px !important;
+  border: 1px solid #c5ccd8 !important;
+  border-radius: 7px 7px 10px 10px !important;
+  background: linear-gradient(180deg, #e9edf3 0%, #d8dee8 100%) !important;
+  background-image: none !important;
+  box-shadow: 0 4px 8px rgba(53, 62, 91, 0.12) !important;
+  filter: none !important;
+  pointer-events: none !important;
+  transform: translate(-50%, -1px) !important;
+}
+
+.scriboo-board-card-preview {
+  height: 157px !important;
+  margin: 25px 16px 0 !important;
+  padding: 0 !important;
+  border: 1px solid rgba(214, 220, 231, 0.42) !important;
+  border-radius: 8px !important;
+  background: #fafbfd !important;
+  box-shadow: 0 2px 5px rgba(27, 34, 57, 0.055) !important;
+  overflow: hidden !important;
+}
+
+.scriboo-board-card-preview::before {
+  content: none !important;
+  display: none !important;
+}
+
+.scriboo-board-card-preview::after {
+  content: none !important;
+  display: none !important;
+}
+
+.scriboo-board-card-body,
+.scriboo-dark-interface .scriboo-board-card-body {
+  min-height: 178px;
+  margin: 0;
+  padding: 16px !important;
+  border: 0;
+  border-radius: 0 0 20px 20px;
+  background: #ffffff !important;
+  box-shadow: none;
+  align-content: start;
+}
+
+.scriboo-board-card-title,
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #18203a !important;
+  font-size: 21px !important;
+  font-weight: 680 !important;
+  letter-spacing: -0.025em;
+}
+
+.scriboo-board-card-statuses {
+  min-height: 26px;
+  align-content: center;
+  margin-top: 1px;
+}
+
+.scriboo-board-card-actions {
+  justify-content: flex-start !important;
+  flex-wrap: nowrap !important;
+  gap: 7px !important;
+  padding: 12px 0 0;
+  border-top: 1px solid rgba(216, 222, 235, 0.78);
+  border-bottom: 0;
+}
+
+.scriboo-board-card-actions button,
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  width: 30px !important;
+  height: 30px !important;
+  flex: 0 0 30px;
+  color: #74809b !important;
+  opacity: 0.72;
+  border: 1px solid rgba(207, 215, 230, 0.76) !important;
+  background: rgba(248, 250, 253, 0.82) !important;
+  box-shadow: none;
+  transition: opacity 160ms ease, color 160ms ease, border-color 160ms ease, background 160ms ease;
+}
+
+.scriboo-board-card:hover .scriboo-board-card-actions button,
+.scriboo-board-card-actions button:focus-visible {
+  opacity: 1;
+}
+
+.scriboo-board-card-actions button svg {
+  width: 14px;
+  height: 14px;
+}
+
+.scriboo-board-card-actions button[aria-label^="Export"]:hover { color: #059669 !important; }
+.scriboo-board-card-actions button[aria-label^="Version"]:hover { color: #0284c7 !important; }
+.scriboo-board-card-actions button[aria-label^="Share"]:hover { color: #6548d8 !important; }
+.scriboo-board-card-actions button[aria-label*="starred"]:hover { color: #d38b08 !important; }
+.scriboo-board-card-actions button[aria-label^="Move"]:hover { color: #dc2626 !important; }
+
+.scriboo-board-card-footer {
+  min-height: 29px;
+  margin-top: 5px;
+  padding-top: 11px;
+  border-top: 0;
+  color: #737d98 !important;
+  font-size: 11px !important;
+}
+
+.scriboo-board-card-footer > span:last-child {
+  color: #6548d8 !important;
+  font-weight: 750;
+}
+
+.scriboo-dark-interface .scriboo-board-card {
+  border-color: rgba(114, 126, 171, 0.3) !important;
+  background: #252b45 !important;
+  box-shadow: 0 8px 22px rgba(4, 7, 23, 0.22) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card:hover {
+  border-color: rgba(151, 129, 255, 0.46) !important;
+  box-shadow: 0 13px 28px rgba(4, 7, 23, 0.31) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card.is-active {
+  border-color: rgba(151, 129, 255, 0.6) !important;
+  box-shadow:
+    0 10px 25px rgba(4, 7, 23, 0.27),
+    0 0 0 2px rgba(126, 101, 232, 0.09) !important;
+}
+
+.scriboo-dark-interface.scriboo-dark-interface .scriboo-board-card::after,
+.scriboo-dark-interface.scriboo-dark-interface .scriboo-board-card.is-active::after {
+  content: "" !important;
+  display: block !important;
+  position: absolute !important;
+  z-index: 20 !important;
+  top: 0 !important;
+  right: auto !important;
+  bottom: auto !important;
+  left: 50% !important;
+  width: 104px !important;
+  height: 26px !important;
+  border-color: rgba(132, 112, 206, 0.72) !important;
+  border-top-color: rgba(151, 129, 255, 0.54) !important;
+  border-radius: 7px 7px 10px 10px !important;
+  background: linear-gradient(90deg, #49436f 0%, #39345f 52%, #47416e 100%) !important;
+  background-image: none !important;
+  box-shadow: 0 5px 11px rgba(5, 7, 24, 0.28), 0 0 6px rgba(133, 103, 230, 0.13) !important;
+  filter: none !important;
+  pointer-events: none !important;
+  transform: translate(-50%, -1px) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-preview {
+  border: 1px solid rgba(117, 125, 159, 0.46) !important;
+  background: #f7f8fb !important;
+  box-shadow: 0 4px 10px rgba(4, 7, 23, 0.28) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-body {
+  background: #252b45 !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-title {
+  color: #f1f3ff !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions {
+  border-color: rgba(122, 133, 177, 0.2);
+}
+
+.scriboo-dark-interface .scriboo-board-card-actions button {
+  color: #a6aec8 !important;
+  border-color: rgba(122, 133, 177, 0.2) !important;
+  background: rgba(48, 55, 82, 0.72) !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-footer {
+  color: #aab2cd !important;
+}
+
+.scriboo-dark-interface .scriboo-board-card-footer > span:last-child {
+  color: #a996ff !important;
+}
