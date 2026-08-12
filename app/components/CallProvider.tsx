@@ -258,13 +258,35 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     try {
+      const supportedConstraints =
+        navigator.mediaDevices.getSupportedConstraints() as MediaTrackSupportedConstraints & {
+          voiceIsolation?: boolean;
+        };
+      const speechConstraints: MediaTrackConstraints & {
+        voiceIsolation?: boolean;
+        latency?: number | { ideal: number };
+      } = {
+        echoCancellation: { ideal: true },
+        noiseSuppression: { ideal: true },
+        autoGainControl: { ideal: true },
+        channelCount: { ideal: 1 },
+        sampleRate: { ideal: 48_000 },
+        latency: { ideal: 0.02 },
+      };
+      if (supportedConstraints.voiceIsolation) {
+        speechConstraints.voiceIsolation = true;
+      }
+
       const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
+        audio: speechConstraints,
         video: false,
+      });
+      stream.getAudioTracks().forEach((track) => {
+        try {
+          track.contentHint = "speech";
+        } catch {
+          // Older browsers can expose contentHint as read-only. Audio still works.
+        }
       });
       localStreamRef.current = stream;
       return stream;
