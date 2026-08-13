@@ -82,6 +82,7 @@ export default function SupportChatbot({ open, onOpen, onClose }: SupportChatbot
     <>
       {!open && (
         <button
+          className="scriboo-support-launcher"
           type="button"
           onClick={onOpen}
           onMouseEnter={() => setLauncherHovered(true)}
@@ -107,6 +108,7 @@ export default function SupportChatbot({ open, onOpen, onClose }: SupportChatbot
 
       {open && (
         <section
+          className="scriboo-support-panel"
           aria-label={t("Scriboo support assistant", "Asystent pomocy Scriboo")}
           style={{
             position: "fixed", right: 20, bottom: 20, zIndex: 2147483000,

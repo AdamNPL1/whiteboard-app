@@ -9872,6 +9872,7 @@ export default function Page() {
       )}
 
       <div
+        className="scriboo-top-bar"
         onPointerEnter={hidePenCursor}
         onPointerMove={hidePenCursor}
         style={{
@@ -9890,6 +9891,7 @@ export default function Page() {
       >
         {!currentAccountId && (
           <div
+            className="scriboo-guest-wordmark"
             aria-label="Scriboo"
             style={{
               position: "absolute",
@@ -15022,6 +15024,7 @@ export default function Page() {
         )}
 
         <div
+          className="scriboo-guest-header-content"
           style={{
             position: "absolute",
             top: "50%",
@@ -15038,6 +15041,7 @@ export default function Page() {
           }}
         >
           <span
+            className="scriboo-guest-header-message"
             style={{
               color: "rgba(255,255,255,0.92)",
               fontFamily: appSansFontFamily,
@@ -15057,6 +15061,7 @@ export default function Page() {
           </span>
 
           <div
+            className="scriboo-guest-header-actions"
             style={{
               display: "flex",
               alignItems: "center",
@@ -15112,6 +15117,7 @@ export default function Page() {
           </button>
 
           <span
+            className="scriboo-guest-register-prompt"
             style={{
               color: "rgba(255,255,255,0.86)",
               fontFamily: appSansFontFamily,
