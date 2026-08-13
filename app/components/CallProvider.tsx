@@ -16,6 +16,8 @@ import {
   MicOff,
   Phone,
   PhoneOff,
+  Video,
+  VideoOff,
   X,
 } from "lucide-react";
 
@@ -60,6 +62,8 @@ type SignalData =
   | { kind: "declined" }
   | { kind: "ended" }
   | { kind: "mute"; muted: boolean }
+  | { kind: "video-state"; enabled: boolean }
+  | { kind: "renegotiate" }
   | { kind: "offer"; description: RTCSessionDescriptionInit }
   | { kind: "answer"; description: RTCSessionDescriptionInit }
   | { kind: "ice-candidate"; candidate: RTCIceCandidateInit };
@@ -131,6 +135,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [remoteMuted, setRemoteMuted] = useState(false);
   const [connectionState, setConnectionState] = useState("");
   const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
+  const [isCameraOn, setIsCameraOn] = useState(false);
+  const [isCameraStarting, setIsCameraStarting] = useState(false);
+  const [cameraMessage, setCameraMessage] = useState("");
+  const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
 
   const userRef = useRef<CurrentUser | null>(null);
   const callRef = useRef<CallRecord | null>(null);
@@ -140,6 +148,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const userChannelRef = useRef<RealtimeChannel | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
+  const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
+  const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const seenSignalsRef = useRef(new Set<string>());
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
@@ -190,6 +203,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     remoteCandidateTypesRef.current.clear();
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
     localStreamRef.current = null;
+    localCameraTrackRef.current = null;
+    localVideoSenderRef.current = null;
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    remoteVideoStreamRef.current = null;
+    if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+    setIsCameraOn(false);
+    setIsCameraStarting(false);
+    setCameraMessage("");
+    setIsRemoteVideoOn(false);
     if (remoteAudioRef.current) {
       remoteAudioRef.current.onloadedmetadata = null;
       remoteAudioRef.current.srcObject = null;
@@ -309,6 +331,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     await channel.send({ type: "broadcast", event: "signal", payload: envelope });
   }, []);
 
+  const createAndSendOffer = useCallback(async () => {
+    const connection = peerConnectionRef.current;
+    if (!connection || connection.signalingState !== "stable") return;
+    const offer = await connection.createOffer();
+    await connection.setLocalDescription(offer);
+    await sendSignal({ kind: "offer", description: offer });
+  }, [sendSignal]);
+
+  const requestRenegotiation = useCallback(async () => {
+    const activeCall = callRef.current;
+    const activeUser = userRef.current;
+    if (!activeCall || !activeUser || phaseRef.current !== "connected") return;
+    if (activeUser.id === activeCall.callerUserId) {
+      await createAndSendOffer();
+    } else {
+      await sendSignal({ kind: "renegotiate" });
+    }
+  }, [createAndSendOffer, sendSignal]);
+
   const connectCallChannel = useCallback(async (activeCall: CallRecord) => {
     const existing = callChannelRef.current;
     if (existing) await getSupabaseBrowserClient().removeChannel(existing);
@@ -391,6 +432,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       stream.getTracks().forEach((track) => connection.addTrack(track, stream));
 
       connection.ontrack = (event) => {
+        if (event.track.kind === "video") {
+          const videoStream = event.streams[0] ?? new MediaStream([event.track]);
+          remoteVideoStreamRef.current = videoStream;
+          setIsRemoteVideoOn(true);
+          event.track.onunmute = () => setIsRemoteVideoOn(true);
+          event.track.onended = () => {
+            if (remoteVideoStreamRef.current === videoStream) {
+              remoteVideoStreamRef.current = null;
+              setIsRemoteVideoOn(false);
+            }
+          };
+          return;
+        }
         const audio = remoteAudioRef.current;
         if (!audio) return;
         audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
@@ -581,9 +635,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setRemoteMuted(signal.muted);
         return;
       }
+      if (signal.kind === "video-state") {
+        if (!signal.enabled) {
+          remoteVideoStreamRef.current = null;
+          if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
+          setIsRemoteVideoOn(false);
+        }
+        return;
+      }
+      if (signal.kind === "renegotiate") {
+        if (activeUser.id === activeCall.callerUserId) {
+          await createAndSendOffer();
+        }
+        return;
+      }
       if (signal.kind === "offer") {
-        setPhase("connecting");
+        if (phaseRef.current !== "connected") setPhase("connecting");
         const connection = await preparePeerConnection(activeCall, false);
+        if (connection.signalingState !== "stable") return;
         await connection.setRemoteDescription(signal.description);
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
@@ -609,7 +678,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
+    [createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
   );
   signalHandlerRef.current = (payload) => {
     void handleSignal(payload).catch(() => {
@@ -891,6 +960,117 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     void sendSignal({ kind: "mute", muted: nextMuted });
   }, [isMuted, sendSignal]);
 
+  const stopCamera = useCallback(async () => {
+    const cameraTrack = localCameraTrackRef.current;
+    const videoSender = localVideoSenderRef.current;
+    localCameraTrackRef.current = null;
+    localVideoSenderRef.current = null;
+    if (cameraTrack) {
+      cameraTrack.onended = null;
+      localStreamRef.current?.removeTrack(cameraTrack);
+      cameraTrack.stop();
+    }
+    if (videoSender && peerConnectionRef.current) {
+      peerConnectionRef.current.removeTrack(videoSender);
+    }
+    if (localVideoRef.current) localVideoRef.current.srcObject = null;
+    setIsCameraOn(false);
+    setIsCameraStarting(false);
+    setCameraMessage("");
+    if (phaseRef.current === "connected") {
+      await sendSignal({ kind: "video-state", enabled: false }).catch(() => undefined);
+      await requestRenegotiation().catch(() => undefined);
+    }
+  }, [requestRenegotiation, sendSignal]);
+
+  const startCamera = useCallback(async () => {
+    if (isCameraStarting || localCameraTrackRef.current) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setCameraMessage(
+        t(
+          "This browser cannot access a camera.",
+          "Ta przeglądarka nie może uzyskać dostępu do kamery."
+        )
+      );
+      return;
+    }
+
+    setIsCameraStarting(true);
+    setCameraMessage("");
+    try {
+      const cameraStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 },
+          facingMode: { ideal: "user" },
+        },
+      });
+      const cameraTrack = cameraStream.getVideoTracks()[0];
+      if (!cameraTrack) throw new Error("CAMERA_TRACK_MISSING");
+      try {
+        cameraTrack.contentHint = "motion";
+      } catch {
+        // The camera remains usable when a browser does not support content hints.
+      }
+      cameraTrack.onended = () => {
+        if (localCameraTrackRef.current === cameraTrack) {
+          void stopCamera();
+          setCameraMessage(
+            t("The camera was disconnected.", "Kamera została odłączona.")
+          );
+        }
+      };
+      localCameraTrackRef.current = cameraTrack;
+      localStreamRef.current?.addTrack(cameraTrack);
+      const connection = peerConnectionRef.current;
+      if (!connection) throw new Error("PEER_CONNECTION_MISSING");
+      localVideoSenderRef.current = connection.addTrack(
+        cameraTrack,
+        localStreamRef.current ?? cameraStream
+      );
+      setIsCameraOn(true);
+      await sendSignal({ kind: "video-state", enabled: true });
+      await requestRenegotiation();
+    } catch {
+      const failedTrack = localCameraTrackRef.current;
+      const failedSender = localVideoSenderRef.current;
+      localCameraTrackRef.current = null;
+      localVideoSenderRef.current = null;
+      if (failedSender && peerConnectionRef.current) {
+        peerConnectionRef.current.removeTrack(failedSender);
+      }
+      if (failedTrack) {
+        failedTrack.onended = null;
+        localStreamRef.current?.removeTrack(failedTrack);
+        failedTrack.stop();
+      }
+      setIsCameraOn(false);
+      setCameraMessage(
+        t(
+          "Camera permission was denied or no camera is available. Audio is still connected.",
+          "Odmówiono dostępu do kamery lub kamera nie jest dostępna. Dźwięk nadal jest połączony."
+        )
+      );
+    } finally {
+      setIsCameraStarting(false);
+    }
+  }, [isCameraStarting, requestRenegotiation, sendSignal, stopCamera, t]);
+
+  useEffect(() => {
+    if (!isCameraOn || !localCameraTrackRef.current || !localVideoRef.current) return;
+    localVideoRef.current.srcObject = new MediaStream([localCameraTrackRef.current]);
+    void localVideoRef.current.play().catch(() => undefined);
+  }, [isCameraOn]);
+
+  useEffect(() => {
+    const video = remoteVideoRef.current;
+    if (!isRemoteVideoOn || !remoteVideoStreamRef.current || !video) return;
+    video.srcObject = remoteVideoStreamRef.current;
+    void video.play().catch(() => undefined);
+  }, [isRemoteVideoOn]);
+
   useEffect(() => {
     return () => {
       clearCallResources();
@@ -1066,6 +1246,90 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
+          {phase === "connected" && isRemoteVideoOn && (
+            <div
+              style={{
+                position: "relative",
+                overflow: "hidden",
+                aspectRatio: "16 / 9",
+                borderRadius: "14px",
+                background: "#0f172a",
+              }}
+            >
+              <video
+                ref={remoteVideoRef}
+                autoPlay
+                muted
+                playsInline
+                aria-label={t("Participant video", "Wideo uczestnika")}
+                style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  left: "9px",
+                  bottom: "8px",
+                  padding: "4px 8px",
+                  borderRadius: "999px",
+                  background: "rgba(15,23,42,0.68)",
+                  color: "#ffffff",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                {peerName || t("Participant", "Uczestnik")}
+              </span>
+            </div>
+          )}
+
+          {phase === "connected" && isCameraOn && (
+            <div
+              style={{
+                position: "relative",
+                overflow: "hidden",
+                aspectRatio: "16 / 9",
+                borderRadius: "14px",
+                background: "#0f172a",
+              }}
+            >
+              <video
+                ref={localVideoRef}
+                autoPlay
+                muted
+                playsInline
+                aria-label={t("Your camera preview", "Podgląd Twojej kamery")}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  display: "block",
+                  objectFit: "cover",
+                  transform: "scaleX(-1)",
+                }}
+              />
+              <span
+                style={{
+                  position: "absolute",
+                  left: "9px",
+                  bottom: "8px",
+                  padding: "4px 8px",
+                  borderRadius: "999px",
+                  background: "rgba(15,23,42,0.68)",
+                  color: "#ffffff",
+                  fontSize: "10px",
+                  fontWeight: 700,
+                }}
+              >
+                {t("Local preview only", "Tylko lokalny podgląd")}
+              </span>
+            </div>
+          )}
+
+          {phase === "connected" && cameraMessage && (
+            <div role="alert" style={{ color: "#b45309", fontSize: "12px", lineHeight: 1.45 }}>
+              {cameraMessage}
+            </div>
+          )}
+
           {phase === "incoming" ? (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
               <button type="button" onClick={() => void declineCall()} style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}>
@@ -1080,11 +1344,33 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {t("Close", "Zamknij")}
             </button>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: phase === "outgoing" ? "1fr" : "1fr 1fr", gap: "9px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: phase === "outgoing" ? "1fr" : phase === "connected" ? "1fr 1fr 1fr" : "1fr 1fr", gap: "9px" }}>
               {phase !== "outgoing" && (
                 <button type="button" onClick={toggleMute} aria-pressed={isMuted} style={{ ...callActionStyle, background: isMuted ? "#ede9fe" : "#f1f5f9", color: isMuted ? "#6d28d9" : "#334155" }}>
                   {isMuted ? <MicOff size={17} /> : <Mic size={17} />}
                   {isMuted ? t("Unmute", "Włącz mikrofon") : t("Mute", "Wycisz")}
+                </button>
+              )}
+              {phase === "connected" && (
+                <button
+                  type="button"
+                  onClick={() => (isCameraOn ? void stopCamera() : void startCamera())}
+                  disabled={isCameraStarting}
+                  aria-pressed={isCameraOn}
+                  style={{
+                    ...callActionStyle,
+                    padding: "0 8px",
+                    background: isCameraOn ? "#ede9fe" : "#f1f5f9",
+                    color: isCameraOn ? "#6d28d9" : "#334155",
+                    opacity: isCameraStarting ? 0.68 : 1,
+                  }}
+                >
+                  {isCameraOn ? <VideoOff size={17} /> : <Video size={17} />}
+                  {isCameraStarting
+                    ? t("Starting…", "Uruchamianie…")
+                    : isCameraOn
+                      ? t("Stop video", "Wyłącz wideo")
+                      : t("Start video", "Włącz wideo")}
                 </button>
               )}
               <button type="button" onClick={() => void endCall()} style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}>
