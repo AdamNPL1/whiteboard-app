@@ -1844,7 +1844,20 @@ export default function Page() {
     setIsBoardsLoading(true);
 
     try {
-      if (activeBoardId) {
+      const leaveConflictedBoard =
+        boardSaveState === "conflict" &&
+        window.confirm(
+          t(
+            "A newer version of the current board is already saved. Create a new board and leave this outdated local copy? The newer saved board will not be overwritten.",
+            "Nowsza wersja bieżącej tablicy jest już zapisana. Utworzyć nową tablicę i opuścić tę nieaktualną kopię lokalną? Nowsza zapisana tablica nie zostanie nadpisana."
+          )
+        );
+
+      if (boardSaveState === "conflict" && !leaveConflictedBoard) {
+        return;
+      }
+
+      if (activeBoardId && !leaveConflictedBoard) {
         await persistBoard(activeBoardId);
       }
 
@@ -1858,6 +1871,8 @@ export default function Page() {
       setBoardSearchQuery("");
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? "");
+      hasUnsavedBoardChangesRef.current = false;
+      setBoardSaveState("saved");
       setCurrentMaxBoards(
         data.maxBoards === null
           ? Number.POSITIVE_INFINITY

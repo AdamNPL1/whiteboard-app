@@ -1216,9 +1216,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           style={{
             position: "fixed",
             right: "18px",
-            bottom: "18px",
+            top: "74px",
             zIndex: 210,
             width: "min(350px, calc(100vw - 36px))",
+            maxHeight: "calc(100dvh - 92px)",
+            overflowY: "auto",
             padding: "18px",
             borderRadius: "20px",
             border: "1px solid rgba(203,213,225,0.88)",
