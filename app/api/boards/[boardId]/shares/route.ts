@@ -13,6 +13,13 @@ import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 export const runtime = "nodejs";
 
 const getPublicAppOrigin = (request: NextRequest) => {
+  // Customer-facing invitation links must always use the canonical domain.
+  // Vercel aliases have separate cookies and may intentionally route to the
+  // maintenance page, so they must never appear in production emails.
+  if (process.env.NODE_ENV === "production") {
+    return "https://scribooapp.com";
+  }
+
   const configuredOrigin = process.env.NEXT_PUBLIC_APP_URL
     ?.trim()
     .replace(/\/+$/, "");
@@ -28,8 +35,7 @@ const getPublicAppOrigin = (request: NextRequest) => {
 
   if (
     configuredOrigin &&
-    (process.env.NODE_ENV !== "production" ||
-      !["localhost", "127.0.0.1"].includes(configuredHostname))
+    !["localhost", "127.0.0.1"].includes(configuredHostname)
   ) {
     return configuredOrigin;
   }
@@ -43,10 +49,6 @@ const getPublicAppOrigin = (request: NextRequest) => {
     !forwardedHost.startsWith("127.0.0.1")
   ) {
     return `${forwardedProtocol}://${forwardedHost}`;
-  }
-
-  if (process.env.NODE_ENV === "production") {
-    return "https://scribooapp.com";
   }
 
   return request.nextUrl.origin;
