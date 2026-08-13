@@ -593,6 +593,49 @@ export default function Page() {
     useState<string | null>(null);
   const [currentMaxBoards, setCurrentMaxBoards] = useState(5);
   const [boardActionMessage, setBoardActionMessage] = useState("");
+  const [confirmationDialog, setConfirmationDialog] = useState<{
+    title: string;
+    message: string;
+    confirmLabel: string;
+    tone: "default" | "danger";
+  } | null>(null);
+  const confirmationResolverRef = useRef<((confirmed: boolean) => void) | null>(null);
+
+  const requestConfirmation = useCallback(
+    (options: {
+      title: string;
+      message: string;
+      confirmLabel?: string;
+      tone?: "default" | "danger";
+    }) =>
+      new Promise<boolean>((resolve) => {
+        confirmationResolverRef.current?.(false);
+        confirmationResolverRef.current = resolve;
+        setConfirmationDialog({
+          title: options.title,
+          message: options.message,
+          confirmLabel: options.confirmLabel ?? t("Continue", "Kontynuuj"),
+          tone: options.tone ?? "default",
+        });
+      }),
+    [t]
+  );
+
+  const resolveConfirmation = useCallback((confirmed: boolean) => {
+    const resolve = confirmationResolverRef.current;
+    confirmationResolverRef.current = null;
+    setConfirmationDialog(null);
+    resolve?.(confirmed);
+  }, []);
+
+  useEffect(() => {
+    if (!confirmationDialog) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") resolveConfirmation(false);
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [confirmationDialog, resolveConfirmation]);
   const [billingMessage, setBillingMessage] = useState("");
   const checkoutAttemptIdsRef = useRef<Record<string, string>>({});
   const [billingMessageTone, setBillingMessageTone] = useState<
@@ -1845,14 +1888,16 @@ export default function Page() {
 
     try {
       const confirmLeavingConflictedBoard = () =>
-        window.confirm(
-          t(
-            "A newer version of the current board is already saved. Create a new board and leave this outdated local copy? The newer saved board will not be overwritten.",
-            "Nowsza wersja bieżącej tablicy jest już zapisana. Utworzyć nową tablicę i opuścić tę nieaktualną kopię lokalną? Nowsza zapisana tablica nie zostanie nadpisana."
-          )
-        );
+        requestConfirmation({
+          title: t("Create a new board?", "Utworzyć nową tablicę?"),
+          message: t(
+            "A newer version of the current board is already saved. You can leave this outdated local copy without overwriting the newer board.",
+            "Nowsza wersja bieżącej tablicy jest już zapisana. Możesz opuścić tę nieaktualną kopię lokalną bez nadpisywania nowszej tablicy."
+          ),
+          confirmLabel: t("Create new board", "Utwórz nową tablicę"),
+        });
       let leaveConflictedBoard =
-        boardSaveState === "conflict" && confirmLeavingConflictedBoard();
+        boardSaveState === "conflict" && (await confirmLeavingConflictedBoard());
 
       if (boardSaveState === "conflict" && !leaveConflictedBoard) {
         return;
@@ -1869,7 +1914,7 @@ export default function Page() {
             );
           if (!newlyDetectedConflict) throw error;
 
-          leaveConflictedBoard = confirmLeavingConflictedBoard();
+          leaveConflictedBoard = await confirmLeavingConflictedBoard();
           if (!leaveConflictedBoard) return;
           setBoardActionMessage("");
         }
@@ -1913,9 +1958,15 @@ export default function Page() {
   const moveBoardToTrash = async (board: BoardSummary) => {
     if (board.deletedAt) return;
 
-    const confirmed = window.confirm(
-      `Move "${board.name}" to Trash?\n\nYou can restore it for 30 days. After that, Scriboo permanently deletes it.`
-    );
+    const confirmed = await requestConfirmation({
+      title: t("Move board to Trash?", "Przenieść tablicę do Kosza?"),
+      message: t(
+        `“${board.name}” can be restored for 30 days. After that, Scriboo will permanently delete it.`,
+        `Tablicę „${board.name}” można przywrócić przez 30 dni. Po tym czasie Scriboo usunie ją trwale.`
+      ),
+      confirmLabel: t("Move to Trash", "Przenieś do Kosza"),
+      tone: "danger",
+    });
 
     if (!confirmed) return;
 
@@ -1987,9 +2038,15 @@ export default function Page() {
   const permanentlyDeleteBoard = async (board: BoardSummary) => {
     if (!board.deletedAt || board.ownedByUser === false) return;
 
-    const confirmed = window.confirm(
-      `Permanently delete "${board.name}"?\n\nThis also deletes its sharing access and version history. This cannot be undone.`
-    );
+    const confirmed = await requestConfirmation({
+      title: t("Permanently delete board?", "Trwale usunąć tablicę?"),
+      message: t(
+        `“${board.name}” and its sharing access and version history will be deleted. This cannot be undone.`,
+        `Tablica „${board.name}”, jej udostępnienia i historia wersji zostaną usunięte. Tej operacji nie można cofnąć.`
+      ),
+      confirmLabel: t("Delete permanently", "Usuń trwale"),
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     setIsBoardsLoading(true);
@@ -2054,9 +2111,14 @@ export default function Page() {
   const restoreBoardVersion = async (version: BoardVersionSummary) => {
     if (!versionHistoryBoard || isVersionHistoryLoading) return;
 
-    const confirmed = window.confirm(
-      `Restore this version of "${versionHistoryBoard.name}"?\n\nScriboo will save the current board as another recovery version first.`
-    );
+    const confirmed = await requestConfirmation({
+      title: t("Restore this version?", "Przywrócić tę wersję?"),
+      message: t(
+        `Scriboo will first preserve the current version of “${versionHistoryBoard.name}” for recovery.`,
+        `Scriboo najpierw zachowa bieżącą wersję tablicy „${versionHistoryBoard.name}”, aby można ją było odzyskać.`
+      ),
+      confirmLabel: t("Restore version", "Przywróć wersję"),
+    });
     if (!confirmed) return;
 
     setIsVersionHistoryLoading(true);
@@ -6458,14 +6520,17 @@ export default function Page() {
 
   };
 
-  const clearCanvas = () => {
+  const clearCanvas = async () => {
     if (elements.length === 0) return;
-    const confirmed = window.confirm(
-      t(
-        "Clear every object from this board? Scriboo will preserve the previous board in version history before the cleared board is stored.",
-        "Usunąć wszystkie obiekty z tej tablicy? Scriboo zachowa poprzednią tablicę w historii wersji przed zapisaniem pustej tablicy."
-      )
-    );
+    const confirmed = await requestConfirmation({
+      title: t("Clear this board?", "Wyczyścić tę tablicę?"),
+      message: t(
+        "Every object will be removed. Scriboo will preserve the previous board in version history before saving the empty board.",
+        "Wszystkie obiekty zostaną usunięte. Scriboo zachowa poprzednią tablicę w historii wersji przed zapisaniem pustej tablicy."
+      ),
+      confirmLabel: t("Clear board", "Wyczyść tablicę"),
+      tone: "danger",
+    });
     if (!confirmed) return;
 
     recordCanvasHistory();
@@ -6911,6 +6976,94 @@ export default function Page() {
         background: canvasCssBackground,
       }}
     >
+      {confirmationDialog && (
+        <div
+          role="presentation"
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 500,
+            display: "grid",
+            placeItems: "center",
+            padding: "20px",
+            background: "rgba(15,23,42,0.42)",
+            backdropFilter: "blur(8px)",
+            animation: "scriboo-fade-in 180ms ease-out",
+          }}
+        >
+          <section
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="scriboo-confirmation-title"
+            aria-describedby="scriboo-confirmation-message"
+            style={{
+              width: "min(430px, calc(100vw - 40px))",
+              padding: "24px",
+              borderRadius: "22px",
+              border: "1px solid rgba(203,213,225,0.88)",
+              background: isInterfaceDarkMode ? "#20263d" : "rgba(255,255,255,0.98)",
+              color: isInterfaceDarkMode ? "#f8fafc" : "#0f172a",
+              boxShadow: "0 28px 90px rgba(15,23,42,0.3)",
+              display: "grid",
+              gap: "18px",
+              animation: "scriboo-dialog-enter 220ms cubic-bezier(0.22,1,0.36,1)",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "flex-start", gap: "13px" }}>
+              <span
+                aria-hidden="true"
+                style={{
+                  width: "42px",
+                  height: "42px",
+                  flex: "0 0 auto",
+                  borderRadius: "13px",
+                  display: "grid",
+                  placeItems: "center",
+                  background:
+                    confirmationDialog.tone === "danger" ? "#fee2e2" : "#ede9fe",
+                  color:
+                    confirmationDialog.tone === "danger" ? "#b91c1c" : "#6d28d9",
+                }}
+              >
+                <AlertTriangle size={20} />
+              </span>
+              <div style={{ minWidth: 0, display: "grid", gap: "8px" }}>
+                <h2
+                  id="scriboo-confirmation-title"
+                  style={{ margin: 0, fontSize: "20px", lineHeight: 1.2 }}
+                >
+                  {confirmationDialog.title}
+                </h2>
+                <p
+                  id="scriboo-confirmation-message"
+                  style={{ margin: 0, color: isInterfaceDarkMode ? "#cbd5e1" : "#64748b", fontSize: "14px", lineHeight: 1.55 }}
+                >
+                  {confirmationDialog.message}
+                </p>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px" }}>
+              <button
+                type="button"
+                onClick={() => resolveConfirmation(false)}
+                style={{ minHeight: "44px", borderRadius: "12px", border: "1px solid #cbd5e1", background: isInterfaceDarkMode ? "#303853" : "#f8fafc", color: isInterfaceDarkMode ? "#f8fafc" : "#334155", fontWeight: 750, cursor: "pointer" }}
+              >
+                {t("Cancel", "Anuluj")}
+              </button>
+              <button
+                type="button"
+                autoFocus
+                onClick={() => resolveConfirmation(true)}
+                style={{ minHeight: "44px", borderRadius: "12px", border: "none", background: confirmationDialog.tone === "danger" ? "#dc2626" : signatureIndigoGradient, color: "#ffffff", fontWeight: 800, cursor: "pointer", boxShadow: confirmationDialog.tone === "danger" ? "0 10px 24px rgba(220,38,38,0.2)" : "0 10px 24px rgba(109,40,217,0.22)" }}
+              >
+                {confirmationDialog.confirmLabel}
+              </button>
+            </div>
+          </section>
+        </div>
+      )}
+
       <canvas
         ref={canvasRef}
         onPointerDown={startDrawing}
@@ -13944,14 +14097,16 @@ export default function Page() {
               <button
                 type="button"
                 disabled={!isOnline}
-                onClick={() => {
+                onClick={async () => {
                   if (boardSaveState === "conflict") {
-                    const reload = window.confirm(
-                      t(
-                        "Reload the newer saved board? Your unsaved changes in this window will be discarded.",
-                        "Wczytać nowszą zapisaną tablicę? Niezapisane zmiany w tym oknie zostaną odrzucone."
-                      )
-                    );
+                    const reload = await requestConfirmation({
+                      title: t("Load the newer board?", "Wczytać nowszą tablicę?"),
+                      message: t(
+                        "The outdated unsaved changes in this window will be discarded. The newer saved board will remain safe.",
+                        "Nieaktualne, niezapisane zmiany w tym oknie zostaną odrzucone. Nowsza zapisana tablica pozostanie bezpieczna."
+                      ),
+                      confirmLabel: t("Load newer board", "Wczytaj nowszą tablicę"),
+                    });
                     if (reload) loadBoards().catch(() => null);
                     return;
                   }

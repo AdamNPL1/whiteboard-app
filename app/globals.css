@@ -3463,3 +3463,18 @@ html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active::after {
 .scriboo-dark-interface .scriboo-board-card-footer > span:last-child {
   color: #a996ff !important;
 }
+@keyframes scriboo-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes scriboo-dialog-enter {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [role="alertdialog"] {
+    animation: none !important;
+  }
+}
