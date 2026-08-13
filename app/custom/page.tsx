@@ -15200,6 +15200,7 @@ export default function Page() {
       </div>
 
       {!isToolbarCollapsed && <div
+        className="scriboo-drawing-toolbar"
         onPointerEnter={hidePenCursor}
         onPointerMove={hidePenCursor}
         style={{

@@ -285,19 +285,20 @@ input.modern-range::-ms-thumb {
 
 /* Tablet workspace: keep the canvas usable and prevent guest controls from
    competing for the same limited screen space. */
-@media (min-width: 601px) and (max-width: 1180px) {
+@media (min-width: 601px) and (max-width: 1180px),
+  (min-width: 601px) and (max-width: 1400px) and (pointer: coarse) {
   .scriboo-guest-wordmark {
-    left: 12px !important;
-    width: 118px !important;
-    transform: translateY(-50%) scale(0.9) !important;
+    left: 8px !important;
+    width: 108px !important;
+    transform: translateY(-50%) scale(0.82) !important;
     transform-origin: left center !important;
   }
 
   .scriboo-guest-header-content {
     left: auto !important;
-    right: 12px !important;
+    right: 10px !important;
     width: auto !important;
-    max-width: calc(100vw - 142px) !important;
+    max-width: calc(100vw - 116px) !important;
     padding: 0 !important;
     transform: translateY(-50%) !important;
     gap: 8px !important;
@@ -313,24 +314,24 @@ input.modern-range::-ms-thumb {
   }
 
   .scriboo-guest-header-actions button {
-    min-width: 112px !important;
-    height: 36px !important;
-    padding-inline: 15px !important;
-    font-size: 14px !important;
+    min-width: 96px !important;
+    height: 34px !important;
+    padding-inline: 12px !important;
+    font-size: 13px !important;
   }
 
   .scriboo-guest-welcome {
-    right: 16px !important;
-    bottom: 78px !important;
-    width: min(310px, calc(100vw - 32px)) !important;
-    padding: 17px !important;
-    border-radius: 20px !important;
+    right: 12px !important;
+    bottom: 66px !important;
+    width: min(280px, calc(100vw - 24px)) !important;
+    padding: 14px !important;
+    border-radius: 18px !important;
   }
 
   .scriboo-guest-welcome > div:nth-of-type(3) {
     margin-top: 12px !important;
-    font-size: 13px !important;
-    line-height: 1.4 !important;
+    font-size: 12px !important;
+    line-height: 1.36 !important;
   }
 
   .scriboo-guest-welcome > div:nth-of-type(4) {
@@ -338,21 +339,40 @@ input.modern-range::-ms-thumb {
   }
 
   .scriboo-guest-welcome > div:last-child {
-    margin-top: 14px !important;
-    grid-template-columns: 1fr 96px !important;
+    margin-top: 11px !important;
+    grid-template-columns: 1fr 82px !important;
+    gap: 7px !important;
+  }
+
+  .scriboo-guest-welcome > div:last-child button {
+    min-height: 36px !important;
+    padding-inline: 9px !important;
+    font-size: 11px !important;
   }
 
   .scriboo-discover-rail {
     top: 43% !important;
-    width: 38px !important;
-    min-height: 138px !important;
+    width: 34px !important;
+    min-height: 122px !important;
+    padding: 10px 6px !important;
+  }
+
+  .scriboo-discover-rail span {
+    font-size: 10px !important;
+  }
+
+  .scriboo-drawing-toolbar {
+    left: 14px !important;
+    transform: translateY(-50%) scale(0.84) !important;
+    transform-origin: left center !important;
   }
 
   .scriboo-support-launcher {
-    right: 16px !important;
-    bottom: 16px !important;
-    width: 46px !important;
-    height: 46px !important;
+    right: 12px !important;
+    bottom: 12px !important;
+    width: 42px !important;
+    height: 42px !important;
+    border-radius: 14px !important;
   }
 
   .scriboo-support-panel {
