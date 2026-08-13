@@ -164,6 +164,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const reconnectAttemptsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
+  const isTerminatingCallRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
@@ -234,6 +235,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsMuted(false);
     setRemoteMuted(false);
     setConnectionState("");
+    isTerminatingCallRef.current = false;
     setPhase("idle");
   }, [clearCallResources]);
 
@@ -478,6 +480,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       };
       connection.onconnectionstatechange = () => {
+        if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.connectionState);
         if (connection.connectionState === "connected") {
           if (connectionRetryRef.current !== null) {
@@ -512,6 +515,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       };
 
       connection.oniceconnectionstatechange = () => {
+        if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.iceConnectionState);
       };
 
@@ -594,7 +598,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const finishRemoteCall = useCallback(
     (text: string) => {
+      if (phaseRef.current === "ended" || isTerminatingCallRef.current) return;
+      isTerminatingCallRef.current = true;
+      phaseRef.current = "ended";
       clearCallResources();
+      setConnectionState("");
       setMessage(text);
       setPhase("ended");
     },
@@ -948,15 +956,21 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const endCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return resetToIdle();
+    if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
+    isTerminatingCallRef.current = true;
+    phaseRef.current = "ended";
     await sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
-    await apiRequest(`/api/calls/${activeCall.id}`, {
+    void apiRequest(`/api/calls/${activeCall.id}`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
       keepalive: true,
     }).catch(() => undefined);
-    resetToIdle();
-  }, [resetToIdle, sendSignal]);
+    clearCallResources();
+    setConnectionState("");
+    setMessage(t("Call ended.", "Połączenie zakończone."));
+    setPhase("ended");
+  }, [clearCallResources, resetToIdle, sendSignal, t]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !isMuted;
