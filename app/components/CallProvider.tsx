@@ -151,6 +151,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
   const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
+  const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
@@ -205,6 +206,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     localStreamRef.current = null;
     localCameraTrackRef.current = null;
     localVideoSenderRef.current = null;
+    localVideoTransceiverRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     remoteVideoStreamRef.current = null;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
@@ -430,12 +432,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const connection = new RTCPeerConnection({ iceServers: credentials.iceServers });
       peerConnectionRef.current = connection;
       stream.getTracks().forEach((track) => connection.addTrack(track, stream));
+      const videoTransceiver = connection.addTransceiver("video", {
+        direction: "recvonly",
+      });
+      localVideoTransceiverRef.current = videoTransceiver;
+      localVideoSenderRef.current = videoTransceiver.sender;
 
       connection.ontrack = (event) => {
         if (event.track.kind === "video") {
           const videoStream = event.streams[0] ?? new MediaStream([event.track]);
           remoteVideoStreamRef.current = videoStream;
-          setIsRemoteVideoOn(true);
+          setIsRemoteVideoOn(!event.track.muted);
           event.track.onunmute = () => setIsRemoteVideoOn(true);
           event.track.onended = () => {
             if (remoteVideoStreamRef.current === videoStream) {
@@ -963,15 +970,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const stopCamera = useCallback(async () => {
     const cameraTrack = localCameraTrackRef.current;
     const videoSender = localVideoSenderRef.current;
+    const videoTransceiver = localVideoTransceiverRef.current;
     localCameraTrackRef.current = null;
-    localVideoSenderRef.current = null;
     if (cameraTrack) {
       cameraTrack.onended = null;
       localStreamRef.current?.removeTrack(cameraTrack);
       cameraTrack.stop();
     }
-    if (videoSender && peerConnectionRef.current) {
-      peerConnectionRef.current.removeTrack(videoSender);
+    if (videoSender) await videoSender.replaceTrack(null).catch(() => undefined);
+    if (videoTransceiver && videoTransceiver.direction !== "stopped") {
+      videoTransceiver.direction = "recvonly";
     }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     setIsCameraOn(false);
@@ -1026,20 +1034,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       localStreamRef.current?.addTrack(cameraTrack);
       const connection = peerConnectionRef.current;
       if (!connection) throw new Error("PEER_CONNECTION_MISSING");
-      localVideoSenderRef.current = connection.addTrack(
-        cameraTrack,
-        localStreamRef.current ?? cameraStream
-      );
+      let videoTransceiver = localVideoTransceiverRef.current;
+      if (!videoTransceiver || videoTransceiver.direction === "stopped") {
+        videoTransceiver = connection.addTransceiver(cameraTrack, {
+          direction: "sendrecv",
+          streams: [localStreamRef.current ?? cameraStream],
+        });
+        localVideoTransceiverRef.current = videoTransceiver;
+        localVideoSenderRef.current = videoTransceiver.sender;
+      } else {
+        videoTransceiver.direction = "sendrecv";
+        await videoTransceiver.sender.replaceTrack(cameraTrack);
+        localVideoSenderRef.current = videoTransceiver.sender;
+      }
       setIsCameraOn(true);
       await sendSignal({ kind: "video-state", enabled: true });
       await requestRenegotiation();
     } catch {
       const failedTrack = localCameraTrackRef.current;
       const failedSender = localVideoSenderRef.current;
+      const failedTransceiver = localVideoTransceiverRef.current;
       localCameraTrackRef.current = null;
-      localVideoSenderRef.current = null;
-      if (failedSender && peerConnectionRef.current) {
-        peerConnectionRef.current.removeTrack(failedSender);
+      if (failedSender) await failedSender.replaceTrack(null).catch(() => undefined);
+      if (failedTransceiver && failedTransceiver.direction !== "stopped") {
+        failedTransceiver.direction = "recvonly";
       }
       if (failedTrack) {
         failedTrack.onended = null;
