@@ -1844,21 +1844,35 @@ export default function Page() {
     setIsBoardsLoading(true);
 
     try {
-      const leaveConflictedBoard =
-        boardSaveState === "conflict" &&
+      const confirmLeavingConflictedBoard = () =>
         window.confirm(
           t(
             "A newer version of the current board is already saved. Create a new board and leave this outdated local copy? The newer saved board will not be overwritten.",
             "Nowsza wersja bieżącej tablicy jest już zapisana. Utworzyć nową tablicę i opuścić tę nieaktualną kopię lokalną? Nowsza zapisana tablica nie zostanie nadpisana."
           )
         );
+      let leaveConflictedBoard =
+        boardSaveState === "conflict" && confirmLeavingConflictedBoard();
 
       if (boardSaveState === "conflict" && !leaveConflictedBoard) {
         return;
       }
 
       if (activeBoardId && !leaveConflictedBoard) {
-        await persistBoard(activeBoardId);
+        try {
+          await persistBoard(activeBoardId);
+        } catch (error) {
+          const newlyDetectedConflict =
+            error instanceof Error &&
+            error.message.includes(
+              "changed in another window or by another editor"
+            );
+          if (!newlyDetectedConflict) throw error;
+
+          leaveConflictedBoard = confirmLeavingConflictedBoard();
+          if (!leaveConflictedBoard) return;
+          setBoardActionMessage("");
+        }
       }
 
       const data = await readBoardResponse(
