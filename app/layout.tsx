@@ -18,7 +18,7 @@ export const metadata: Metadata = {
     icon: {
       url: "/favicon-rounded-48.png",
       type: "image/png",
-      sizes: "256x256",
+      sizes: "48x48",
     },
   },
 };
