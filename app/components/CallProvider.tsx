@@ -135,6 +135,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [remoteMuted, setRemoteMuted] = useState(false);
   const [connectionState, setConnectionState] = useState("");
   const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
+  const [isCallToneBlocked, setIsCallToneBlocked] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
@@ -191,7 +192,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       callAudioContextRef.current = new AudioContext();
     }
     const context = callAudioContextRef.current;
-    if (context.state === "suspended") await context.resume();
+    if (context.state === "suspended") {
+      await Promise.race([
+        context.resume().catch(() => undefined),
+        new Promise<void>((resolve) => window.setTimeout(resolve, 250)),
+      ]);
+    }
+    if (context.state !== "running") {
+      setIsCallToneBlocked(true);
+      throw new Error("Call sound requires a browser interaction.");
+    }
+    setIsCallToneBlocked(false);
     return context;
   }, []);
 
@@ -243,9 +254,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [ensureCallAudioContext]
   );
 
+  const playIncomingCallTone = useCallback(
+    () =>
+      playCallTonePattern(
+        [
+          { delay: 0, frequency: 659.25, duration: 0.18 },
+          { delay: 0.23, frequency: 783.99, duration: 0.22 },
+        ],
+        0.11
+      ),
+    [playCallTonePattern]
+  );
+
+  const playOutgoingCallTone = useCallback(
+    () =>
+      playCallTonePattern(
+        [
+          { delay: 0, frequency: 440, duration: 0.34 },
+          { delay: 0.4, frequency: 523.25, duration: 0.34 },
+        ],
+        0.085
+      ),
+    [playCallTonePattern]
+  );
+
   useEffect(() => {
     const unlockAudio = () => {
-      void ensureCallAudioContext().catch(() => undefined);
+      void ensureCallAudioContext()
+        .then(() => {
+          if (phaseRef.current === "incoming") return playIncomingCallTone();
+          if (phaseRef.current === "outgoing") return playOutgoingCallTone();
+        })
+        .catch(() => undefined);
     };
     window.addEventListener("pointerdown", unlockAudio, { once: true });
     window.addEventListener("keydown", unlockAudio, { once: true });
@@ -253,21 +293,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.removeEventListener("pointerdown", unlockAudio);
       window.removeEventListener("keydown", unlockAudio);
     };
-  }, [ensureCallAudioContext]);
+  }, [ensureCallAudioContext, playIncomingCallTone, playOutgoingCallTone]);
 
   useEffect(() => {
     stopCallSounds();
 
     const playIncomingRing = () =>
-      void playCallTonePattern([
-        { delay: 0, frequency: 659.25, duration: 0.18 },
-        { delay: 0.23, frequency: 783.99, duration: 0.22 },
-      ], 0.11).catch(() => undefined);
+      void playIncomingCallTone().catch(() => undefined);
     const playOutgoingRing = () =>
-      void playCallTonePattern([
-        { delay: 0, frequency: 440, duration: 0.34 },
-        { delay: 0.4, frequency: 523.25, duration: 0.34 },
-      ], 0.085).catch(() => undefined);
+      void playOutgoingCallTone().catch(() => undefined);
 
     if (phase === "incoming") {
       playIncomingRing();
@@ -284,7 +318,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     return stopCallSounds;
-  }, [phase, playCallTonePattern, stopCallSounds]);
+  }, [phase, playCallTonePattern, playIncomingCallTone, playOutgoingCallTone, stopCallSounds]);
 
   const clearCallResources = useCallback(() => {
     stopCallSounds();
@@ -1410,6 +1444,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           <div aria-live="polite" style={{ color: phase === "error" ? "#b91c1c" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {statusText || connectionState}
           </div>
+
+          {isCallToneBlocked && (phase === "incoming" || phase === "outgoing") && (
+            <button
+              type="button"
+              onClick={() => {
+                const playTone =
+                  phase === "incoming" ? playIncomingCallTone : playOutgoingCallTone;
+                void playTone().catch(() => undefined);
+              }}
+              style={{
+                ...callActionStyle,
+                minHeight: "38px",
+                background: "#ede9fe",
+                color: "#6d28d9",
+              }}
+            >
+              {t("Enable call sound", "Włącz dźwięk połączenia")}
+            </button>
+          )}
 
           {phase === "connected" && isRemoteAudioBlocked && (
             <button
