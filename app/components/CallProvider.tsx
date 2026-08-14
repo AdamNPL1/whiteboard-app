@@ -262,12 +262,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       void playCallTonePattern([
         { delay: 0, frequency: 659.25, duration: 0.18 },
         { delay: 0.23, frequency: 783.99, duration: 0.22 },
-      ]).catch(() => undefined);
+      ], 0.11).catch(() => undefined);
     const playOutgoingRing = () =>
       void playCallTonePattern([
         { delay: 0, frequency: 440, duration: 0.34 },
         { delay: 0.4, frequency: 523.25, duration: 0.34 },
-      ], 0.035).catch(() => undefined);
+      ], 0.085).catch(() => undefined);
 
     if (phase === "incoming") {
       playIncomingRing();
@@ -280,7 +280,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         { delay: 0, frequency: 587.33, duration: 0.16 },
         { delay: 0.15, frequency: 440, duration: 0.18 },
         { delay: 0.32, frequency: 329.63, duration: 0.24 },
-      ], 0.04).catch(() => undefined);
+      ], 0.1).catch(() => undefined);
     }
 
     return stopCallSounds;
@@ -663,12 +663,54 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       if (connectionTimeoutRef.current === null) {
         connectionTimeoutRef.current = window.setTimeout(() => {
+          void (async () => {
           const latestConnection = peerConnectionRef.current;
           const latestCall = callRef.current;
-          if (!latestCall || latestConnection?.connectionState === "connected") return;
+          if (
+            !latestCall ||
+            latestConnection?.connectionState === "connected" ||
+            isTerminatingCallRef.current ||
+            phaseRef.current === "ended"
+          ) {
+            return;
+          }
+
+          // A remote hang-up can reach the database at the same moment as the
+          // connection diagnostic. Terminal call state must win that race.
+          const refreshed = await apiRequest<{ call: CallRecord }>(
+            `/api/calls/${latestCall.id}`
+          ).catch(() => null);
+          if (
+            isTerminatingCallRef.current ||
+            ["ended"].includes(phaseRef.current) ||
+            peerConnectionRef.current?.connectionState === "connected"
+          ) {
+            return;
+          }
+          if (
+            refreshed &&
+            ["declined", "cancelled", "missed", "ended"].includes(
+              refreshed.call.status
+            )
+          ) {
+            isTerminatingCallRef.current = true;
+            phaseRef.current = "ended";
+            clearCallResources();
+            setConnectionState("");
+            setMessage(
+              refreshed.call.status === "declined"
+                ? t("Call declined.", "Połączenie odrzucone.")
+                : refreshed.call.status === "missed"
+                  ? t("No answer.", "Brak odpowiedzi.")
+                  : t("Call ended.", "Połączenie zakończone.")
+            );
+            setPhase("ended");
+            return;
+          }
 
           const relayAvailable = localCandidateTypesRef.current.has("relay");
           const remoteRelayReceived = remoteCandidateTypesRef.current.has("relay");
+          isTerminatingCallRef.current = true;
           void sendSignal({ kind: "ended" }).catch(() => undefined);
           void apiRequest(`/api/calls/${latestCall.id}`, {
             method: "PATCH",
@@ -693,6 +735,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   )
           );
           setPhase("error");
+          })();
         }, 25_000);
       }
       return connection;
