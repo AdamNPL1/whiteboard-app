@@ -62,4 +62,15 @@ describe("Supabase write boundaries", () => {
     expect(sql).not.toContain('create policy "call_sessions_insert');
     expect(sql).not.toContain('create policy "call_sessions_update');
   });
+
+  it("limits private board Realtime topics to authorized board participants", () => {
+    const sql = readSql("board-realtime.sql");
+
+    expect(sql).toContain("on realtime.messages");
+    expect(sql).toContain("'board:' || boards.id");
+    expect(sql).toContain("boards.user_id = (select auth.uid())");
+    expect(sql).toContain("board_shares.recipient_user_id = (select auth.uid())");
+    expect(sql).toContain("board_shares.status = 'accepted'");
+    expect(sql).toContain("board_shares.permission = 'editor'");
+  });
 });

@@ -1049,8 +1049,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setPeerName(participant.name);
       setCallBoardName(board.name);
       setPhase("connecting");
+      let createdCall: CallRecord | null = null;
       try {
-        await getMicrophone();
+        // Start the authorized call request and microphone preparation in
+        // parallel. This removes the usual getUserMedia startup delay before
+        // the recipient receives the incoming-call notification.
+        const microphoneResult = getMicrophone().then(
+          () => ({ error: null as Error | null }),
+          (error: unknown) => ({
+            error:
+              error instanceof Error
+                ? error
+                : new Error("Could not access the microphone."),
+          })
+        );
         const data = await apiRequest<{ call: CallRecord }>("/api/calls", {
           method: "POST",
           body: JSON.stringify({
@@ -1058,12 +1070,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             recipientUserId: participant.userId,
           }),
         });
+        createdCall = data.call;
         setCall(data.call);
         callRef.current = data.call;
         setPhase("outgoing");
+        const microphone = await microphoneResult;
+        if (microphone.error) throw microphone.error;
         await connectCallChannel(data.call);
         startStatusPoll(data.call);
       } catch (error) {
+        if (createdCall) {
+          void apiRequest(`/api/calls/${createdCall.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ action: "cancel" }),
+            keepalive: true,
+          }).catch(() => undefined);
+        }
         clearCallResources();
         setMessage(error instanceof Error ? error.message : "Could not start the call.");
         setPhase("error");

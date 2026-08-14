@@ -4,6 +4,7 @@ import Link from "next/link";
 import NextImage from "next/image";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   Pen,
   Eraser,
@@ -709,6 +710,9 @@ export default function Page() {
   const [boardSaveState, setBoardSaveState] =
     useState<BoardSaveState>("saved");
   const [isOnline, setIsOnline] = useState(true);
+  const activeBoard = boards.find(
+    (board) => board.id === activeBoardId && !board.deletedAt
+  );
 
   useEffect(() => {
     const isObsoleteLoadingNotice =
@@ -721,14 +725,10 @@ export default function Page() {
   }, [boardActionMessage, isBoardsLoading]);
 
   useEffect(() => {
-    const activeBoard = boards.find(
-      (board) => board.id === activeBoardId && !board.deletedAt
-    );
-
     setBoardContext(
       activeBoard ? { id: activeBoard.id, name: activeBoard.name } : null
     );
-  }, [activeBoardId, boards, setBoardContext]);
+  }, [activeBoard, setBoardContext]);
 
   useEffect(
     () => () => {
@@ -864,12 +864,40 @@ export default function Page() {
   const latestRedrawCanvasRef = useRef<() => void>(() => {});
   const pendingRedrawFrame = useRef<number | null>(null);
   const autosaveBoardTimeoutRef = useRef<number | null>(null);
+  const boardRealtimeChannelRef = useRef<RealtimeChannel | null>(null);
+  const boardRealtimeReadyRef = useRef(false);
+  const pendingBoardRealtimeMessageRef = useRef<{
+    boardId: string;
+    updatedAt: string;
+  } | null>(null);
+  const boardRealtimeClientIdRef = useRef(crypto.randomUUID());
+  const latestRemoteRefreshRef = useRef(0);
   const suppressBoardAutosaveUntilRef = useRef(0);
   const boardChangeVersionRef = useRef(0);
   const latestSaveAttemptRef = useRef(0);
   const hasUnsavedBoardChangesRef = useRef(false);
   const boardSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const boardUpdatedAtRef = useRef<Record<string, string>>({});
+
+  const broadcastBoardSaved = useCallback((boardId: string, updatedAt: string) => {
+    const channel = boardRealtimeChannelRef.current;
+    if (!channel || !boardId || !updatedAt) return;
+    if (!boardRealtimeReadyRef.current) {
+      pendingBoardRealtimeMessageRef.current = { boardId, updatedAt };
+      return;
+    }
+    void channel
+      .send({
+        type: "broadcast",
+        event: "board-saved",
+        payload: {
+          boardId,
+          updatedAt,
+          senderId: boardRealtimeClientIdRef.current,
+        },
+      })
+      .catch(() => undefined);
+  }, []);
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -1715,6 +1743,7 @@ export default function Page() {
                 : board
             )
           );
+          broadcastBoardSaved(boardId, savedUpdatedAt);
         }
       });
 
@@ -2638,6 +2667,9 @@ export default function Page() {
 
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? activeBoardId);
+      if (data.board?.updatedAt) {
+        broadcastBoardSaved(boardId, data.board.updatedAt);
+      }
       setEditingBoardId("");
       setEditingBoardName("");
     } catch (error) {
@@ -4055,6 +4087,48 @@ export default function Page() {
     persistBoard(boardId).catch(() => null);
   });
 
+  const refreshBoardFromRealtime = useEffectEvent(
+    async (boardId: string, updatedAt: string) => {
+      if (!boardId || boardId !== activeBoardId || !currentAccountId) return;
+      const knownUpdatedAt = boardUpdatedAtRef.current[boardId];
+      if (
+        knownUpdatedAt &&
+        new Date(updatedAt).getTime() <= new Date(knownUpdatedAt).getTime()
+      ) {
+        return;
+      }
+
+      // Never overwrite local work that has not reached the server yet.
+      if (hasUnsavedBoardChangesRef.current || isDrawingRef.current) {
+        setBoardSaveState("conflict");
+        return;
+      }
+
+      const refreshAttempt = latestRemoteRefreshRef.current + 1;
+      latestRemoteRefreshRef.current = refreshAttempt;
+      const data = await readBoardResponse(
+        await fetch("/api/boards", { cache: "no-store" })
+      );
+      if (refreshAttempt !== latestRemoteRefreshRef.current) return;
+      if (data.activeBoardId !== boardId || data.board?.id !== boardId) return;
+
+      const remoteUpdatedAt = data.board.updatedAt;
+      if (!remoteUpdatedAt) return;
+      const latestKnownUpdatedAt = boardUpdatedAtRef.current[boardId];
+      if (
+        latestKnownUpdatedAt &&
+        new Date(remoteUpdatedAt).getTime() <=
+          new Date(latestKnownUpdatedAt).getTime()
+      ) {
+        return;
+      }
+
+      boardUpdatedAtRef.current[boardId] = remoteUpdatedAt;
+      setBoards(data.boards ?? []);
+      applyBoardDocument(data.board.document);
+    }
+  );
+
   const retryUnsavedBoardEffect = useEffectEvent(() => {
     if (
       currentAccountId &&
@@ -4064,6 +4138,56 @@ export default function Page() {
       persistBoard(activeBoardId).catch(() => null);
     }
   });
+
+  useEffect(() => {
+    const existing = boardRealtimeChannelRef.current;
+    if (existing) {
+      boardRealtimeChannelRef.current = null;
+      boardRealtimeReadyRef.current = false;
+      void getSupabaseBrowserClient().removeChannel(existing);
+    }
+    if (!currentAccountId || !activeBoardId) return;
+
+    const supabase = getSupabaseBrowserClient();
+    void supabase.realtime.setAuth();
+    const channel = supabase.channel(`board:${activeBoardId}`, {
+      config: { private: true, broadcast: { ack: false, self: false } },
+    });
+    channel.on("broadcast", { event: "board-saved" }, ({ payload }) => {
+      const message = payload as {
+        boardId?: unknown;
+        updatedAt?: unknown;
+        senderId?: unknown;
+      };
+      if (
+        message.senderId === boardRealtimeClientIdRef.current ||
+        message.boardId !== activeBoardId ||
+        typeof message.updatedAt !== "string"
+      ) {
+        return;
+      }
+      void refreshBoardFromRealtime(activeBoardId, message.updatedAt).catch(
+        () => undefined
+      );
+    });
+    channel.subscribe((status) => {
+      boardRealtimeReadyRef.current = status === "SUBSCRIBED";
+      if (status !== "SUBSCRIBED") return;
+      const pending = pendingBoardRealtimeMessageRef.current;
+      if (!pending || pending.boardId !== activeBoardId) return;
+      pendingBoardRealtimeMessageRef.current = null;
+      broadcastBoardSaved(pending.boardId, pending.updatedAt);
+    });
+    boardRealtimeChannelRef.current = channel;
+
+    return () => {
+      if (boardRealtimeChannelRef.current === channel) {
+        boardRealtimeChannelRef.current = null;
+        boardRealtimeReadyRef.current = false;
+      }
+      void supabase.removeChannel(channel);
+    };
+  }, [activeBoardId, broadcastBoardSaved, currentAccountId]);
 
   const applyTextBoxOpacity = (opacity: number) => {
     setActiveText((prev) =>
@@ -5632,7 +5756,7 @@ export default function Page() {
     autosaveBoardTimeoutRef.current = window.setTimeout(() => {
       persistBoardEffect(activeBoardId);
       autosaveBoardTimeoutRef.current = null;
-    }, 700);
+    }, 220);
 
     return () => {
       if (autosaveBoardTimeoutRef.current !== null) {
@@ -14058,6 +14182,136 @@ export default function Page() {
                 </button>
               </div>
             </div>
+          </div>
+        )}
+
+        {currentAccountEmail && activeBoard && !showBoardsMenu && (
+          <div
+            aria-label={t("Current board", "Bieżąca tablica")}
+            style={{
+              position: "absolute",
+              top: `calc(100% + 10px)`,
+              left: "14px",
+              width: "min(320px, calc(100vw - 28px))",
+              boxSizing: "border-box",
+              height: "46px",
+              padding: "0 12px 0 8px",
+              borderRadius: "14px",
+              background: "rgba(255,255,255,0.97)",
+              border: "1px solid #d7dce5",
+              boxShadow: "0 8px 22px rgba(15,23,42,0.1)",
+              color: "#1f2937",
+              display: "flex",
+              alignItems: "center",
+              gap: "10px",
+              zIndex: 3,
+            }}
+          >
+            <button
+              type="button"
+              aria-label={t("Back to all boards", "Wróć do wszystkich tablic")}
+              title={t("All boards", "Wszystkie tablice")}
+              onClick={() => {
+                setBoardBrowserView("all");
+                setShowBoardsMenu(true);
+                setShowSettingsMenu(false);
+                setShowProfileMenu(false);
+              }}
+              style={{
+                width: "26px",
+                height: "26px",
+                border: "none",
+                background: "transparent",
+                color: "#475569",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+                flex: "0 0 auto",
+              }}
+            >
+              <ChevronLeft size={20} />
+            </button>
+            <span
+              aria-hidden="true"
+              style={{
+                width: "1px",
+                height: "24px",
+                background: "#d7dce5",
+                flex: "0 0 auto",
+              }}
+            />
+            {editingBoardId === activeBoard.id ? (
+              <input
+                ref={boardNameInputRef}
+                value={editingBoardName}
+                maxLength={40}
+                disabled={isBoardsLoading}
+                aria-label={t("Rename board", "Zmień nazwę tablicy")}
+                onChange={(event) => setEditingBoardName(event.currentTarget.value)}
+                onBlur={() => void renameBoard(activeBoard.id)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") {
+                    event.preventDefault();
+                    event.currentTarget.blur();
+                  } else if (event.key === "Escape") {
+                    setEditingBoardId("");
+                    setEditingBoardName("");
+                  }
+                }}
+                style={{
+                  minWidth: 0,
+                  width: "100%",
+                  height: "30px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "8px",
+                  background: "#f8fafc",
+                  color: "#0f172a",
+                  padding: "0 8px",
+                  outline: "none",
+                  fontFamily: appSansFontFamily,
+                  fontSize: "14px",
+                  fontWeight: 620,
+                }}
+              />
+            ) : (
+              <button
+                type="button"
+                disabled={activeBoard.ownedByUser === false || isBoardsLoading}
+                aria-label={
+                  activeBoard.ownedByUser === false
+                    ? activeBoard.name
+                    : t(`Rename ${activeBoard.name}`, `Zmień nazwę ${activeBoard.name}`)
+                }
+                title={
+                  activeBoard.ownedByUser === false
+                    ? activeBoard.name
+                    : t("Click to rename", "Kliknij, aby zmienić nazwę")
+                }
+                onClick={() => startRenamingBoard(activeBoard)}
+                style={{
+                  minWidth: 0,
+                  flex: "1 1 auto",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  whiteSpace: "nowrap",
+                  border: "none",
+                  background: "transparent",
+                  color: "#1f2937",
+                  padding: 0,
+                  fontFamily: appSansFontFamily,
+                  fontSize: "14px",
+                  fontWeight: 620,
+                  textAlign: "left",
+                  cursor:
+                    activeBoard.ownedByUser === false || isBoardsLoading
+                      ? "default"
+                      : "text",
+                }}
+              >
+                {activeBoard.name}
+              </button>
+            )}
           </div>
         )}
 
