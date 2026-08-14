@@ -165,6 +165,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
   const isTerminatingCallRef = useRef(false);
+  const callAudioContextRef = useRef<AudioContext | null>(null);
+  const callSoundIntervalRef = useRef<number | null>(null);
+  const activeCallTonesRef = useRef(new Set<OscillatorNode>());
 
   useEffect(() => {
     userRef.current = user;
@@ -183,7 +186,108 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
+  const ensureCallAudioContext = useCallback(async () => {
+    if (!callAudioContextRef.current) {
+      callAudioContextRef.current = new AudioContext();
+    }
+    const context = callAudioContextRef.current;
+    if (context.state === "suspended") await context.resume();
+    return context;
+  }, []);
+
+  const stopCallSounds = useCallback(() => {
+    if (callSoundIntervalRef.current !== null) {
+      window.clearInterval(callSoundIntervalRef.current);
+      callSoundIntervalRef.current = null;
+    }
+    activeCallTonesRef.current.forEach((oscillator) => {
+      try {
+        oscillator.stop();
+      } catch {
+        // The tone may already have completed naturally.
+      }
+    });
+    activeCallTonesRef.current.clear();
+  }, []);
+
+  const playCallTonePattern = useCallback(
+    async (
+      notes: Array<{ delay: number; frequency: number; duration: number }>,
+      volume = 0.045
+    ) => {
+      const context = await ensureCallAudioContext();
+      const startAt = context.currentTime + 0.015;
+      notes.forEach(({ delay, frequency, duration }) => {
+        const oscillator = context.createOscillator();
+        const gain = context.createGain();
+        const noteStart = startAt + delay;
+        const noteEnd = noteStart + duration;
+        oscillator.type = "sine";
+        oscillator.frequency.setValueAtTime(frequency, noteStart);
+        gain.gain.setValueAtTime(0.0001, noteStart);
+        gain.gain.exponentialRampToValueAtTime(volume, noteStart + 0.025);
+        gain.gain.setValueAtTime(volume, Math.max(noteStart + 0.03, noteEnd - 0.06));
+        gain.gain.exponentialRampToValueAtTime(0.0001, noteEnd);
+        oscillator.connect(gain);
+        gain.connect(context.destination);
+        activeCallTonesRef.current.add(oscillator);
+        oscillator.onended = () => {
+          activeCallTonesRef.current.delete(oscillator);
+          oscillator.disconnect();
+          gain.disconnect();
+        };
+        oscillator.start(noteStart);
+        oscillator.stop(noteEnd + 0.01);
+      });
+    },
+    [ensureCallAudioContext]
+  );
+
+  useEffect(() => {
+    const unlockAudio = () => {
+      void ensureCallAudioContext().catch(() => undefined);
+    };
+    window.addEventListener("pointerdown", unlockAudio, { once: true });
+    window.addEventListener("keydown", unlockAudio, { once: true });
+    return () => {
+      window.removeEventListener("pointerdown", unlockAudio);
+      window.removeEventListener("keydown", unlockAudio);
+    };
+  }, [ensureCallAudioContext]);
+
+  useEffect(() => {
+    stopCallSounds();
+
+    const playIncomingRing = () =>
+      void playCallTonePattern([
+        { delay: 0, frequency: 659.25, duration: 0.18 },
+        { delay: 0.23, frequency: 783.99, duration: 0.22 },
+      ]).catch(() => undefined);
+    const playOutgoingRing = () =>
+      void playCallTonePattern([
+        { delay: 0, frequency: 440, duration: 0.34 },
+        { delay: 0.4, frequency: 523.25, duration: 0.34 },
+      ], 0.035).catch(() => undefined);
+
+    if (phase === "incoming") {
+      playIncomingRing();
+      callSoundIntervalRef.current = window.setInterval(playIncomingRing, 2_700);
+    } else if (phase === "outgoing") {
+      playOutgoingRing();
+      callSoundIntervalRef.current = window.setInterval(playOutgoingRing, 2_900);
+    } else if (phase === "ended") {
+      void playCallTonePattern([
+        { delay: 0, frequency: 587.33, duration: 0.16 },
+        { delay: 0.15, frequency: 440, duration: 0.18 },
+        { delay: 0.32, frequency: 329.63, duration: 0.24 },
+      ], 0.04).catch(() => undefined);
+    }
+
+    return stopCallSounds;
+  }, [phase, playCallTonePattern, stopCallSounds]);
+
   const clearCallResources = useCallback(() => {
+    stopCallSounds();
     stopCallPoll();
     if (turnRefreshRef.current !== null) {
       window.clearTimeout(turnRefreshRef.current);
@@ -223,7 +327,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const channel = callChannelRef.current;
     callChannelRef.current = null;
     if (channel) void getSupabaseBrowserClient().removeChannel(channel);
-  }, [stopCallPoll]);
+  }, [stopCallPoll, stopCallSounds]);
 
   const resetToIdle = useCallback(() => {
     clearCallResources();
@@ -1106,6 +1210,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     return () => {
       clearCallResources();
+      const audioContext = callAudioContextRef.current;
+      callAudioContextRef.current = null;
+      if (audioContext && audioContext.state !== "closed") {
+        void audioContext.close().catch(() => undefined);
+      }
       const channel = userChannelRef.current;
       if (channel) void getSupabaseBrowserClient().removeChannel(channel);
     };

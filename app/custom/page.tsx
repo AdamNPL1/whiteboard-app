@@ -688,7 +688,7 @@ export default function Page() {
   const [shareEmailInput, setShareEmailInput] = useState("");
   const [shareLimit, setShareLimit] = useState(1);
   const [sharePanelMessage, setSharePanelMessage] = useState("");
-  const [sharePanelTone, setSharePanelTone] = useState<"error" | "success">(
+  const [sharePanelTone, setSharePanelTone] = useState<"error" | "success" | "info">(
     "success"
   );
   const [isSharePanelLoading, setIsSharePanelLoading] = useState(false);
@@ -2710,6 +2710,30 @@ export default function Page() {
 
   const submitBoardShare = async () => {
     if (!sharingBoard || !shareEmailInput.trim()) return;
+
+    const normalizedEmail = shareEmailInput.trim().toLowerCase();
+    const existingShare = boardShares.find(
+      (share) => share.email.trim().toLowerCase() === normalizedEmail
+    );
+    if (existingShare) {
+      if (existingShare.status === "accepted") {
+        setSharePanelMessage(
+          t(
+            "This board is already shared with this person.",
+            "Ta tablica jest już udostępniona tej osobie."
+          )
+        );
+      } else {
+        setSharePanelMessage(
+          t(
+            "An invitation has already been sent to this person.",
+            "Zaproszenie zostało już wysłane do tej osoby."
+          )
+        );
+      }
+      setSharePanelTone("info");
+      return;
+    }
 
     setIsSharePanelLoading(true);
     setSharePanelMessage("");
@@ -5462,7 +5486,12 @@ export default function Page() {
       if (event.button !== 0) return;
 
       const target = event.target;
-      if (!(target instanceof Node)) return;
+      if (!(target instanceof Element)) return;
+
+      // Board actions render their dialogs outside of the boards panel. Treat
+      // those layers as part of the panel so interacting with a dialog does
+      // not close the board browser underneath it.
+      if (target.closest("[data-board-browser-layer='true']")) return;
 
       if (boardsMenuContainerRef.current?.contains(target)) {
         return;
@@ -6978,6 +7007,7 @@ export default function Page() {
     >
       {confirmationDialog && (
         <div
+          data-board-browser-layer="true"
           role="presentation"
           onMouseDown={(event) => event.stopPropagation()}
           style={{
@@ -14403,6 +14433,7 @@ export default function Page() {
 
         {exportingBoard && (
           <div
+            data-board-browser-layer="true"
             onClick={() => {
               if (isBoardExporting) return;
               setExportingBoard(null);
@@ -14569,6 +14600,7 @@ export default function Page() {
 
         {versionHistoryBoard && (
           <div
+            data-board-browser-layer="true"
             onClick={() => {
               if (isVersionHistoryLoading) return;
               setVersionHistoryBoard(null);
@@ -14779,6 +14811,7 @@ export default function Page() {
 
         {sharingBoard && (
           <div
+            data-board-browser-layer="true"
             onClick={() => {
               if (isSharePanelLoading) return;
               setSharingBoard(null);
@@ -14871,7 +14904,10 @@ export default function Page() {
               >
                 <input
                   value={shareEmailInput}
-                  onChange={(event) => setShareEmailInput(event.currentTarget.value)}
+                  onChange={(event) => {
+                    setShareEmailInput(event.currentTarget.value);
+                    if (sharePanelTone === "info") setSharePanelMessage("");
+                  }}
                   onKeyDown={(event) => {
                     if (event.key === "Enter") {
                       event.preventDefault();
@@ -14924,13 +14960,21 @@ export default function Page() {
                     border:
                       sharePanelTone === "success"
                         ? "1px solid rgba(34,197,94,0.22)"
+                        : sharePanelTone === "info"
+                          ? "1px solid rgba(99,102,241,0.22)"
                         : "1px solid rgba(239,68,68,0.18)",
                     background:
                       sharePanelTone === "success"
                         ? "rgba(240,253,244,0.9)"
+                        : sharePanelTone === "info"
+                          ? "rgba(238,242,255,0.94)"
                         : "rgba(254,242,242,0.95)",
                     color:
-                      sharePanelTone === "success" ? "#166534" : "#b91c1c",
+                      sharePanelTone === "success"
+                        ? "#166534"
+                        : sharePanelTone === "info"
+                          ? "#4338ca"
+                          : "#b91c1c",
                     fontSize: "13px",
                     fontWeight: 500,
                   }}
@@ -14942,9 +14986,9 @@ export default function Page() {
               <div style={{ display: "grid", gap: "10px" }}>
                 <div
                   style={{
-                    color: "#0f172a",
+                    color: isInterfaceDarkMode ? "#f8fafc" : "#0f172a",
                     fontSize: "14px",
-                    fontWeight: 700,
+                    fontWeight: 750,
                   }}
                 >
                 {t("People with access", "Osoby z dostępem")}
@@ -14993,7 +15037,7 @@ export default function Page() {
                           <span style={{ color: share.status === "accepted" ? "#047857" : "#b45309", fontSize: "11px", fontWeight: 700 }}>
                             {share.status === "accepted"
                               ? share.permission === "editor" ? "Accepted · Can edit" : "Accepted · View only"
-                              : `Pending · expires ${share.expiresAt ? new Date(share.expiresAt).toLocaleDateString() : "in 7 days"}`}
+                              : t("Invitation pending", "Zaproszenie oczekuje")}
                           </span>
                         </div>
                         <button
@@ -15004,15 +15048,17 @@ export default function Page() {
                             height: "34px",
                             padding: "0 12px",
                             borderRadius: "10px",
-                            border: "1px solid rgba(239,68,68,0.16)",
+                            border: "1px solid rgba(148,163,184,0.34)",
                             background: "#ffffff",
-                            color: "#dc2626",
-                            fontSize: "13px",
+                            color: "#64748b",
+                            fontSize: "12px",
                             fontWeight: 600,
                             cursor: isSharePanelLoading ? "default" : "pointer",
                           }}
                         >
-                          {t("Remove", "Usuń")}
+                          {share.status === "pending"
+                            ? t("Cancel invitation", "Anuluj zaproszenie")
+                            : t("Remove access", "Usuń dostęp")}
                         </button>
                       </div>
                     ))}
