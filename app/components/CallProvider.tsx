@@ -158,6 +158,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const seenSignalsRef = useRef(new Set<string>());
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
+  const signalProcessingRef = useRef<Promise<void>>(Promise.resolve());
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
   const connectionRetryRef = useRef<number | null>(null);
@@ -846,8 +847,35 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (signal.kind === "offer") {
+        // Only the designated caller creates offers. This also prevents an
+        // overlapping renegotiation from producing offer glare.
+        if (
+          payload.senderUserId !== activeCall.callerUserId ||
+          activeUser.id !== activeCall.recipientUserId
+        ) {
+          return;
+        }
         if (phaseRef.current !== "connected") setPhase("connecting");
         const connection = await preparePeerConnection(activeCall, false);
+        if (connection.signalingState !== "stable") {
+          // Do not permanently discard a valid ICE-restart offer merely
+          // because the browser is still applying the previous description.
+          await new Promise<void>((resolve) => {
+            const startedAt = Date.now();
+            const check = () => {
+              if (
+                connection.signalingState === "stable" ||
+                connection.signalingState === "closed" ||
+                Date.now() - startedAt >= 2_000
+              ) {
+                resolve();
+                return;
+              }
+              window.setTimeout(check, 25);
+            };
+            check();
+          });
+        }
         if (connection.signalingState !== "stable") return;
         await connection.setRemoteDescription(signal.description);
         await flushQueuedCandidates();
@@ -857,8 +885,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (signal.kind === "answer") {
+        if (
+          payload.senderUserId !== activeCall.recipientUserId ||
+          activeUser.id !== activeCall.callerUserId
+        ) {
+          return;
+        }
         const connection = peerConnectionRef.current;
-        if (!connection) return;
+        if (!connection || connection.signalingState !== "have-local-offer") return;
         await connection.setRemoteDescription(signal.description);
         await flushQueuedCandidates();
         return;
@@ -877,9 +911,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
   );
   signalHandlerRef.current = (payload) => {
-    void handleSignal(payload).catch(() => {
+    // Realtime can deliver SDP and trickled ICE events almost simultaneously.
+    // Preserve their arrival order so asynchronous description updates cannot
+    // race each other and strand an otherwise valid TURN connection.
+    signalProcessingRef.current = signalProcessingRef.current
+      .then(() => handleSignal(payload))
+      .catch(() => {
       setMessage(t("Could not establish the audio connection.", "Nie udało się nawiązać połączenia audio."));
-    });
+      });
   };
 
   const loadCallContext = useCallback(async (activeCall: CallRecord) => {
