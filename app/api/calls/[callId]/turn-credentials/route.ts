@@ -25,7 +25,11 @@ export async function POST(
 
   const limit = await enforceRateLimit(request, {
     action: "turn-credentials",
-    limit: 12,
+    // A connection attempt can legitimately request credentials again during
+    // ICE restart or recovery. Access is already restricted to authenticated
+    // participants in an accepted active call, while call creation has its own
+    // stricter anti-spam limits.
+    limit: 120,
     windowSeconds: 60 * 60,
     identifiers: [user.id, `${user.id}:${callId}`],
   });

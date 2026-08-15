@@ -97,7 +97,20 @@ const apiRequest = async <T,>(
   const data = (await response.json().catch(() => ({}))) as T & {
     error?: string;
   };
-  if (!response.ok) throw new Error(data.error || "Call request failed.");
+  if (!response.ok) {
+    if (response.status === 429) {
+      const retryAfter = Math.max(
+        1,
+        Number(response.headers.get("Retry-After")) || 60
+      );
+      const waitText =
+        retryAfter < 60
+          ? `${retryAfter} seconds`
+          : `${Math.ceil(retryAfter / 60)} minutes`;
+      throw new Error(`Please wait ${waitText} before trying another call.`);
+    }
+    throw new Error(data.error || "Call request failed.");
+  }
   return data;
 };
 
