@@ -164,6 +164,14 @@ const getCompleteLocalDescription = async (connection: RTCPeerConnection) => {
   return { type: description.type, sdp: description.sdp };
 };
 
+const isPeerConnectionEstablished = (connection: RTCPeerConnection | null) =>
+  Boolean(
+    connection &&
+      (connection.connectionState === "connected" ||
+        connection.iceConnectionState === "connected" ||
+        connection.iceConnectionState === "completed")
+  );
+
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const { text: t } = useLanguage();
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -664,20 +672,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
         }
       };
+      const markConnectionEstablished = () => {
+        if (connectionRetryRef.current !== null) {
+          window.clearTimeout(connectionRetryRef.current);
+          connectionRetryRef.current = null;
+        }
+        if (connectionTimeoutRef.current !== null) {
+          window.clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+        setPhase("connected");
+        setMessage("");
+      };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.connectionState);
-        if (connection.connectionState === "connected") {
-          if (connectionRetryRef.current !== null) {
-            window.clearTimeout(connectionRetryRef.current);
-            connectionRetryRef.current = null;
-          }
-          if (connectionTimeoutRef.current !== null) {
-            window.clearTimeout(connectionTimeoutRef.current);
-            connectionTimeoutRef.current = null;
-          }
-          setPhase("connected");
-          setMessage("");
+        if (isPeerConnectionEstablished(connection)) {
+          markConnectionEstablished();
         } else if (connection.connectionState === "failed") {
           const activeUser = userRef.current;
           const latestCall = callRef.current;
@@ -705,6 +716,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       connection.oniceconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.iceConnectionState);
+        if (isPeerConnectionEstablished(connection)) {
+          markConnectionEstablished();
+        }
       };
 
       const refreshIn = Math.max(
@@ -731,7 +745,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (
             !latestConnection ||
             !latestCall ||
-            latestConnection.connectionState === "connected" ||
+            isPeerConnectionEstablished(latestConnection) ||
             userRef.current?.id !== latestCall.callerUserId
           ) {
             return;
@@ -758,7 +772,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           const latestCall = callRef.current;
           if (
             !latestCall ||
-            latestConnection?.connectionState === "connected" ||
+            isPeerConnectionEstablished(latestConnection) ||
             isTerminatingCallRef.current ||
             phaseRef.current === "ended"
           ) {
@@ -773,7 +787,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (
             isTerminatingCallRef.current ||
             ["ended"].includes(phaseRef.current) ||
-            peerConnectionRef.current?.connectionState === "connected"
+            isPeerConnectionEstablished(peerConnectionRef.current)
           ) {
             return;
           }
