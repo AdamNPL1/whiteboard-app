@@ -358,6 +358,10 @@ const serializeUserBoards = (
       ? {
           id: activeBoard.id,
           name: activeBoard.name,
+          createdAt: activeBoard.createdAt,
+          updatedAt: activeBoard.updatedAt,
+          deletedAt: activeBoard.deletedAt,
+          starred: activeBoard.starred,
           document: activeBoard.document,
           ownedByUser: activeBoard.ownedByUser,
           shareCount: activeBoard.shareCount,

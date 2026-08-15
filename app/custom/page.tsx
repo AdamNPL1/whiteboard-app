@@ -1850,12 +1850,19 @@ export default function Page() {
 
   const switchBoard = async (boardId: string) => {
     if (!currentAccountId || !boardId || isBoardsLoading) return;
-    if (boardId === activeBoardId) return;
+    if (boardId === activeBoardId) {
+      setShowBoardsMenu(false);
+      return;
+    }
 
+    setBoardActionMessage("");
     setIsBoardsLoading(true);
 
     try {
-      if (activeBoardId) {
+      // Saving an unchanged board before every navigation can produce a stale
+      // version conflict on a collaborator's tablet and prevent selection.
+      // Flush only genuine local work.
+      if (activeBoardId && hasUnsavedBoardChangesRef.current) {
         await persistBoard(activeBoardId);
       }
 
@@ -1867,6 +1874,9 @@ export default function Page() {
 
       setBoards(data.boards ?? []);
       setActiveBoardId(data.activeBoardId ?? boardId);
+      if (data.board?.updatedAt) {
+        boardUpdatedAtRef.current[boardId] = data.board.updatedAt;
+      }
       setCurrentMaxBoards(
         data.maxBoards === null
           ? Number.POSITIVE_INFINITY
@@ -1885,6 +1895,11 @@ export default function Page() {
           calendarEntries: [],
         });
       }
+      setShowBoardsMenu(false);
+    } catch (error) {
+      setBoardActionMessage(
+        error instanceof Error ? error.message : t("Could not open this board.", "Nie udało się otworzyć tej tablicy.")
+      );
     } finally {
       setIsBoardsLoading(false);
     }
@@ -4149,43 +4164,57 @@ export default function Page() {
     if (!currentAccountId || !activeBoardId) return;
 
     const supabase = getSupabaseBrowserClient();
-    void supabase.realtime.setAuth();
-    const channel = supabase.channel(`board:${activeBoardId}`, {
-      config: { private: true, broadcast: { ack: false, self: false } },
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      // Private channels must not subscribe before the authenticated Realtime
+      // token is ready. The previous race was especially visible on tablets.
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+
+      const nextChannel = supabase.channel(`board:${activeBoardId}`, {
+        config: { private: true, broadcast: { ack: false, self: false } },
+      });
+      channel = nextChannel;
+      nextChannel.on("broadcast", { event: "board-saved" }, ({ payload }) => {
+        const message = payload as {
+          boardId?: unknown;
+          updatedAt?: unknown;
+          senderId?: unknown;
+        };
+        if (
+          message.senderId === boardRealtimeClientIdRef.current ||
+          message.boardId !== activeBoardId ||
+          typeof message.updatedAt !== "string"
+        ) {
+          return;
+        }
+        void refreshBoardFromRealtime(activeBoardId, message.updatedAt).catch(
+          () => undefined
+        );
+      });
+      nextChannel.subscribe((status) => {
+        if (cancelled) return;
+        boardRealtimeReadyRef.current = status === "SUBSCRIBED";
+        if (status !== "SUBSCRIBED") return;
+        const pending = pendingBoardRealtimeMessageRef.current;
+        if (!pending || pending.boardId !== activeBoardId) return;
+        pendingBoardRealtimeMessageRef.current = null;
+        broadcastBoardSaved(pending.boardId, pending.updatedAt);
+      });
+      boardRealtimeChannelRef.current = nextChannel;
+    })().catch(() => {
+      if (!cancelled) boardRealtimeReadyRef.current = false;
     });
-    channel.on("broadcast", { event: "board-saved" }, ({ payload }) => {
-      const message = payload as {
-        boardId?: unknown;
-        updatedAt?: unknown;
-        senderId?: unknown;
-      };
-      if (
-        message.senderId === boardRealtimeClientIdRef.current ||
-        message.boardId !== activeBoardId ||
-        typeof message.updatedAt !== "string"
-      ) {
-        return;
-      }
-      void refreshBoardFromRealtime(activeBoardId, message.updatedAt).catch(
-        () => undefined
-      );
-    });
-    channel.subscribe((status) => {
-      boardRealtimeReadyRef.current = status === "SUBSCRIBED";
-      if (status !== "SUBSCRIBED") return;
-      const pending = pendingBoardRealtimeMessageRef.current;
-      if (!pending || pending.boardId !== activeBoardId) return;
-      pendingBoardRealtimeMessageRef.current = null;
-      broadcastBoardSaved(pending.boardId, pending.updatedAt);
-    });
-    boardRealtimeChannelRef.current = channel;
 
     return () => {
+      cancelled = true;
       if (boardRealtimeChannelRef.current === channel) {
         boardRealtimeChannelRef.current = null;
         boardRealtimeReadyRef.current = false;
       }
-      void supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [activeBoardId, broadcastBoardSaved, currentAccountId]);
 
@@ -12529,7 +12558,6 @@ export default function Page() {
                               if (isEditing || isBoardsLoading || isInTrash) return;
 
                               switchBoard(board.id).catch(() => null);
-                              setShowBoardsMenu(false);
                             }}
                           >
                             <div
