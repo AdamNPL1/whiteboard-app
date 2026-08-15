@@ -121,6 +121,36 @@ const readCandidateType = (candidate: RTCIceCandidateInit | RTCIceCandidate) => 
     ?.toLowerCase();
 };
 
+const waitForIceGathering = async (
+  connection: RTCPeerConnection,
+  timeoutMs = 4_000
+) => {
+  if (connection.iceGatheringState === "complete") return;
+
+  await new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeout);
+      connection.removeEventListener("icegatheringstatechange", handleStateChange);
+      resolve();
+    };
+    const handleStateChange = () => {
+      if (connection.iceGatheringState === "complete") finish();
+    };
+    const timeout = window.setTimeout(finish, timeoutMs);
+    connection.addEventListener("icegatheringstatechange", handleStateChange);
+  });
+};
+
+const getCompleteLocalDescription = async (connection: RTCPeerConnection) => {
+  await waitForIceGathering(connection);
+  const description = connection.localDescription;
+  if (!description) throw new Error("LOCAL_DESCRIPTION_MISSING");
+  return { type: description.type, sdp: description.sdp };
+};
+
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const { text: t } = useLanguage();
   const [user, setUser] = useState<CurrentUser | null>(null);
@@ -479,7 +509,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (!connection || connection.signalingState !== "stable") return;
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
-    await sendSignal({ kind: "offer", description: offer });
+    await sendSignal({
+      kind: "offer",
+      description: await getCompleteLocalDescription(connection),
+    });
   }, [sendSignal]);
 
   const requestRenegotiation = useCallback(async () => {
@@ -643,7 +676,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             void (async () => {
               const offer = await connection.createOffer({ iceRestart: true });
               await connection.setLocalDescription(offer);
-              await sendSignal({ kind: "offer", description: offer });
+              await sendSignal({
+                kind: "offer",
+                description: await getCompleteLocalDescription(connection),
+              });
             })().catch(() => {
               setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
             });
@@ -669,7 +705,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (callerCreatesOffer) {
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
-        await sendSignal({ kind: "offer", description: offer });
+        await sendSignal({
+          kind: "offer",
+          description: await getCompleteLocalDescription(connection),
+        });
       }
 
       if (connectionRetryRef.current === null) {
@@ -690,7 +729,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               latestConnection.restartIce();
               const retryOffer = await latestConnection.createOffer({ iceRestart: true });
               await latestConnection.setLocalDescription(retryOffer);
-              await sendSignal({ kind: "offer", description: retryOffer });
+              await sendSignal({
+                kind: "offer",
+                description: await getCompleteLocalDescription(latestConnection),
+              });
             })
             .catch(() => undefined);
         }, 10_000);
@@ -881,7 +923,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
-        await sendSignal({ kind: "answer", description: answer });
+        await sendSignal({
+          kind: "answer",
+          description: await getCompleteLocalDescription(connection),
+        });
         return;
       }
       if (signal.kind === "answer") {
