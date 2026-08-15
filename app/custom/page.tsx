@@ -4103,19 +4103,14 @@ export default function Page() {
   });
 
   const refreshBoardFromRealtime = useEffectEvent(
-    async (boardId: string, updatedAt: string) => {
+    async (boardId: string, updatedAt?: string) => {
       if (!boardId || boardId !== activeBoardId || !currentAccountId) return;
       const knownUpdatedAt = boardUpdatedAtRef.current[boardId];
       if (
+        updatedAt &&
         knownUpdatedAt &&
         new Date(updatedAt).getTime() <= new Date(knownUpdatedAt).getTime()
       ) {
-        return;
-      }
-
-      // Never overwrite local work that has not reached the server yet.
-      if (hasUnsavedBoardChangesRef.current || isDrawingRef.current) {
-        setBoardSaveState("conflict");
         return;
       }
 
@@ -4135,6 +4130,14 @@ export default function Page() {
         new Date(remoteUpdatedAt).getTime() <=
           new Date(latestKnownUpdatedAt).getTime()
       ) {
+        return;
+      }
+
+      // Compare the authoritative server version before deciding there is a
+      // conflict. This lets a periodic recovery check run harmlessly while a
+      // user is drawing when no newer remote version actually exists.
+      if (hasUnsavedBoardChangesRef.current || isDrawingRef.current) {
+        setBoardSaveState("conflict");
         return;
       }
 
@@ -4217,6 +4220,30 @@ export default function Page() {
       if (channel) void supabase.removeChannel(channel);
     };
   }, [activeBoardId, broadcastBoardSaved, currentAccountId]);
+
+  useEffect(() => {
+    if (!currentAccountId || !activeBoardId) return;
+
+    const recoverMissedBoardUpdate = () => {
+      if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      void refreshBoardFromRealtime(activeBoardId).catch(() => undefined);
+    };
+
+    // Realtime remains the fast path. This modest fallback makes missed
+    // broadcasts, tablet sleep/wake, and temporary channel failures recover
+    // automatically instead of leaving two users permanently out of sync.
+    const interval = window.setInterval(recoverMissedBoardUpdate, 3_000);
+    window.addEventListener("focus", recoverMissedBoardUpdate);
+    window.addEventListener("online", recoverMissedBoardUpdate);
+    document.addEventListener("visibilitychange", recoverMissedBoardUpdate);
+
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", recoverMissedBoardUpdate);
+      window.removeEventListener("online", recoverMissedBoardUpdate);
+      document.removeEventListener("visibilitychange", recoverMissedBoardUpdate);
+    };
+  }, [activeBoardId, currentAccountId]);
 
   const applyTextBoxOpacity = (opacity: number) => {
     setActiveText((prev) =>
