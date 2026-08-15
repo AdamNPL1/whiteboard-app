@@ -64,6 +64,13 @@ import { useLanguage } from "@/lib/i18n";
 import { useCall } from "@/app/components/CallProvider";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 import SupportChatbot from "@/app/components/SupportChatbot";
+import {
+  LIVE_STROKE_PROTOCOL_VERSION,
+  MAX_LIVE_STROKE_BATCH_POINTS,
+  MAX_LIVE_STROKE_POINTS,
+  parseLiveStrokePoints,
+  parseLiveStrokeStart,
+} from "@/lib/board-live-strokes";
 
 type ShapeTool = "circle" | "square" | "arrow" | "line" | "ruler";
 type StrokeTool = "pen" | "eraser";
@@ -77,11 +84,19 @@ const ERASER_CURSOR =
 
 type Stroke = {
   kind: "stroke";
+  id?: string;
   points: Point[];
   tool: StrokeTool;
   width: number;
   color?: string;
   style?: StrokeStyle;
+};
+type RemoteLiveStroke = {
+  stroke: Stroke;
+  senderId: string;
+  sequence: number;
+  updatedAt: number;
+  completedAt?: number;
 };
 type Shape = {
   kind: "shape";
@@ -871,6 +886,14 @@ export default function Page() {
     updatedAt: string;
   } | null>(null);
   const boardRealtimeClientIdRef = useRef(crypto.randomUUID());
+  const remoteLiveStrokesRef = useRef<Map<string, RemoteLiveStroke>>(new Map());
+  const localLiveStrokeRef = useRef<{
+    strokeId: string;
+    sequence: number;
+    sentPointCount: number;
+    lastSentAt: number;
+    flushTimer: number | null;
+  } | null>(null);
   const latestRemoteRefreshRef = useRef(0);
   const suppressBoardAutosaveUntilRef = useRef(0);
   const boardChangeVersionRef = useRef(0);
@@ -898,6 +921,25 @@ export default function Page() {
       })
       .catch(() => undefined);
   }, []);
+
+  const requestCanvasRedraw = useCallback(() => {
+    if (pendingRedrawFrame.current !== null) return;
+    pendingRedrawFrame.current = window.requestAnimationFrame(() => {
+      pendingRedrawFrame.current = null;
+      latestRedrawCanvasRef.current();
+    });
+  }, []);
+
+  const sendLiveStrokeMessage = useCallback(
+    (event: "stroke-start" | "stroke-points" | "stroke-end", payload: object) => {
+      const channel = boardRealtimeChannelRef.current;
+      if (!channel || !boardRealtimeReadyRef.current) return;
+      void channel
+        .send({ type: "broadcast", event, payload })
+        .catch(() => undefined);
+    },
+    []
+  );
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -1626,6 +1668,7 @@ export default function Page() {
     hasUnsavedBoardChangesRef.current = false;
     setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
+    remoteLiveStrokesRef.current.clear();
     setIsDrawing(false);
     setShapeStart(null);
     setSnapshot(null);
@@ -1764,14 +1807,54 @@ export default function Page() {
       }
     } catch (error) {
       hasUnsavedBoardChangesRef.current = true;
+      const conflict =
+        error instanceof Error &&
+        error.message.includes("changed in another window or by another editor");
+
+      if (conflict) {
+        try {
+          const latest = await readBoardResponse(
+            await fetch(`/api/boards/${encodeURIComponent(boardId)}`, {
+              cache: "no-store",
+            })
+          );
+          if (latest.board?.id === boardId && latest.board.updatedAt) {
+            const serverElements = Array.isArray(latest.board.document.elements)
+              ? latest.board.document.elements
+              : [];
+            const serverStrokeIds = new Set(
+              serverElements
+                .filter(
+                  (element): element is Stroke =>
+                    element.kind === "stroke" && typeof element.id === "string"
+                )
+                .map((stroke) => stroke.id as string)
+            );
+            const missingLocalStrokes = documentSnapshot.elements.filter(
+              (element): element is Stroke =>
+                element.kind === "stroke" &&
+                typeof element.id === "string" &&
+                !serverStrokeIds.has(element.id)
+            );
+
+            if (missingLocalStrokes.length > 0) {
+              boardUpdatedAtRef.current[boardId] = latest.board.updatedAt;
+              setElements([...serverElements, ...missingLocalStrokes]);
+              setBoardSaveState("dirty");
+              return;
+            }
+          }
+        } catch {
+          // Keep the original conflict state if recovery cannot load the
+          // authoritative version. The existing exact-board recovery remains.
+        }
+      }
+
       if (attempt === latestSaveAttemptRef.current) {
         const offline =
           (error instanceof Error && error.message === "OFFLINE") ||
           (typeof navigator !== "undefined" && !navigator.onLine);
         if (offline) setIsOnline(false);
-        const conflict =
-          error instanceof Error &&
-          error.message.includes("changed in another window or by another editor");
         setBoardSaveState(conflict ? "conflict" : offline ? "offline" : "error");
       }
       throw error;
@@ -4163,6 +4246,112 @@ export default function Page() {
     }
   );
 
+  const beginLivePenStroke = useCallback(
+    (stroke: Stroke) => {
+      if (!activeBoardId || stroke.tool !== "pen" || !stroke.id) return;
+      const state = {
+        strokeId: stroke.id,
+        sequence: 0,
+        sentPointCount: stroke.points.length,
+        lastSentAt: performance.now(),
+        flushTimer: null,
+      };
+      localLiveStrokeRef.current = state;
+      sendLiveStrokeMessage("stroke-start", {
+        version: LIVE_STROKE_PROTOCOL_VERSION,
+        boardId: activeBoardId,
+        senderId: boardRealtimeClientIdRef.current,
+        strokeId: stroke.id,
+        sequence: state.sequence,
+        width: stroke.width,
+        color: stroke.color ?? "#000000",
+        style: stroke.style ?? "solid",
+        points: stroke.points,
+      });
+    },
+    [activeBoardId, sendLiveStrokeMessage]
+  );
+
+  const flushLivePenPoints = useCallback(
+    (force = false) => {
+      const state = localLiveStrokeRef.current;
+      const stroke = currentStroke.current;
+      if (!state || !stroke || stroke.id !== state.strokeId || !activeBoardId) {
+        return;
+      }
+
+      const elapsed = performance.now() - state.lastSentAt;
+      if (!force && elapsed < 40) {
+        if (state.flushTimer === null) {
+          state.flushTimer = window.setTimeout(() => {
+            const latest = localLiveStrokeRef.current;
+            if (latest) latest.flushTimer = null;
+            flushLivePenPoints(true);
+          }, Math.max(1, 40 - elapsed));
+        }
+        return;
+      }
+
+      if (state.flushTimer !== null) {
+        window.clearTimeout(state.flushTimer);
+        state.flushTimer = null;
+      }
+
+      while (state.sentPointCount < stroke.points.length) {
+        const points = stroke.points.slice(
+          state.sentPointCount,
+          state.sentPointCount + MAX_LIVE_STROKE_BATCH_POINTS
+        );
+        if (!points.length) break;
+        state.sequence += 1;
+        state.sentPointCount += points.length;
+        sendLiveStrokeMessage("stroke-points", {
+          version: LIVE_STROKE_PROTOCOL_VERSION,
+          boardId: activeBoardId,
+          senderId: boardRealtimeClientIdRef.current,
+          strokeId: state.strokeId,
+          sequence: state.sequence,
+          points,
+        });
+      }
+      state.lastSentAt = performance.now();
+    },
+    [activeBoardId, sendLiveStrokeMessage]
+  );
+
+  const finishLivePenStroke = useCallback(
+    (stroke: Stroke) => {
+      const state = localLiveStrokeRef.current;
+      if (!state || !stroke.id || stroke.id !== state.strokeId || !activeBoardId) {
+        return;
+      }
+      flushLivePenPoints(true);
+      state.sequence += 1;
+      const finalPoints =
+        stroke.points.length <= MAX_LIVE_STROKE_POINTS
+          ? stroke.points
+          : Array.from({ length: MAX_LIVE_STROKE_POINTS }, (_, index) =>
+              stroke.points[
+                Math.round(
+                  (index * (stroke.points.length - 1)) /
+                    (MAX_LIVE_STROKE_POINTS - 1)
+                )
+              ]
+            );
+      sendLiveStrokeMessage("stroke-end", {
+        version: LIVE_STROKE_PROTOCOL_VERSION,
+        boardId: activeBoardId,
+        senderId: boardRealtimeClientIdRef.current,
+        strokeId: state.strokeId,
+        sequence: state.sequence,
+        points: finalPoints,
+      });
+      if (state.flushTimer !== null) window.clearTimeout(state.flushTimer);
+      localLiveStrokeRef.current = null;
+    },
+    [activeBoardId, flushLivePenPoints, sendLiveStrokeMessage]
+  );
+
   const retryUnsavedBoardEffect = useEffectEvent(() => {
     if (
       currentAccountId &&
@@ -4183,6 +4372,7 @@ export default function Page() {
     if (!currentAccountId || !activeBoardId) return;
 
     const supabase = getSupabaseBrowserClient();
+    const remoteStrokes = remoteLiveStrokesRef.current;
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
 
@@ -4213,6 +4403,72 @@ export default function Page() {
           () => undefined
         );
       });
+      nextChannel.on("broadcast", { event: "stroke-start" }, ({ payload }) => {
+        const message = parseLiveStrokeStart(payload);
+        if (
+          !message ||
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current
+        ) {
+          return;
+        }
+        remoteLiveStrokesRef.current.set(
+          `${message.senderId}:${message.strokeId}`,
+          {
+            senderId: message.senderId,
+            sequence: message.sequence,
+            updatedAt: Date.now(),
+            stroke: {
+              kind: "stroke",
+              id: message.strokeId,
+              tool: "pen",
+              width: message.width,
+              color: message.color,
+              style: message.style,
+              points: message.points,
+            },
+          }
+        );
+        requestCanvasRedraw();
+      });
+      nextChannel.on("broadcast", { event: "stroke-points" }, ({ payload }) => {
+        const message = parseLiveStrokePoints(payload);
+        if (
+          !message ||
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current
+        ) {
+          return;
+        }
+        const key = `${message.senderId}:${message.strokeId}`;
+        const remote = remoteLiveStrokesRef.current.get(key);
+        if (!remote || message.sequence <= remote.sequence) return;
+        remote.sequence = message.sequence;
+        remote.updatedAt = Date.now();
+        remote.stroke.points = [
+          ...remote.stroke.points,
+          ...message.points,
+        ].slice(0, MAX_LIVE_STROKE_POINTS);
+        requestCanvasRedraw();
+      });
+      nextChannel.on("broadcast", { event: "stroke-end" }, ({ payload }) => {
+        const message = parseLiveStrokePoints(payload, { final: true });
+        if (
+          !message ||
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current
+        ) {
+          return;
+        }
+        const key = `${message.senderId}:${message.strokeId}`;
+        const remote = remoteLiveStrokesRef.current.get(key);
+        if (!remote || message.sequence <= remote.sequence) return;
+        remote.sequence = message.sequence;
+        remote.updatedAt = Date.now();
+        remote.completedAt = Date.now();
+        remote.stroke.points = message.points;
+        requestCanvasRedraw();
+      });
       nextChannel.subscribe((status) => {
         if (cancelled) return;
         boardRealtimeReadyRef.current = status === "SUBSCRIBED";
@@ -4229,13 +4485,44 @@ export default function Page() {
 
     return () => {
       cancelled = true;
+      const local = localLiveStrokeRef.current;
+      if (local && local.flushTimer !== null) {
+        window.clearTimeout(local.flushTimer);
+      }
+      localLiveStrokeRef.current = null;
+      remoteStrokes.clear();
+      requestCanvasRedraw();
       if (boardRealtimeChannelRef.current === channel) {
         boardRealtimeChannelRef.current = null;
         boardRealtimeReadyRef.current = false;
       }
       if (channel) void supabase.removeChannel(channel);
     };
-  }, [activeBoardId, broadcastBoardSaved, currentAccountId]);
+  }, [
+    activeBoardId,
+    broadcastBoardSaved,
+    currentAccountId,
+    requestCanvasRedraw,
+  ]);
+
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      const now = Date.now();
+      let removed = false;
+      for (const [key, remote] of remoteLiveStrokesRef.current) {
+        const lifetime = remote.completedAt
+          ? now - remote.completedAt
+          : now - remote.updatedAt;
+        const maximumLifetime = remote.completedAt ? 12_000 : 30_000;
+        if (lifetime > maximumLifetime) {
+          remoteLiveStrokesRef.current.delete(key);
+          removed = true;
+        }
+      }
+      if (removed) requestCanvasRedraw();
+    }, 2_000);
+    return () => window.clearInterval(interval);
+  }, [requestCanvasRedraw]);
 
   useEffect(() => {
     if (!currentAccountId || !activeBoardId) return;
@@ -5498,6 +5785,14 @@ export default function Page() {
       drawStrokePath(ctx, stroke.points, stroke.width, stroke.style);
     }
 
+    for (const remote of remoteLiveStrokesRef.current.values()) {
+      const stroke = remote.stroke;
+      if (stroke.points.length === 0) continue;
+      ctx.strokeStyle = stroke.color ?? "black";
+      ctx.fillStyle = stroke.color ?? "black";
+      drawStrokePath(ctx, stroke.points, stroke.width, stroke.style);
+    }
+
     if (selectionBox) {
       drawSelectedStrokeHighlights(ctx, selectionBox);
       drawSelectionBox(ctx, selectionBox);
@@ -5510,12 +5805,7 @@ export default function Page() {
   });
 
   const scheduleRedrawCanvas = () => {
-    if (pendingRedrawFrame.current !== null) return;
-
-    pendingRedrawFrame.current = window.requestAnimationFrame(() => {
-      pendingRedrawFrame.current = null;
-      latestRedrawCanvasRef.current();
-    });
+    requestCanvasRedraw();
   };
 
   useEffect(() => {
@@ -6554,15 +6844,18 @@ export default function Page() {
 
     if (tool === "pen" || tool === "eraser") {
       e.preventDefault();
-      currentStroke.current = {
+      const nextStroke: Stroke = {
         kind: "stroke",
+        id: tool === "pen" ? crypto.randomUUID() : undefined,
         points: [{ x, y }],
         tool,
         width: tool === "pen" ? penWidth : eraserWidth,
         color: tool === "pen" ? penColor : undefined,
         style: tool === "pen" ? strokeStyle : undefined,
       };
+      currentStroke.current = nextStroke;
       renderedLiveStrokePointCountRef.current = 1;
+      if (tool === "pen") beginLivePenStroke(nextStroke);
     }
 
     isDrawingRef.current = true;
@@ -6729,6 +7022,7 @@ export default function Page() {
 
       if (didAppendPoint) {
         if (currentStroke.current?.tool === "pen") {
+          flushLivePenPoints();
           if (currentStroke.current.style === "solid") {
             drawLivePenStrokeSegment();
           } else {
@@ -6880,6 +7174,7 @@ export default function Page() {
 
       const finishedStroke = {
         kind: "stroke" as const,
+        id: currentStroke.current.id,
         points: [...currentStroke.current.points],
         tool: currentStroke.current.tool,
         width: currentStroke.current.width,
@@ -6887,6 +7182,7 @@ export default function Page() {
         style: currentStroke.current.style,
       };
 
+      finishLivePenStroke(finishedStroke);
       recordCanvasHistory();
       setElements((prev) => [...prev, finishedStroke]);
       currentStroke.current = null;
