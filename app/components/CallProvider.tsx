@@ -97,20 +97,7 @@ const apiRequest = async <T,>(
   const data = (await response.json().catch(() => ({}))) as T & {
     error?: string;
   };
-  if (!response.ok) {
-    if (response.status === 429) {
-      const retryAfter = Math.max(
-        1,
-        Number(response.headers.get("Retry-After")) || 60
-      );
-      const waitText =
-        retryAfter < 60
-          ? `${retryAfter} seconds`
-          : `${Math.ceil(retryAfter / 60)} minutes`;
-      throw new Error(`Please wait ${waitText} before trying another call.`);
-    }
-    throw new Error(data.error || "Call request failed.");
-  }
+  if (!response.ok) throw new Error(data.error || "Call request failed.");
   return data;
 };
 
@@ -133,44 +120,6 @@ const readCandidateType = (candidate: RTCIceCandidateInit | RTCIceCandidate) => 
   return candidate.candidate?.match(/\btyp\s+(host|srflx|prflx|relay)\b/i)?.[1]
     ?.toLowerCase();
 };
-
-const waitForIceGathering = async (
-  connection: RTCPeerConnection,
-  timeoutMs = 4_000
-) => {
-  if (connection.iceGatheringState === "complete") return;
-
-  await new Promise<void>((resolve) => {
-    let settled = false;
-    const finish = () => {
-      if (settled) return;
-      settled = true;
-      window.clearTimeout(timeout);
-      connection.removeEventListener("icegatheringstatechange", handleStateChange);
-      resolve();
-    };
-    const handleStateChange = () => {
-      if (connection.iceGatheringState === "complete") finish();
-    };
-    const timeout = window.setTimeout(finish, timeoutMs);
-    connection.addEventListener("icegatheringstatechange", handleStateChange);
-  });
-};
-
-const getCompleteLocalDescription = async (connection: RTCPeerConnection) => {
-  await waitForIceGathering(connection);
-  const description = connection.localDescription;
-  if (!description) throw new Error("LOCAL_DESCRIPTION_MISSING");
-  return { type: description.type, sdp: description.sdp };
-};
-
-const isPeerConnectionEstablished = (connection: RTCPeerConnection | null) =>
-  Boolean(
-    connection &&
-      (connection.connectionState === "connected" ||
-        connection.iceConnectionState === "connected" ||
-        connection.iceConnectionState === "completed")
-  );
 
 export function CallProvider({ children }: { children: React.ReactNode }) {
   const { text: t } = useLanguage();
@@ -209,7 +158,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const seenSignalsRef = useRef(new Set<string>());
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
-  const signalProcessingRef = useRef<Promise<void>>(Promise.resolve());
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
   const connectionRetryRef = useRef<number | null>(null);
@@ -530,10 +478,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (!connection || connection.signalingState !== "stable") return;
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
-    await sendSignal({
-      kind: "offer",
-      description: await getCompleteLocalDescription(connection),
-    });
+    await sendSignal({ kind: "offer", description: offer });
   }, [sendSignal]);
 
   const requestRenegotiation = useCallback(async () => {
@@ -672,23 +617,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
         }
       };
-      const markConnectionEstablished = () => {
-        if (connectionRetryRef.current !== null) {
-          window.clearTimeout(connectionRetryRef.current);
-          connectionRetryRef.current = null;
-        }
-        if (connectionTimeoutRef.current !== null) {
-          window.clearTimeout(connectionTimeoutRef.current);
-          connectionTimeoutRef.current = null;
-        }
-        setPhase("connected");
-        setMessage("");
-      };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.connectionState);
-        if (isPeerConnectionEstablished(connection)) {
-          markConnectionEstablished();
+        if (connection.connectionState === "connected") {
+          if (connectionRetryRef.current !== null) {
+            window.clearTimeout(connectionRetryRef.current);
+            connectionRetryRef.current = null;
+          }
+          if (connectionTimeoutRef.current !== null) {
+            window.clearTimeout(connectionTimeoutRef.current);
+            connectionTimeoutRef.current = null;
+          }
+          setPhase("connected");
+          setMessage("");
         } else if (connection.connectionState === "failed") {
           const activeUser = userRef.current;
           const latestCall = callRef.current;
@@ -700,10 +642,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             void (async () => {
               const offer = await connection.createOffer({ iceRestart: true });
               await connection.setLocalDescription(offer);
-              await sendSignal({
-                kind: "offer",
-                description: await getCompleteLocalDescription(connection),
-              });
+              await sendSignal({ kind: "offer", description: offer });
             })().catch(() => {
               setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
             });
@@ -716,9 +655,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       connection.oniceconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.iceConnectionState);
-        if (isPeerConnectionEstablished(connection)) {
-          markConnectionEstablished();
-        }
       };
 
       const refreshIn = Math.max(
@@ -732,10 +668,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (callerCreatesOffer) {
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
-        await sendSignal({
-          kind: "offer",
-          description: await getCompleteLocalDescription(connection),
-        });
+        await sendSignal({ kind: "offer", description: offer });
       }
 
       if (connectionRetryRef.current === null) {
@@ -745,7 +678,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (
             !latestConnection ||
             !latestCall ||
-            isPeerConnectionEstablished(latestConnection) ||
+            latestConnection.connectionState === "connected" ||
             userRef.current?.id !== latestCall.callerUserId
           ) {
             return;
@@ -756,10 +689,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               latestConnection.restartIce();
               const retryOffer = await latestConnection.createOffer({ iceRestart: true });
               await latestConnection.setLocalDescription(retryOffer);
-              await sendSignal({
-                kind: "offer",
-                description: await getCompleteLocalDescription(latestConnection),
-              });
+              await sendSignal({ kind: "offer", description: retryOffer });
             })
             .catch(() => undefined);
         }, 10_000);
@@ -772,7 +702,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           const latestCall = callRef.current;
           if (
             !latestCall ||
-            isPeerConnectionEstablished(latestConnection) ||
+            latestConnection?.connectionState === "connected" ||
             isTerminatingCallRef.current ||
             phaseRef.current === "ended"
           ) {
@@ -787,7 +717,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           if (
             isTerminatingCallRef.current ||
             ["ended"].includes(phaseRef.current) ||
-            isPeerConnectionEstablished(peerConnectionRef.current)
+            peerConnectionRef.current?.connectionState === "connected"
           ) {
             return;
           }
@@ -916,55 +846,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       if (signal.kind === "offer") {
-        // Only the designated caller creates offers. This also prevents an
-        // overlapping renegotiation from producing offer glare.
-        if (
-          payload.senderUserId !== activeCall.callerUserId ||
-          activeUser.id !== activeCall.recipientUserId
-        ) {
-          return;
-        }
         if (phaseRef.current !== "connected") setPhase("connecting");
         const connection = await preparePeerConnection(activeCall, false);
-        if (connection.signalingState !== "stable") {
-          // Do not permanently discard a valid ICE-restart offer merely
-          // because the browser is still applying the previous description.
-          await new Promise<void>((resolve) => {
-            const startedAt = Date.now();
-            const check = () => {
-              if (
-                connection.signalingState === "stable" ||
-                connection.signalingState === "closed" ||
-                Date.now() - startedAt >= 2_000
-              ) {
-                resolve();
-                return;
-              }
-              window.setTimeout(check, 25);
-            };
-            check();
-          });
-        }
         if (connection.signalingState !== "stable") return;
         await connection.setRemoteDescription(signal.description);
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
-        await sendSignal({
-          kind: "answer",
-          description: await getCompleteLocalDescription(connection),
-        });
+        await sendSignal({ kind: "answer", description: answer });
         return;
       }
       if (signal.kind === "answer") {
-        if (
-          payload.senderUserId !== activeCall.recipientUserId ||
-          activeUser.id !== activeCall.callerUserId
-        ) {
-          return;
-        }
         const connection = peerConnectionRef.current;
-        if (!connection || connection.signalingState !== "have-local-offer") return;
+        if (!connection) return;
         await connection.setRemoteDescription(signal.description);
         await flushQueuedCandidates();
         return;
@@ -983,14 +877,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
   );
   signalHandlerRef.current = (payload) => {
-    // Realtime can deliver SDP and trickled ICE events almost simultaneously.
-    // Preserve their arrival order so asynchronous description updates cannot
-    // race each other and strand an otherwise valid TURN connection.
-    signalProcessingRef.current = signalProcessingRef.current
-      .then(() => handleSignal(payload))
-      .catch(() => {
+    void handleSignal(payload).catch(() => {
       setMessage(t("Could not establish the audio connection.", "Nie udało się nawiązać połączenia audio."));
-      });
+    });
   };
 
   const loadCallContext = useCallback(async (activeCall: CallRecord) => {
@@ -1013,20 +902,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const showIncomingCall = useCallback(
     async (incomingCall: CallRecord) => {
       if (phaseRef.current !== "idle" && callRef.current?.id !== incomingCall.id) return;
-      // A delayed poll or broadcast may refer to a call that was cancelled
-      // moments earlier. Revalidate the durable state before displaying it.
-      const { call: currentCall } = await apiRequest<{ call: CallRecord }>(
-        `/api/calls/${incomingCall.id}`
-      );
-      if (
-        currentCall.status !== "ringing" ||
-        new Date(currentCall.ringExpiresAt).getTime() <= Date.now() ||
-        phaseRef.current !== "idle"
-      ) {
-        return;
-      }
-      const context = await loadCallContext(currentCall);
-      setCall(currentCall);
+      const context = await loadCallContext(incomingCall);
+      setCall(incomingCall);
       setPeerName(context.peerName);
       setCallBoardName(context.boardName);
       setMessage("");
@@ -1099,35 +976,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     const supabase = getSupabaseBrowserClient();
-    let channel: RealtimeChannel | null = null;
-    let cancelled = false;
-
-    void (async () => {
-      // Private incoming-call topics require the authenticated Realtime token.
-      // Waiting here avoids a tablet falling back to delayed polling.
-      await supabase.realtime.setAuth();
-      if (cancelled) return;
-      const nextChannel = supabase.channel(`user:${user.id}:calls`, {
-        config: { private: true, broadcast: { ack: true } },
-      });
-      channel = nextChannel;
-      nextChannel.on("broadcast", { event: "incoming-call" }, () => {
-        void loadActiveCalls().catch(() => undefined);
-      });
-      nextChannel.subscribe();
-      userChannelRef.current = nextChannel;
-    })().catch(() => undefined);
+    void supabase.realtime.setAuth();
+    const channel = supabase.channel(`user:${user.id}:calls`, {
+      config: { private: true, broadcast: { ack: true } },
+    });
+    channel.on("broadcast", { event: "incoming-call" }, () => {
+      void loadActiveCalls().catch(() => undefined);
+    });
+    channel.subscribe();
+    userChannelRef.current = channel;
     void loadActiveCalls().catch(() => undefined);
     const poll = window.setInterval(
       () => void loadActiveCalls().catch(() => undefined),
-      5_000
+      15_000
     );
 
     return () => {
-      cancelled = true;
       window.clearInterval(poll);
       if (userChannelRef.current === channel) userChannelRef.current = null;
-      if (channel) void supabase.removeChannel(channel);
+      void supabase.removeChannel(channel);
     };
   }, [loadActiveCalls, resetToIdle, user]);
 
@@ -1292,16 +1159,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const endCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return resetToIdle();
-    if (phaseRef.current === "ended") return;
+    if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
     isTerminatingCallRef.current = true;
     phaseRef.current = "ended";
-    // Never hold the End button UI hostage to a degraded Realtime channel.
-    // Start both remote notifications, then close locally immediately. The
-    // durable API state lets the other participant's poll recover if the
-    // best-effort broadcast cannot be delivered.
-    const remoteSignal = sendSignal({ kind: "ended" }).catch(() => undefined);
+    await sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
-    const durableEnd = apiRequest(`/api/calls/${activeCall.id}`, {
+    void apiRequest(`/api/calls/${activeCall.id}`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
       keepalive: true,
@@ -1310,7 +1173,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setConnectionState("");
     setMessage(t("Call ended.", "Połączenie zakończone."));
     setPhase("ended");
-    void Promise.allSettled([remoteSignal, durableEnd]);
   }, [clearCallResources, resetToIdle, sendSignal, t]);
 
   const toggleMute = useCallback(() => {
