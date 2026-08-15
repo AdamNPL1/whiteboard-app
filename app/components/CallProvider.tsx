@@ -999,8 +999,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const showIncomingCall = useCallback(
     async (incomingCall: CallRecord) => {
       if (phaseRef.current !== "idle" && callRef.current?.id !== incomingCall.id) return;
-      const context = await loadCallContext(incomingCall);
-      setCall(incomingCall);
+      // A delayed poll or broadcast may refer to a call that was cancelled
+      // moments earlier. Revalidate the durable state before displaying it.
+      const { call: currentCall } = await apiRequest<{ call: CallRecord }>(
+        `/api/calls/${incomingCall.id}`
+      );
+      if (
+        currentCall.status !== "ringing" ||
+        new Date(currentCall.ringExpiresAt).getTime() <= Date.now() ||
+        phaseRef.current !== "idle"
+      ) {
+        return;
+      }
+      const context = await loadCallContext(currentCall);
+      setCall(currentCall);
       setPeerName(context.peerName);
       setCallBoardName(context.boardName);
       setMessage("");
@@ -1073,25 +1085,35 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     const supabase = getSupabaseBrowserClient();
-    void supabase.realtime.setAuth();
-    const channel = supabase.channel(`user:${user.id}:calls`, {
-      config: { private: true, broadcast: { ack: true } },
-    });
-    channel.on("broadcast", { event: "incoming-call" }, () => {
-      void loadActiveCalls().catch(() => undefined);
-    });
-    channel.subscribe();
-    userChannelRef.current = channel;
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      // Private incoming-call topics require the authenticated Realtime token.
+      // Waiting here avoids a tablet falling back to delayed polling.
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+      const nextChannel = supabase.channel(`user:${user.id}:calls`, {
+        config: { private: true, broadcast: { ack: true } },
+      });
+      channel = nextChannel;
+      nextChannel.on("broadcast", { event: "incoming-call" }, () => {
+        void loadActiveCalls().catch(() => undefined);
+      });
+      nextChannel.subscribe();
+      userChannelRef.current = nextChannel;
+    })().catch(() => undefined);
     void loadActiveCalls().catch(() => undefined);
     const poll = window.setInterval(
       () => void loadActiveCalls().catch(() => undefined),
-      15_000
+      5_000
     );
 
     return () => {
+      cancelled = true;
       window.clearInterval(poll);
       if (userChannelRef.current === channel) userChannelRef.current = null;
-      void supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [loadActiveCalls, resetToIdle, user]);
 
@@ -1256,12 +1278,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const endCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return resetToIdle();
-    if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
+    if (phaseRef.current === "ended") return;
     isTerminatingCallRef.current = true;
     phaseRef.current = "ended";
-    await sendSignal({ kind: "ended" }).catch(() => undefined);
+    // Never hold the End button UI hostage to a degraded Realtime channel.
+    // Start both remote notifications, then close locally immediately. The
+    // durable API state lets the other participant's poll recover if the
+    // best-effort broadcast cannot be delivered.
+    const remoteSignal = sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
-    void apiRequest(`/api/calls/${activeCall.id}`, {
+    const durableEnd = apiRequest(`/api/calls/${activeCall.id}`, {
       method: "PATCH",
       body: JSON.stringify({ action }),
       keepalive: true,
@@ -1270,6 +1296,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setConnectionState("");
     setMessage(t("Call ended.", "Połączenie zakończone."));
     setPhase("ended");
+    void Promise.allSettled([remoteSignal, durableEnd]);
   }, [clearCallResources, resetToIdle, sendSignal, t]);
 
   const toggleMute = useCallback(() => {
