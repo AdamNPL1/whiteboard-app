@@ -4117,10 +4117,12 @@ export default function Page() {
       const refreshAttempt = latestRemoteRefreshRef.current + 1;
       latestRemoteRefreshRef.current = refreshAttempt;
       const data = await readBoardResponse(
-        await fetch("/api/boards", { cache: "no-store" })
+        await fetch(`/api/boards/${encodeURIComponent(boardId)}`, {
+          cache: "no-store",
+        })
       );
       if (refreshAttempt !== latestRemoteRefreshRef.current) return;
-      if (data.activeBoardId !== boardId || data.board?.id !== boardId) return;
+      if (data.board?.id !== boardId) return;
 
       const remoteUpdatedAt = data.board.updatedAt;
       if (!remoteUpdatedAt) return;
@@ -4142,7 +4144,21 @@ export default function Page() {
       }
 
       boardUpdatedAtRef.current[boardId] = remoteUpdatedAt;
-      setBoards(data.boards ?? []);
+      setBoards((previousBoards) =>
+        previousBoards.map((board) =>
+          board.id === boardId
+            ? {
+                ...board,
+                name: data.board?.name ?? board.name,
+                createdAt: data.board?.createdAt ?? board.createdAt,
+                updatedAt: remoteUpdatedAt,
+                deletedAt: data.board?.deletedAt,
+                starred: data.board?.starred ?? board.starred,
+                previewDocument: data.board?.document ?? board.previewDocument,
+              }
+            : board
+        )
+      );
       applyBoardDocument(data.board.document);
     }
   );

@@ -817,6 +817,41 @@ export const getUserBoards = async (
   return serializeUserBoards(sanitizedEntry, access.maxBoards);
 };
 
+export const getBoardForUser = async (
+  supabase: SupabaseClient,
+  userId: string,
+  userEmail: string,
+  plan: AppProfilePlan,
+  subscriptionStatus: AppProfileSubscriptionStatus,
+  boardId: string
+) => {
+  const access = getWorkspaceAccess(plan, subscriptionStatus);
+  const entry = await loadUserBoardCollection(
+    getBoardStoreClient(supabase),
+    userId,
+    userEmail
+  );
+  const board = sanitizeStoredBoardForAccess(
+    getAccessibleBoardOrThrow(entry, boardId),
+    access.canUseCalendar
+  );
+
+  return {
+    board: {
+      id: board.id,
+      name: board.name,
+      createdAt: board.createdAt,
+      updatedAt: board.updatedAt,
+      deletedAt: board.deletedAt,
+      starred: board.starred,
+      document: board.document,
+      ownedByUser: board.ownedByUser,
+      shareCount: board.shareCount,
+      sharePermission: board.sharePermission,
+    },
+  };
+};
+
 export const createBoardForUser = async (
   supabase: SupabaseClient,
   userId: string,

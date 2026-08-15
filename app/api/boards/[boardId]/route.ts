@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import {
+  getBoardForUser,
   moveBoardToTrashForUser,
   renameBoardForUser,
   saveBoardForUser,
@@ -15,6 +16,52 @@ import {
 } from "@/lib/board-document-limits";
 
 export const runtime = "nodejs";
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ boardId: string }> }
+) {
+  const user = await getSupabaseUserFromRequest(request);
+  const supabase = createSupabaseServerAuthClient({
+    getAll: () => request.cookies.getAll(),
+  });
+
+  if (!user) {
+    return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  }
+
+  const { boardId } = await context.params;
+  const {
+    data: { user: authUser },
+  } = await supabase.auth.getUser();
+  const profile = authUser
+    ? await ensureProfileForSupabaseUser(supabase, authUser)
+    : null;
+
+  try {
+    const result = await getBoardForUser(
+      supabase,
+      user.id,
+      user.email,
+      profile?.plan ?? "basic",
+      profile?.subscriptionStatus ?? "inactive",
+      boardId
+    );
+
+    return NextResponse.json(result, {
+      headers: { "Cache-Control": "private, no-store" },
+    });
+  } catch (error) {
+    if (error instanceof Error && error.message === "BOARD_NOT_FOUND") {
+      return NextResponse.json({ error: "Board not found." }, { status: 404 });
+    }
+
+    return NextResponse.json(
+      { error: "Could not load this board." },
+      { status: 500 }
+    );
+  }
+}
 
 export async function PUT(
   request: NextRequest,
