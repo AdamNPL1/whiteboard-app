@@ -976,25 +976,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     const supabase = getSupabaseBrowserClient();
-    void supabase.realtime.setAuth();
-    const channel = supabase.channel(`user:${user.id}:calls`, {
-      config: { private: true, broadcast: { ack: true } },
-    });
-    channel.on("broadcast", { event: "incoming-call" }, () => {
-      void loadActiveCalls().catch(() => undefined);
-    });
-    channel.subscribe();
-    userChannelRef.current = channel;
+    let channel: RealtimeChannel | null = null;
+    let cancelled = false;
+
+    void (async () => {
+      // This is a private topic. Subscribe only after the authenticated
+      // Realtime token is ready, otherwise slower devices can silently miss
+      // the instant event and wait for the polling fallback.
+      await supabase.realtime.setAuth();
+      if (cancelled) return;
+
+      const nextChannel = supabase.channel(`user:${user.id}:calls`, {
+        config: { private: true, broadcast: { ack: true } },
+      });
+      channel = nextChannel;
+      nextChannel.on("broadcast", { event: "incoming-call" }, () => {
+        void loadActiveCalls().catch(() => undefined);
+      });
+      nextChannel.subscribe();
+      userChannelRef.current = nextChannel;
+    })().catch(() => undefined);
+
     void loadActiveCalls().catch(() => undefined);
     const poll = window.setInterval(
       () => void loadActiveCalls().catch(() => undefined),
-      15_000
+      5_000
     );
 
     return () => {
+      cancelled = true;
       window.clearInterval(poll);
       if (userChannelRef.current === channel) userChannelRef.current = null;
-      void supabase.removeChannel(channel);
+      if (channel) void supabase.removeChannel(channel);
     };
   }, [loadActiveCalls, resetToIdle, user]);
 
