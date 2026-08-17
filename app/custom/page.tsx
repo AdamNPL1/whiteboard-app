@@ -7716,9 +7716,9 @@ export default function Page() {
             position: "fixed",
             left: `${penCursorPoint.x}px`,
             top: `${penCursorPoint.y}px`,
-            width: "20px",
-            height: "20px",
-            transform: `translate(-2px, -18px) rotate(43deg) ${
+            width: "24px",
+            height: "24px",
+            transform: `translate(-2px, -22px) ${
               isDrawing ? "scale(0.96)" : "scale(1)"
             }`,
             pointerEvents: "none",
@@ -7726,29 +7726,39 @@ export default function Page() {
           }}
         >
           <svg
-            viewBox="0 0 20 20"
-            width="20"
-            height="20"
+            viewBox="0 0 24 24"
+            width="24"
+            height="24"
             fill="none"
+            shapeRendering="geometricPrecision"
             xmlns="http://www.w3.org/2000/svg"
           >
+            <defs>
+              <linearGradient
+                id="pen-cursor-gradient"
+                x1="2"
+                y1="22"
+                x2="22"
+                y2="2"
+                gradientUnits="userSpaceOnUse"
+              >
+                <stop stopColor="#9b4df1" />
+                <stop offset="1" stopColor="#58b9df" />
+              </linearGradient>
+            </defs>
             <path
-              d="M9.8 2.5H12.9C13.6 2.5 14.2 3.1 14.2 3.8V13.8L11.4 17.5L8.6 13.8V3.8C8.6 3.1 9.1 2.5 9.8 2.5Z"
-              fill="#ffffff"
-              stroke="#111827"
-              strokeWidth="1.4"
+              d="M21.174 6.812A2.815 2.815 0 0 0 17.188 2.826L3.842 16.174A2 2 0 0 0 3.342 17.004L2.021 21.356A.5.5 0 0 0 2.644 21.978L6.997 20.658A2 2 0 0 0 7.827 20.161L21.174 6.812Z"
+              stroke="url(#pen-cursor-gradient)"
+              strokeWidth="2"
+              strokeLinecap="round"
               strokeLinejoin="round"
             />
-            <path d="M8.6 13.6H14.2" stroke="#111827" strokeWidth="1.4" />
             <path
-              d="M9.5 5.7H13.3"
-              stroke="#111827"
-              strokeWidth="1.2"
+              d="M15 5L19 9"
+              stroke="url(#pen-cursor-gradient)"
+              strokeWidth="2"
               strokeLinecap="round"
-            />
-            <path
-              d="M11.4 17.5L10.4 14.9H12.4L11.4 17.5Z"
-              fill={penColor}
+              strokeLinejoin="round"
             />
           </svg>
         </div>
