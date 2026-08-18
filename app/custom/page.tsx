@@ -77,6 +77,18 @@ type ShapeTool = "circle" | "square" | "triangle" | "arrow" | "line" | "ruler";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
 
+const DRAWABLE_SHAPE_TOOLS = new Set<ShapeTool>([
+  "circle",
+  "square",
+  "triangle",
+  "arrow",
+  "line",
+  "ruler",
+]);
+
+const isDrawableShapeTool = (candidate: string): candidate is ShapeTool =>
+  DRAWABLE_SHAPE_TOOLS.has(candidate as ShapeTool);
+
 const BLACK_CROSSHAIR_CURSOR =
   'url("data:image/svg+xml,%3Csvg xmlns=%22http://www.w3.org/2000/svg%22 width=%2224%22 height=%2224%22 viewBox=%220 0 24 24%22%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22white%22 stroke-width=%224%22/%3E%3Cpath d=%22M12 1v22M1 12h22%22 stroke=%22black%22 stroke-width=%222%22/%3E%3C/svg%3E") 12 12, crosshair';
 
@@ -6839,13 +6851,7 @@ export default function Page() {
 
     const { x, y } = getCanvasCoordinates(e);
 
-    if (
-      tool === "circle" ||
-      tool === "square" ||
-      tool === "arrow" ||
-      tool === "line" ||
-      tool === "ruler"
-    ) {
+    if (isDrawableShapeTool(tool)) {
       isDrawingRef.current = true;
       setIsDrawing(true);
       setShapeStart({ x, y });
@@ -6997,17 +7003,7 @@ export default function Page() {
 
     const { x, y } = getCanvasCoordinates(e);
 
-    if (
-      (
-        tool === "circle" ||
-        tool === "square" ||
-        tool === "arrow" ||
-        tool === "line" ||
-        tool === "ruler"
-      ) &&
-      shapeStart &&
-      snapshot
-    ) {
+    if (isDrawableShapeTool(tool) && shapeStart && snapshot) {
       shapeEnd.current = { x, y };
       ctx.putImageData(snapshot, 0, 0);
 
@@ -7143,17 +7139,7 @@ export default function Page() {
       return;
     }
 
-    if (
-      (
-        tool === "circle" ||
-        tool === "square" ||
-        tool === "arrow" ||
-        tool === "line" ||
-        tool === "ruler"
-      ) &&
-      shapeStart &&
-      shapeEnd.current
-    ) {
+    if (isDrawableShapeTool(tool) && shapeStart && shapeEnd.current) {
       const finalShapeEnd = shapeEnd.current;
 
       recordCanvasHistory();
