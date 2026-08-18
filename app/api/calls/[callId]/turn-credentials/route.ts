@@ -11,6 +11,20 @@ export const runtime = "nodejs";
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
+const hasCloudflareTurnConfiguration = () =>
+  Boolean(
+    process.env.CLOUDFLARE_TURN_KEY_ID?.trim() &&
+      process.env.CLOUDFLARE_TURN_API_TOKEN?.trim()
+  );
+
+const createDevelopmentIceConfiguration = (ttlSeconds: number) => ({
+  iceServers: [
+    { urls: "stun:stun.cloudflare.com:3478" },
+    { urls: "stun:stun.l.google.com:19302" },
+  ],
+  expiresAt: new Date(Date.now() + ttlSeconds * 1000).toISOString(),
+});
+
 export async function POST(
   request: NextRequest,
   context: { params: Promise<{ callId: string }> }
@@ -45,6 +59,19 @@ export async function POST(
         { error: "TURN credentials are available only for an accepted active call." },
         { status: 409 }
       );
+    }
+
+    // Local development should not require production TURN secrets. STUN is
+    // sufficient for localhost/LAN testing in the usual network setup, while
+    // production still fails loudly if its relay configuration is missing.
+    if (process.env.NODE_ENV === "development" && !hasCloudflareTurnConfiguration()) {
+      return NextResponse.json(createDevelopmentIceConfiguration(remainingSeconds), {
+        headers: {
+          "Cache-Control": "no-store, private",
+          Pragma: "no-cache",
+          "X-Scriboo-Ice-Mode": "development-stun",
+        },
+      });
     }
 
     const credentials = await generateCloudflareTurnCredentials({
