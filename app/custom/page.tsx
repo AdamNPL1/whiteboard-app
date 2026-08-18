@@ -12,6 +12,7 @@ import {
   Shapes,
   Circle,
   Square,
+  Triangle,
   Minus,
   MousePointer2,
   Type,
@@ -72,7 +73,7 @@ import {
   parseLiveStrokeStart,
 } from "@/lib/board-live-strokes";
 
-type ShapeTool = "circle" | "square" | "arrow" | "line" | "ruler";
+type ShapeTool = "circle" | "square" | "triangle" | "arrow" | "line" | "ruler";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
 
@@ -5191,6 +5192,15 @@ export default function Page() {
     if (shape === "circle") {
       const radius = Math.sqrt(shapeWidth * shapeWidth + height * height);
       ctx.arc(startX, startY, radius, 0, Math.PI * 2);
+      ctx.stroke();
+      return;
+    }
+
+    if (shape === "triangle") {
+      ctx.moveTo(startX + shapeWidth / 2, startY);
+      ctx.lineTo(currentX, currentY);
+      ctx.lineTo(startX, currentY);
+      ctx.closePath();
       ctx.stroke();
       return;
     }
@@ -16496,10 +16506,10 @@ export default function Page() {
               height: "38px",
               borderRadius: "8px",
               border: "none",
-              background: ["circle", "square", "arrow", "line"].includes(tool)
+              background: ["circle", "square", "triangle", "arrow", "line"].includes(tool)
                 ? "#7c3aed"
                 : inactiveToolBackground,
-              color: ["circle", "square", "arrow", "line"].includes(tool)
+              color: ["circle", "square", "triangle", "arrow", "line"].includes(tool)
                 ? "#fff"
                 : panelTextColor,
               display: "flex",
@@ -16560,6 +16570,26 @@ export default function Page() {
                 }}
               >
                 <Square size={18} />
+              </button>
+
+              <button
+                onClick={() => selectShapeTool("triangle")}
+                aria-label={t("Triangle", "Trójkąt")}
+                title={t("Triangle", "Trójkąt")}
+                style={{
+                  width: "32px",
+                  height: "32px",
+                  borderRadius: "6px",
+                  border: "none",
+                  background: "transparent",
+                  color: panelTextColor,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  cursor: "pointer",
+                }}
+              >
+                <Triangle size={18} />
               </button>
 
               <button
