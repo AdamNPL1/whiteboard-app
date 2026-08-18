@@ -551,7 +551,7 @@ export default function Page() {
   const [showForgotPassword, setShowForgotPassword] = useState(false);
   const [welcomeCelebration, setWelcomeCelebration] = useState<{
     name: string;
-    kind: "login" | "created";
+    kind: "login" | "created" | "logout";
   } | null>(null);
   const [showGuestWelcome, setShowGuestWelcome] = useState(true);
   const [showGuestFeatureShowcase, setShowGuestFeatureShowcase] = useState(false);
@@ -1335,7 +1335,7 @@ export default function Page() {
 
   const showWelcomeCelebration = (
     name: string | null | undefined,
-    kind: "login" | "created"
+    kind: "login" | "created" | "logout"
   ) => {
     const displayName = name?.trim() || t("Scriboo user", "Użytkowniku Scriboo");
     setWelcomeCelebration({ name: displayName, kind });
@@ -1501,14 +1501,14 @@ export default function Page() {
   };
 
   const signOut = async () => {
+    const departingName = currentAccountName;
+    const boardSave =
+      currentAccountId && activeBoardId
+        ? persistBoard(activeBoardId).catch(() => null)
+        : Promise.resolve(null);
+
     setShowProfileMenu(false);
-
-    if (currentAccountId && activeBoardId) {
-      await persistBoard(activeBoardId).catch(() => null);
-    }
-
-    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
-    window.dispatchEvent(new Event("scriboo-auth-changed"));
+    showWelcomeCelebration(departingName, "logout");
     setCurrentAccountId("");
     setCurrentAccountName("");
     setCurrentAccountEmail("");
@@ -1527,6 +1527,14 @@ export default function Page() {
       gridOpacity: 24,
       calendarEntries: [],
     });
+
+    // The interface signs out immediately. Keep the authenticated session just
+    // long enough to finish saving the active board, then clear both the server
+    // cookie and the browser client's cached session.
+    await boardSave;
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
+    await getSupabaseBrowserClient().auth.signOut({ scope: "local" }).catch(() => null);
+    window.dispatchEvent(new Event("scriboo-auth-changed"));
   };
 
   const closeDeleteAccountModal = () => {
@@ -8995,14 +9003,20 @@ export default function Page() {
           role="status"
           aria-live="polite"
           aria-label={t(
-            `Welcome, ${welcomeCelebration.name}!`,
-            `Witaj, ${welcomeCelebration.name}!`
+            welcomeCelebration.kind === "logout"
+              ? `See you soon, ${welcomeCelebration.name}!`
+              : `Welcome, ${welcomeCelebration.name}!`,
+            welcomeCelebration.kind === "logout"
+              ? `Do zobaczenia, ${welcomeCelebration.name}!`
+              : `Witaj, ${welcomeCelebration.name}!`
           )}
           onClick={() => setWelcomeCelebration(null)}
         >
           <div className="scriboo-welcome-celebration__glow" aria-hidden="true" />
           <div className="scriboo-welcome-celebration__burst" aria-hidden="true">
-            <span className="scriboo-welcome-celebration__popper">🎉</span>
+            <span className="scriboo-welcome-celebration__popper">
+              {welcomeCelebration.kind === "logout" ? "👋" : "🎉"}
+            </span>
             {Array.from({ length: 18 }, (_, index) => {
               const palette = ["#7447e8", "#5792e3", "#59bda5", "#f59e7a", "#f3c969"];
               const angle = (index / 18) * Math.PI * 2;
@@ -9026,9 +9040,11 @@ export default function Page() {
           </div>
           <div className="scriboo-welcome-celebration__copy">
             <span>
-              {welcomeCelebration.kind === "created"
-                ? t("Your Scriboo workspace is ready", "Twoja przestrzeń Scriboo jest gotowa")
-                : t("Welcome back", "Witaj ponownie")}
+              {welcomeCelebration.kind === "logout"
+                ? t("See you soon", "Do zobaczenia")
+                : welcomeCelebration.kind === "created"
+                  ? t("Your Scriboo workspace is ready", "Twoja przestrzeń Scriboo jest gotowa")
+                  : t("Welcome back", "Witaj ponownie")}
             </span>
             <strong>{welcomeCelebration.name}!</strong>
           </div>

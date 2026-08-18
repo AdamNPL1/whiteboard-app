@@ -1235,16 +1235,29 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     setIsCameraStarting(true);
     setCameraMessage("");
+    let cameraStream: MediaStream | null = null;
     try {
-      const cameraStream = await navigator.mediaDevices.getUserMedia({
-        audio: false,
-        video: {
-          width: { ideal: 1280 },
-          height: { ideal: 720 },
-          frameRate: { ideal: 24, max: 30 },
-          facingMode: { ideal: "user" },
-        },
-      });
+      try {
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: {
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+            frameRate: { ideal: 24, max: 30 },
+            facingMode: { ideal: "user" },
+          },
+        });
+      } catch (error) {
+        // Some virtual, mobile, and older camera drivers reject optional
+        // preferences. Retry without them before reporting a camera failure.
+        if (!(error instanceof DOMException) || error.name !== "OverconstrainedError") {
+          throw error;
+        }
+        cameraStream = await navigator.mediaDevices.getUserMedia({
+          audio: false,
+          video: true,
+        });
+      }
       const cameraTrack = cameraStream.getVideoTracks()[0];
       if (!cameraTrack) throw new Error("CAMERA_TRACK_MISSING");
       try {
@@ -1278,8 +1291,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         localVideoSenderRef.current = videoTransceiver.sender;
       }
       setIsCameraOn(true);
-      await sendSignal({ kind: "video-state", enabled: true });
-      await requestRenegotiation();
+      try {
+        await sendSignal({ kind: "video-state", enabled: true });
+        await requestRenegotiation();
+      } catch {
+        // The camera opened successfully. A transient signaling failure must
+        // not be presented as a missing camera or tear down the local preview.
+        setCameraMessage(
+          t(
+            "Your camera is on, but the video connection could not be updated. Try turning video off and on again.",
+            "Kamera jest włączona, ale nie udało się zaktualizować połączenia wideo. Wyłącz i włącz wideo ponownie."
+          )
+        );
+      }
     } catch {
       const failedTrack = localCameraTrackRef.current;
       const failedSender = localVideoSenderRef.current;
@@ -1294,6 +1318,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         localStreamRef.current?.removeTrack(failedTrack);
         failedTrack.stop();
       }
+      cameraStream?.getTracks().forEach((track) => {
+        if (track !== failedTrack) track.stop();
+      });
       setIsCameraOn(false);
       setCameraMessage(
         t(
