@@ -21,6 +21,7 @@ import {
   AlignRight,
   ArrowRight,
   Bold,
+  BookOpenText,
   CalendarDays,
   Check,
   CheckCircle2,
@@ -48,6 +49,7 @@ import {
   Search,
   Settings,
   Share2,
+  Send,
   Star,
   Underline,
   Undo2,
@@ -73,7 +75,15 @@ import {
   parseLiveStrokeStart,
 } from "@/lib/board-live-strokes";
 
-type ShapeTool = "circle" | "square" | "triangle" | "arrow" | "line" | "ruler";
+type ShapeTool =
+  | "circle"
+  | "square"
+  | "triangle"
+  | "arrow"
+  | "line"
+  | "ruler"
+  | "oval"
+  | "curve";
 type StrokeTool = "pen" | "eraser";
 type Point = { x: number; y: number };
 
@@ -84,6 +94,8 @@ const DRAWABLE_SHAPE_TOOLS = new Set<ShapeTool>([
   "arrow",
   "line",
   "ruler",
+  "oval",
+  "curve",
 ]);
 
 const isDrawableShapeTool = (candidate: string): candidate is ShapeTool =>
@@ -159,7 +171,29 @@ type ImageElement = {
   name: string;
   rotation?: number;
 };
-type CanvasElement = Stroke | Shape | TextElement | ImageElement;
+type ConverterKind = "km-mi" | "kg-lb" | "c-f" | "gb-mb" | "cm-in";
+type ConverterElement = {
+  kind: "converter";
+  point: Point;
+  width: number;
+  height: number;
+  converter: ConverterKind;
+  value: number;
+};
+type CalculatorElement = {
+  kind: "calculator";
+  point: Point;
+  width: number;
+  height: number;
+  expression: string;
+};
+type CanvasElement =
+  | Stroke
+  | Shape
+  | TextElement
+  | ImageElement
+  | ConverterElement
+  | CalculatorElement;
 type ActiveText = {
   point: Point;
   screenPoint: Point;
@@ -187,6 +221,76 @@ type Bounds = {
   y: number;
   width: number;
   height: number;
+};
+
+const converterOptions: Array<{
+  value: ConverterKind;
+  label: string;
+  inputUnit: string;
+  outputUnit: string;
+}> = [
+  { value: "km-mi", label: "Kilometres → miles", inputUnit: "km", outputUnit: "mi" },
+  { value: "kg-lb", label: "Kilograms → pounds", inputUnit: "kg", outputUnit: "lb" },
+  { value: "c-f", label: "Celsius → Fahrenheit", inputUnit: "°C", outputUnit: "°F" },
+  { value: "gb-mb", label: "Gigabytes → megabytes", inputUnit: "GB", outputUnit: "MB" },
+  { value: "cm-in", label: "Centimetres → inches", inputUnit: "cm", outputUnit: "in" },
+];
+
+const convertBoardValue = (kind: ConverterKind, value: number) => {
+  if (!Number.isFinite(value)) return 0;
+  if (kind === "km-mi") return value * 0.621371;
+  if (kind === "kg-lb") return value * 2.20462;
+  if (kind === "c-f") return value * 1.8 + 32;
+  if (kind === "gb-mb") return value * 1024;
+  return value / 2.54;
+};
+
+const formatConvertedValue = (value: number) =>
+  new Intl.NumberFormat(undefined, { maximumFractionDigits: 3 }).format(value);
+
+const calculateExpression = (expression: string): number | null => {
+  const source = expression.replace(/×/g, "*").replace(/÷/g, "/").replace(/\s+/g, "");
+  if (!source || !/^[0-9+\-*/().]+$/.test(source)) return null;
+  let index = 0;
+  const parseNumber = (): number => {
+    if (source[index] === "(") {
+      index += 1;
+      const value = parseAddSubtract();
+      if (source[index] !== ")") throw new Error("Missing closing parenthesis");
+      index += 1;
+      return value;
+    }
+    const start = index;
+    if (source[index] === "+" || source[index] === "-") index += 1;
+    while (/[0-9.]/.test(source[index] ?? "")) index += 1;
+    const value = Number(source.slice(start, index));
+    if (!Number.isFinite(value)) throw new Error("Invalid number");
+    return value;
+  };
+  const parseMultiplyDivide = (): number => {
+    let value = parseNumber();
+    while (source[index] === "*" || source[index] === "/") {
+      const operator = source[index++];
+      const next = parseNumber();
+      value = operator === "*" ? value * next : value / next;
+    }
+    return value;
+  };
+  function parseAddSubtract(): number {
+    let value = parseMultiplyDivide();
+    while (source[index] === "+" || source[index] === "-") {
+      const operator = source[index++];
+      const next = parseMultiplyDivide();
+      value = operator === "+" ? value + next : value - next;
+    }
+    return value;
+  }
+  try {
+    const value = parseAddSubtract();
+    return index === source.length && Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
 };
 type SelectionMenu = {
   x: number;
@@ -514,6 +618,20 @@ export default function Page() {
     startAngle?: number;
     didRecordHistory?: boolean;
   } | null>(null);
+  const converterDragRef = useRef<{
+    index: number;
+    pointerId: number;
+    startClient: Point;
+    startPoint: Point;
+    didRecordHistory: boolean;
+  } | null>(null);
+  const calculatorDragRef = useRef<{
+    index: number;
+    pointerId: number;
+    startClient: Point;
+    startPoint: Point;
+    didRecordHistory: boolean;
+  } | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
   const floralBackgroundRef = useRef<HTMLImageElement | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -523,6 +641,13 @@ export default function Page() {
   const [showShapesMenu, setShowShapesMenu] = useState(false);
   const [showPenMenu, setShowPenMenu] = useState(false);
   const [isToolbarCollapsed, setIsToolbarCollapsed] = useState(false);
+  const [showSpecialTools, setShowSpecialTools] = useState(false);
+  const [showBrainstormMenu, setShowBrainstormMenu] = useState(false);
+  const [showPersonalLayer, setShowPersonalLayer] = useState(false);
+  const [personalNoteTitle, setPersonalNoteTitle] = useState("My private notes");
+  const [personalNoteContent, setPersonalNoteContent] = useState("");
+  const [personalNoteLoadedBoardId, setPersonalNoteLoadedBoardId] = useState("");
+  const [personalNoteSaveState, setPersonalNoteSaveState] = useState<"loading" | "saving" | "saved" | "error">("loading");
   const [isInterfaceDarkMode, setIsInterfaceDarkMode] = useState(false);
   const [, setShowTextMenu] = useState(false);
   const textBoxOpacity = 0.75;
@@ -758,6 +883,63 @@ export default function Page() {
     );
   }, [activeBoard, setBoardContext]);
 
+  useEffect(() => {
+    if (!showPersonalLayer || !activeBoardId || !currentAccountId) return;
+    let cancelled = false;
+    setPersonalNoteSaveState("loading");
+    fetch(`/api/boards/${encodeURIComponent(activeBoardId)}/personal-note`, {
+      cache: "no-store",
+    })
+      .then(async (response) => {
+        const data = (await response.json().catch(() => null)) as
+          | { note?: { title?: string; content?: string }; error?: string }
+          | null;
+        if (!response.ok) throw new Error(data?.error ?? "Could not load private notes.");
+        if (cancelled) return;
+        setPersonalNoteTitle(data?.note?.title ?? "My private notes");
+        setPersonalNoteContent(data?.note?.content ?? "");
+        setPersonalNoteLoadedBoardId(activeBoardId);
+        setPersonalNoteSaveState("saved");
+      })
+      .catch(() => {
+        if (!cancelled) setPersonalNoteSaveState("error");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [activeBoardId, currentAccountId, showPersonalLayer]);
+
+  useEffect(() => {
+    if (
+      !showPersonalLayer ||
+      !activeBoardId ||
+      personalNoteLoadedBoardId !== activeBoardId
+    ) return;
+    setPersonalNoteSaveState("saving");
+    const timeout = window.setTimeout(() => {
+      fetch(`/api/boards/${encodeURIComponent(activeBoardId)}/personal-note`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: personalNoteTitle,
+          content: personalNoteContent,
+        }),
+      })
+        .then((response) => {
+          if (!response.ok) throw new Error("Save failed");
+          setPersonalNoteSaveState("saved");
+        })
+        .catch(() => setPersonalNoteSaveState("error"));
+    }, 650);
+    return () => window.clearTimeout(timeout);
+  }, [
+    activeBoardId,
+    personalNoteContent,
+    personalNoteLoadedBoardId,
+    personalNoteTitle,
+    showPersonalLayer,
+  ]);
+
   useEffect(
     () => () => {
       setBoardContext(null);
@@ -778,6 +960,7 @@ export default function Page() {
   const [textSizeMenu, setTextSizeMenu] = useState<SelectionMenu | null>(null);
   const shapeEnd = useRef<Point | null>(null);
   const textInputRef = useRef<HTMLTextAreaElement | null>(null);
+  const personalNoteRef = useRef<HTMLTextAreaElement | null>(null);
   const boardNameInputRef = useRef<HTMLInputElement | null>(null);
   const boardsMenuContainerRef = useRef<HTMLDivElement | null>(null);
   const profileMenuContainerRef = useRef<HTMLDivElement | null>(null);
@@ -2346,6 +2529,22 @@ export default function Page() {
   };
 
   const getExportElementBounds = (element: CanvasElement): Bounds | null => {
+    if (element.kind === "calculator") {
+      return {
+        x: element.point.x,
+        y: element.point.y,
+        width: element.width,
+        height: element.height,
+      };
+    }
+    if (element.kind === "converter") {
+      return {
+        x: element.point.x,
+        y: element.point.y,
+        width: element.width,
+        height: element.height,
+      };
+    }
     if (element.kind === "image") {
       return {
         x: element.point.x,
@@ -2533,6 +2732,14 @@ export default function Page() {
     }
 
     documentToExport.elements.forEach((element) => {
+      if (element.kind === "calculator") {
+        drawCalculatorElement(context, element);
+        return;
+      }
+      if (element.kind === "converter") {
+        drawConverterElement(context, element);
+        return;
+      }
       if (element.kind === "image") {
         const image = importedImageCacheRef.current.get(element.src);
         if (image?.complete) {
@@ -3888,6 +4095,22 @@ export default function Page() {
     };
 
     elementsToPreview.forEach((element) => {
+      if (element.kind === "calculator") {
+        includePoint(element.point.x, element.point.y);
+        includePoint(
+          element.point.x + element.width,
+          element.point.y + element.height
+        );
+        return;
+      }
+      if (element.kind === "converter") {
+        includePoint(element.point.x, element.point.y);
+        includePoint(
+          element.point.x + element.width,
+          element.point.y + element.height
+        );
+        return;
+      }
       if (element.kind === "image") {
         includePoint(element.point.x, element.point.y);
         includePoint(
@@ -3977,6 +4200,37 @@ export default function Page() {
       const width = Math.abs(element.end.x - element.start.x);
       const height = Math.abs(element.end.y - element.start.y);
       const dashArray = getStrokeDashArray(element.style);
+
+      if (element.tool === "oval") {
+        return (
+          <ellipse
+            key={index}
+            cx={x + width / 2}
+            cy={y + height / 2}
+            rx={Math.max(width / 2, 1)}
+            ry={Math.max(height / 2, 1)}
+            fill="none"
+            stroke={element.color}
+            strokeWidth={element.width}
+            strokeDasharray={dashArray}
+          />
+        );
+      }
+
+      if (element.tool === "curve") {
+        const deltaX = element.end.x - element.start.x;
+        return (
+          <path
+            key={index}
+            d={`M ${element.start.x} ${element.start.y} C ${element.start.x + deltaX * 0.38} ${element.start.y}, ${element.end.x - deltaX * 0.38} ${element.end.y}, ${element.end.x} ${element.end.y}`}
+            fill="none"
+            stroke={element.color}
+            strokeWidth={element.width}
+            strokeDasharray={dashArray}
+            strokeLinecap="round"
+          />
+        );
+      }
 
       if (element.tool === "circle") {
         return (
@@ -4165,6 +4419,47 @@ export default function Page() {
 
               if (element.kind === "shape") {
                 return renderShapePreview(element, index);
+              }
+
+              if (element.kind === "converter") {
+                const option =
+                  converterOptions.find(
+                    (item) => item.value === element.converter
+                  ) ?? converterOptions[0];
+                return (
+                  <g key={index}>
+                    <rect
+                      x={element.point.x}
+                      y={element.point.y}
+                      width={element.width}
+                      height={element.height}
+                      rx={18}
+                      fill="#ffffff"
+                      stroke="rgba(124,58,237,0.3)"
+                    />
+                    <text x={element.point.x + 16} y={element.point.y + 27} fill="#0f172a" fontSize="14" fontWeight="700">
+                      Unit converter
+                    </text>
+                    <text x={element.point.x + 16} y={element.point.y + 77} fill="#5b21b6" fontSize="14" fontWeight="700">
+                      {formatConvertedValue(element.value)} {option.inputUnit}
+                    </text>
+                    <text x={element.point.x + 16} y={element.point.y + 121} fill="#075985" fontSize="14" fontWeight="700">
+                      {formatConvertedValue(convertBoardValue(element.converter, element.value))} {option.outputUnit}
+                    </text>
+                  </g>
+                );
+              }
+
+              if (element.kind === "calculator") {
+                const result = calculateExpression(element.expression);
+                return (
+                  <g key={index}>
+                    <rect x={element.point.x} y={element.point.y} width={element.width} height={element.height} rx={18} fill="#ffffff" stroke="rgba(75,143,255,0.3)" />
+                    <text x={element.point.x + 16} y={element.point.y + 27} fill="#0f172a" fontSize="14" fontWeight="700">Calculator</text>
+                    <text x={element.point.x + element.width - 18} y={element.point.y + 67} fill="#64748b" fontSize="12" textAnchor="end">{element.expression || "0"}</text>
+                    <text x={element.point.x + element.width - 18} y={element.point.y + 96} fill="#0f172a" fontSize="19" fontWeight="800" textAnchor="end">{result === null ? "—" : formatConvertedValue(result)}</text>
+                  </g>
+                );
               }
 
               return (
@@ -5196,6 +5491,34 @@ export default function Page() {
     ctx.strokeStyle = color;
     ctx.lineWidth = width;
 
+    if (shape === "oval") {
+      ctx.ellipse(
+        startX + shapeWidth / 2,
+        startY + height / 2,
+        Math.max(Math.abs(shapeWidth) / 2, 1),
+        Math.max(Math.abs(height) / 2, 1),
+        0,
+        0,
+        Math.PI * 2
+      );
+      ctx.stroke();
+      return;
+    }
+
+    if (shape === "curve") {
+      ctx.moveTo(startX, startY);
+      ctx.bezierCurveTo(
+        startX + shapeWidth * 0.38,
+        startY,
+        currentX - shapeWidth * 0.38,
+        currentY,
+        currentX,
+        currentY
+      );
+      ctx.stroke();
+      return;
+    }
+
     if (shape === "square") {
       ctx.strokeRect(startX, startY, shapeWidth, height);
       return;
@@ -5747,6 +6070,16 @@ export default function Page() {
 
     for (const [index, element] of visibleElements.entries()) {
       if (activeText?.editingIndex === index) {
+        continue;
+      }
+
+      if (element.kind === "converter") {
+        drawConverterElement(ctx, element);
+        continue;
+      }
+
+      if (element.kind === "calculator") {
+        drawCalculatorElement(ctx, element);
         continue;
       }
 
@@ -6400,6 +6733,299 @@ export default function Page() {
   const getCanvasCoordinates = (
     e: React.MouseEvent<HTMLCanvasElement> | React.PointerEvent<HTMLCanvasElement>
   ) => getCanvasCoordinatesFromClient(e.clientX, e.clientY);
+
+  const insertConverterObject = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const center = getCanvasCoordinatesFromClient(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
+    recordCanvasHistory();
+    setElements((previous) => [
+      ...previous,
+      {
+        kind: "converter",
+        point: { x: center.x - 110, y: center.y - 74 },
+        width: 220,
+        height: 148,
+        converter: "km-mi",
+        value: 1,
+      },
+    ]);
+    setShowBrainstormMenu(false);
+  };
+
+  const publishPersonalNoteSelection = () => {
+    const note = personalNoteRef.current;
+    const canvas = canvasRef.current;
+    if (!note || !canvas) return;
+    if (
+      activeBoard?.ownedByUser === false &&
+      activeBoard.sharePermission !== "editor"
+    ) {
+      window.alert(t("You only have view access to this board.", "Masz tylko dostęp do podglądu tej tablicy."));
+      return;
+    }
+    const selected = personalNoteContent
+      .slice(note.selectionStart, note.selectionEnd)
+      .trim();
+    if (!selected) {
+      window.alert(t("Select some private text to publish first.", "Najpierw zaznacz prywatny tekst do opublikowania."));
+      return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const center = getCanvasCoordinatesFromClient(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
+    const fontSize = 20;
+    const width = 360;
+    const lineCount = Math.max(1, Math.ceil(selected.length / 38));
+    recordCanvasHistory();
+    setElements((previous) => [
+      ...previous,
+      {
+        kind: "text",
+        point: { x: center.x - width / 2, y: center.y - 40 },
+        value: selected,
+        color: penColor,
+        runs: [],
+        fontFamily: textFontFamily,
+        fontWeight: 500,
+        fontSize,
+        fontStyle: "normal",
+        underline: false,
+        textAlign: "left",
+        width,
+        height: Math.max(52, lineCount * fontSize * textLineHeight + 20),
+        backgroundColor: "rgba(255,255,255,0.9)",
+      },
+    ]);
+  };
+
+  const drawConverterElement = (
+    ctx: CanvasRenderingContext2D,
+    converter: ConverterElement
+  ) => {
+    const option =
+      converterOptions.find((item) => item.value === converter.converter) ??
+      converterOptions[0];
+    const result = convertBoardValue(converter.converter, converter.value);
+    const { x, y } = converter.point;
+    ctx.save();
+    ctx.shadowColor = "rgba(15,23,42,0.14)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "rgba(255,255,255,0.98)";
+    ctx.beginPath();
+    ctx.roundRect(x, y, converter.width, converter.height, 18);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(124,58,237,0.24)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 14px Inter, system-ui, sans-serif";
+    ctx.fillText("Unit converter", x + 16, y + 25);
+    ctx.fillStyle = "#64748b";
+    ctx.font = "500 11px Inter, system-ui, sans-serif";
+    ctx.fillText(option.label, x + 16, y + 44);
+    ctx.fillStyle = "#f5f3ff";
+    ctx.beginPath();
+    ctx.roundRect(x + 14, y + 57, converter.width - 28, 32, 9);
+    ctx.fill();
+    ctx.fillStyle = "#5b21b6";
+    ctx.font = "700 14px Inter, system-ui, sans-serif";
+    ctx.fillText(`${formatConvertedValue(converter.value)} ${option.inputUnit}`, x + 25, y + 78);
+    ctx.fillStyle = "#e0f2fe";
+    ctx.beginPath();
+    ctx.roundRect(x + 14, y + 101, converter.width - 28, 32, 9);
+    ctx.fill();
+    ctx.fillStyle = "#075985";
+    ctx.fillText(`${formatConvertedValue(result)} ${option.outputUnit}`, x + 25, y + 122);
+    ctx.restore();
+  };
+
+  const drawCalculatorElement = (
+    ctx: CanvasRenderingContext2D,
+    calculator: CalculatorElement
+  ) => {
+    const { x, y } = calculator.point;
+    const result = calculateExpression(calculator.expression);
+    ctx.save();
+    ctx.shadowColor = "rgba(15,23,42,0.14)";
+    ctx.shadowBlur = 18;
+    ctx.shadowOffsetY = 6;
+    ctx.fillStyle = "rgba(255,255,255,0.98)";
+    ctx.beginPath();
+    ctx.roundRect(x, y, calculator.width, calculator.height, 18);
+    ctx.fill();
+    ctx.shadowColor = "transparent";
+    ctx.strokeStyle = "rgba(75,143,255,0.24)";
+    ctx.lineWidth = 1;
+    ctx.stroke();
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "700 14px Inter, system-ui, sans-serif";
+    ctx.fillText("Calculator", x + 16, y + 25);
+    ctx.fillStyle = "#f8fafc";
+    ctx.beginPath();
+    ctx.roundRect(x + 14, y + 42, calculator.width - 28, 64, 11);
+    ctx.fill();
+    ctx.fillStyle = "#64748b";
+    ctx.font = "500 12px Inter, system-ui, sans-serif";
+    ctx.textAlign = "right";
+    ctx.fillText(calculator.expression || "0", x + calculator.width - 24, y + 65);
+    ctx.fillStyle = "#0f172a";
+    ctx.font = "800 19px Inter, system-ui, sans-serif";
+    ctx.fillText(result === null ? "—" : formatConvertedValue(result), x + calculator.width - 24, y + 94);
+    ctx.textAlign = "left";
+    ctx.fillStyle = "#eef2ff";
+    ctx.beginPath();
+    ctx.roundRect(x + 14, y + 120, calculator.width - 28, calculator.height - 134, 12);
+    ctx.fill();
+    ctx.restore();
+  };
+
+  const updateConverterObject = (
+    index: number,
+    update: Partial<Pick<ConverterElement, "converter" | "value">>
+  ) => {
+    recordCanvasHistory();
+    setElements((previous) =>
+      previous.map((element, elementIndex) =>
+        elementIndex === index && element.kind === "converter"
+          ? { ...element, ...update }
+          : element
+      )
+    );
+  };
+
+  const beginConverterDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    index: number,
+    converter: ConverterElement
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    converterDragRef.current = {
+      index,
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      startPoint: converter.point,
+      didRecordHistory: false,
+    };
+  };
+
+  const moveConverter = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = converterDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!drag.didRecordHistory) {
+      recordCanvasHistory();
+      drag.didRecordHistory = true;
+    }
+    const dx = (event.clientX - drag.startClient.x) / zoomRef.current;
+    const dy = (event.clientY - drag.startClient.y) / zoomRef.current;
+    setElements((previous) =>
+      previous.map((element, index) =>
+        index === drag.index && element.kind === "converter"
+          ? {
+              ...element,
+              point: { x: drag.startPoint.x + dx, y: drag.startPoint.y + dy },
+            }
+          : element
+      )
+    );
+  };
+
+  const endConverterDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    converterDragRef.current = null;
+  };
+
+  const insertCalculatorObject = () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const rect = canvas.getBoundingClientRect();
+    const center = getCanvasCoordinatesFromClient(
+      rect.left + rect.width / 2,
+      rect.top + rect.height / 2
+    );
+    recordCanvasHistory();
+    setElements((previous) => [
+      ...previous,
+      {
+        kind: "calculator",
+        point: { x: center.x - 100, y: center.y - 145 },
+        width: 200,
+        height: 290,
+        expression: "",
+      },
+    ]);
+  };
+
+  const beginCalculatorDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    index: number,
+    calculator: CalculatorElement
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    calculatorDragRef.current = {
+      index,
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      startPoint: calculator.point,
+      didRecordHistory: false,
+    };
+  };
+
+  const moveCalculator = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = calculatorDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!drag.didRecordHistory) {
+      recordCanvasHistory();
+      drag.didRecordHistory = true;
+    }
+    const dx = (event.clientX - drag.startClient.x) / zoomRef.current;
+    const dy = (event.clientY - drag.startClient.y) / zoomRef.current;
+    setElements((previous) =>
+      previous.map((element, index) =>
+        index === drag.index && element.kind === "calculator"
+          ? {
+              ...element,
+              point: { x: drag.startPoint.x + dx, y: drag.startPoint.y + dy },
+            }
+          : element
+      )
+    );
+  };
+
+  const endCalculatorDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    calculatorDragRef.current = null;
+  };
+
+  const setCalculatorExpression = (index: number, expression: string) => {
+    setElements((previous) =>
+      previous.map((element, elementIndex) =>
+        elementIndex === index && element.kind === "calculator"
+          ? { ...element, expression: expression.slice(0, 80) }
+          : element
+      )
+    );
+  };
 
   const importImageFiles = async (files: File[]) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
@@ -7620,6 +8246,410 @@ export default function Page() {
           userSelect: "none",
         }}
       />
+
+      {!showBoardsMenu &&
+        elements.map((element, index) => {
+          if (element.kind !== "converter") return null;
+          const option =
+            converterOptions.find((item) => item.value === element.converter) ??
+            converterOptions[0];
+          const result = convertBoardValue(element.converter, element.value);
+          return (
+            <section
+              key={`converter-${index}`}
+              aria-label={t("Unit converter", "Przelicznik jednostek")}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              style={{
+                position: "fixed",
+                left: `${element.point.x * zoom + offset.x}px`,
+                top: `${element.point.y * zoom + offset.y + topBarHeight}px`,
+                width: `${element.width}px`,
+                minHeight: `${element.height}px`,
+                boxSizing: "border-box",
+                padding: "12px",
+                borderRadius: "18px",
+                border: "1px solid rgba(124,58,237,0.24)",
+                background: "rgba(255,255,255,0.98)",
+                color: "#0f172a",
+                boxShadow: "0 12px 32px rgba(15,23,42,0.16)",
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left",
+                zIndex: 11,
+                display: "grid",
+                gap: "8px",
+                fontFamily: appSansFontFamily,
+              }}
+            >
+              <div
+                onPointerDown={(event) => beginConverterDrag(event, index, element)}
+                onPointerMove={moveConverter}
+                onPointerUp={endConverterDrag}
+                onPointerCancel={endConverterDrag}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "8px",
+                  cursor: "grab",
+                  touchAction: "none",
+                }}
+              >
+                <strong style={{ fontSize: "14px" }}>
+                  {t("Unit converter", "Przelicznik jednostek")}
+                </strong>
+                <button
+                  type="button"
+                  aria-label={t("Remove converter", "Usuń przelicznik")}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    recordCanvasHistory();
+                    setElements((previous) =>
+                      previous.filter((_, elementIndex) => elementIndex !== index)
+                    );
+                  }}
+                  style={{
+                    width: "22px",
+                    height: "22px",
+                    border: "none",
+                    borderRadius: "7px",
+                    background: "#f1f5f9",
+                    color: "#64748b",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                    padding: 0,
+                  }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <select
+                value={element.converter}
+                aria-label={t("Conversion type", "Typ przeliczenia")}
+                onChange={(event) =>
+                  updateConverterObject(index, {
+                    converter: event.currentTarget.value as ConverterKind,
+                  })
+                }
+                style={{
+                  width: "100%",
+                  height: "30px",
+                  borderRadius: "8px",
+                  border: "1px solid #ddd6fe",
+                  background: "#fafafa",
+                  color: "#334155",
+                  padding: "0 8px",
+                  fontSize: "11px",
+                  outline: "none",
+                }}
+              >
+                {converterOptions.map((item) => (
+                  <option key={item.value} value={item.value}>
+                    {item.label}
+                  </option>
+                ))}
+              </select>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "6px" }}>
+                <input
+                  type="number"
+                  value={element.value}
+                  aria-label={t("Value to convert", "Wartość do przeliczenia")}
+                  onChange={(event) =>
+                    updateConverterObject(index, {
+                      value: Number(event.currentTarget.value),
+                    })
+                  }
+                  style={{
+                    minWidth: 0,
+                    height: "30px",
+                    boxSizing: "border-box",
+                    borderRadius: "8px",
+                    border: "1px solid #ddd6fe",
+                    background: "#f5f3ff",
+                    color: "#5b21b6",
+                    padding: "0 9px",
+                    fontWeight: 700,
+                    outline: "none",
+                  }}
+                />
+                <span style={{ alignSelf: "center", color: "#6d28d9", fontSize: "12px", fontWeight: 750 }}>
+                  {option.inputUnit}
+                </span>
+              </div>
+              <output
+                style={{
+                  minHeight: "30px",
+                  borderRadius: "8px",
+                  background: "#e0f2fe",
+                  color: "#075985",
+                  display: "flex",
+                  alignItems: "center",
+                  padding: "0 10px",
+                  fontSize: "13px",
+                  fontWeight: 800,
+                }}
+              >
+                {formatConvertedValue(result)} {option.outputUnit}
+              </output>
+            </section>
+          );
+        })}
+
+      {!showBoardsMenu &&
+        elements.map((element, index) => {
+          if (element.kind !== "calculator") return null;
+          const result = calculateExpression(element.expression);
+          const keys = ["C", "(", ")", "÷", "7", "8", "9", "×", "4", "5", "6", "-", "1", "2", "3", "+", "⌫", "0", ".", "="];
+          return (
+            <section
+              key={`calculator-${index}`}
+              aria-label={t("Calculator", "Kalkulator")}
+              onPointerDown={(event) => event.stopPropagation()}
+              onMouseDown={(event) => event.stopPropagation()}
+              style={{
+                position: "fixed",
+                left: `${element.point.x * zoom + offset.x}px`,
+                top: `${element.point.y * zoom + offset.y + topBarHeight}px`,
+                width: `${element.width}px`,
+                minHeight: `${element.height}px`,
+                boxSizing: "border-box",
+                padding: "12px",
+                borderRadius: "18px",
+                border: "1px solid rgba(75,143,255,0.24)",
+                background: "rgba(255,255,255,0.98)",
+                color: "#0f172a",
+                boxShadow: "0 12px 32px rgba(15,23,42,0.16)",
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left",
+                zIndex: 11,
+                display: "grid",
+                gap: "9px",
+                fontFamily: appSansFontFamily,
+              }}
+            >
+              <div
+                onPointerDown={(event) => beginCalculatorDrag(event, index, element)}
+                onPointerMove={moveCalculator}
+                onPointerUp={endCalculatorDrag}
+                onPointerCancel={endCalculatorDrag}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "grab", touchAction: "none" }}
+              >
+                <strong style={{ fontSize: "14px" }}>{t("Calculator", "Kalkulator")}</strong>
+                <button
+                  type="button"
+                  aria-label={t("Remove calculator", "Usuń kalkulator")}
+                  onPointerDown={(event) => event.stopPropagation()}
+                  onClick={() => {
+                    recordCanvasHistory();
+                    setElements((previous) => previous.filter((_, elementIndex) => elementIndex !== index));
+                  }}
+                  style={{ width: "22px", height: "22px", border: "none", borderRadius: "7px", background: "#f1f5f9", color: "#64748b", display: "grid", placeItems: "center", cursor: "pointer", padding: 0 }}
+                >
+                  <X size={13} />
+                </button>
+              </div>
+              <div style={{ minHeight: "58px", borderRadius: "11px", background: "#f8fafc", padding: "8px 10px", display: "grid", justifyItems: "end", alignContent: "center", gap: "4px", overflow: "hidden" }}>
+                <span style={{ width: "100%", color: "#64748b", fontSize: "12px", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{element.expression || "0"}</span>
+                <strong style={{ fontSize: "19px", letterSpacing: "-0.02em" }}>{result === null ? "—" : formatConvertedValue(result)}</strong>
+              </div>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
+                {keys.map((key) => (
+                  <button
+                    key={key}
+                    type="button"
+                    onClick={() => {
+                      recordCanvasHistory();
+                      if (key === "C") setCalculatorExpression(index, "");
+                      else if (key === "⌫") setCalculatorExpression(index, element.expression.slice(0, -1));
+                      else if (key === "=") {
+                        if (result !== null) setCalculatorExpression(index, String(result));
+                      } else setCalculatorExpression(index, element.expression + key);
+                    }}
+                    style={{
+                      height: "31px",
+                      border: "none",
+                      borderRadius: "8px",
+                      background: ["÷", "×", "-", "+", "="].includes(key) ? "#ede9fe" : key === "C" ? "#fee2e2" : "#f1f5f9",
+                      color: key === "C" ? "#b91c1c" : ["÷", "×", "-", "+", "="].includes(key) ? "#6d28d9" : "#334155",
+                      fontSize: "13px",
+                      fontWeight: 750,
+                      cursor: "pointer",
+                    }}
+                  >
+                    {key}
+                  </button>
+                ))}
+              </div>
+            </section>
+          );
+        })}
+
+      {showPersonalLayer && activeBoardId && currentAccountId && (
+        <aside
+          aria-label={t("Personal writing layer", "Prywatna warstwa tekstowa")}
+          onPointerDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => event.stopPropagation()}
+          style={{
+            position: "fixed",
+            top: `${topBarHeight + 14}px`,
+            right: "14px",
+            bottom: "14px",
+            width: "min(470px, calc(100vw - 28px))",
+            boxSizing: "border-box",
+            borderRadius: "22px",
+            border: "1px solid rgba(148,163,184,0.3)",
+            background: "#fffefb",
+            color: "#172033",
+            boxShadow: "0 24px 70px rgba(15,23,42,0.2)",
+            zIndex: 35,
+            display: "grid",
+            gridTemplateRows: "auto auto minmax(0, 1fr) auto",
+            overflow: "hidden",
+            fontFamily: appSansFontFamily,
+          }}
+        >
+          <header
+            style={{
+              padding: "16px 18px 13px",
+              borderBottom: "1px solid #e5e7eb",
+              display: "flex",
+              alignItems: "center",
+              gap: "11px",
+              background: "rgba(255,255,255,0.92)",
+            }}
+          >
+            <span
+              aria-hidden="true"
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "11px",
+                background: "linear-gradient(135deg, rgba(139,70,255,0.12), rgba(25,195,188,0.12))",
+                color: "#6d4df4",
+                display: "grid",
+                placeItems: "center",
+                flex: "0 0 auto",
+              }}
+            >
+              <BookOpenText size={18} />
+            </span>
+            <div style={{ minWidth: 0, flex: 1, display: "grid", gap: "3px" }}>
+              <strong style={{ fontSize: "15px" }}>{t("My Layer", "Moja warstwa")}</strong>
+              <span style={{ color: "#64748b", fontSize: "11px" }}>
+                {t("Private to you on this board", "Prywatna tylko dla Ciebie na tej tablicy")}
+              </span>
+            </div>
+            <span style={{ color: personalNoteSaveState === "error" ? "#b91c1c" : "#64748b", fontSize: "10px", fontWeight: 700 }}>
+              {personalNoteSaveState === "loading"
+                ? t("Loading…", "Ładowanie…")
+                : personalNoteSaveState === "saving"
+                  ? t("Saving…", "Zapisywanie…")
+                  : personalNoteSaveState === "error"
+                    ? t("Not saved", "Nie zapisano")
+                    : t("Private · Saved", "Prywatne · Zapisano")}
+            </span>
+            <button
+              type="button"
+              aria-label={t("Close personal layer", "Zamknij warstwę prywatną")}
+              onClick={() => setShowPersonalLayer(false)}
+              style={{ width: "30px", height: "30px", border: "none", borderRadius: "9px", background: "#f1f5f9", color: "#475569", display: "grid", placeItems: "center", padding: 0, cursor: "pointer" }}
+            >
+              <X size={15} />
+            </button>
+          </header>
+          <input
+            value={personalNoteTitle}
+            maxLength={120}
+            disabled={personalNoteSaveState === "loading"}
+            aria-label={t("Private document title", "Tytuł prywatnego dokumentu")}
+            onChange={(event) => setPersonalNoteTitle(event.currentTarget.value)}
+            placeholder={t("Untitled private document", "Prywatny dokument bez tytułu")}
+            style={{
+              margin: "18px 28px 8px",
+              border: "none",
+              outline: "none",
+              background: "transparent",
+              color: "#111827",
+              fontFamily: "Georgia, 'Times New Roman', serif",
+              fontSize: "25px",
+              fontWeight: 700,
+              letterSpacing: "-0.025em",
+            }}
+          />
+          <textarea
+            ref={personalNoteRef}
+            value={personalNoteContent}
+            maxLength={100000}
+            disabled={personalNoteSaveState === "loading"}
+            aria-label={t("Private document", "Prywatny dokument")}
+            onChange={(event) => setPersonalNoteContent(event.currentTarget.value)}
+            placeholder={t(
+              "Write privately here. Draft an answer, analyze the board, or prepare feedback…",
+              "Pisz tutaj prywatnie. Przygotuj odpowiedź, przeanalizuj tablicę lub opracuj feedback…"
+            )}
+            style={{
+              width: "auto",
+              minHeight: 0,
+              resize: "none",
+              margin: "0 18px 14px",
+              padding: "11px 18px 40px 42px",
+              boxSizing: "border-box",
+              border: "1px solid #eee9df",
+              borderRadius: "14px",
+              outline: "none",
+              backgroundColor: "#fffefb",
+              backgroundImage:
+                "linear-gradient(90deg, transparent 0, transparent 27px, rgba(248,113,113,0.2) 28px, transparent 29px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(148,163,184,0.18) 28px, transparent 29px)",
+              backgroundPosition: "0 10px",
+              color: "#263246",
+              fontFamily: "Georgia, 'Times New Roman', serif",
+              fontSize: "16px",
+              lineHeight: "29px",
+              caretColor: "#6d28d9",
+            }}
+          />
+          <footer
+            style={{
+              padding: "12px 18px",
+              borderTop: "1px solid #e5e7eb",
+              background: "rgba(255,255,255,0.94)",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "12px",
+            }}
+          >
+            <span style={{ color: "#64748b", fontSize: "11px", lineHeight: 1.35 }}>
+              {t("Select text, then publish only that part.", "Zaznacz tekst i opublikuj tylko wybrany fragment.")}
+            </span>
+            <button
+              type="button"
+              onClick={publishPersonalNoteSelection}
+              style={{
+                minWidth: "148px",
+                height: "38px",
+                padding: "0 14px",
+                border: "none",
+                borderRadius: "11px",
+                background: signatureIndigoGradient,
+                color: "#ffffff",
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "7px",
+                fontSize: "12px",
+                fontWeight: 800,
+                cursor: "pointer",
+                boxShadow: "0 8px 20px rgba(91,33,182,0.18)",
+              }}
+            >
+              <Send size={14} />
+              {t("Publish to Shared", "Opublikuj we wspólnej")}
+            </button>
+          </footer>
+        </aside>
+      )}
 
       {selectedImageIndex !== null && (() => {
         const selectedImage = elements[selectedImageIndex];
@@ -14809,6 +15839,62 @@ export default function Page() {
                   : t("Retry", "Spróbuj ponownie")}
               </button>
             )}
+
+            <span
+              aria-hidden="true"
+              style={{
+                width: "1px",
+                height: "18px",
+                margin: "0 2px",
+                background: "rgba(255,255,255,0.28)",
+              }}
+            />
+            <button
+              type="button"
+              aria-label={t("Undo last change", "Cofnij ostatnią zmianę")}
+              title={t("Undo", "Cofnij")}
+              disabled={undoDepth === 0}
+              onClick={undoCanvasChange}
+              style={{
+                width: "28px",
+                height: "28px",
+                padding: 0,
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                cursor: undoDepth > 0 ? "pointer" : "default",
+                opacity: undoDepth > 0 ? 0.96 : 0.38,
+                transition: "background 0.18s ease, opacity 0.18s ease",
+              }}
+            >
+              <Undo2 size={17} strokeWidth={2.2} />
+            </button>
+            <button
+              type="button"
+              aria-label={t("Redo last change", "Ponów ostatnią zmianę")}
+              title={t("Redo", "Ponów")}
+              disabled={redoDepth === 0}
+              onClick={redoCanvasChange}
+              style={{
+                width: "28px",
+                height: "28px",
+                padding: 0,
+                borderRadius: "8px",
+                border: "none",
+                background: "transparent",
+                color: "#ffffff",
+                display: "grid",
+                placeItems: "center",
+                cursor: redoDepth > 0 ? "pointer" : "default",
+                opacity: redoDepth > 0 ? 0.96 : 0.38,
+                transition: "background 0.18s ease, opacity 0.18s ease",
+              }}
+            >
+              <Redo2 size={17} strokeWidth={2.2} />
+            </button>
           </div>
         )}
 
@@ -15923,26 +17009,23 @@ export default function Page() {
           style={{
             position: "absolute",
             top: "50%",
-            right: "-15px",
-            width: "26px",
-            height: "48px",
+            right: "-31px",
+            width: "25px",
+            height: "34px",
             transform: "translateY(-50%)",
-            borderTop: `1px solid ${panelBorderColor}`,
-            borderRight: `1px solid ${panelBorderColor}`,
-            borderBottom: `1px solid ${panelBorderColor}`,
-            borderLeftWidth: 0,
-            borderRadius: "0 11px 11px 0",
+            border: `1px solid ${panelBorderColor}`,
+            borderRadius: "9px",
             background: toolbarBackground,
             color: panelTextColor,
             display: "grid",
             placeItems: "center",
             padding: 0,
             cursor: "pointer",
-            boxShadow: "5px 6px 14px rgba(0,0,0,0.1)",
-            zIndex: -1,
+            boxShadow: "0 5px 14px rgba(15,23,42,0.12)",
+            zIndex: 1,
           }}
         >
-          <ChevronLeft size={17} />
+          <ChevronLeft size={15} strokeWidth={2.1} />
         </button>
 
         <input
@@ -15959,52 +17042,6 @@ export default function Page() {
           }}
           style={{ display: "none" }}
         />
-
-        <button
-          type="button"
-          aria-label={t("Undo last change", "Cofnij ostatnią zmianę")}
-          title={t("Undo", "Cofnij")}
-          disabled={undoDepth === 0}
-          onClick={undoCanvasChange}
-          style={{
-            width: "38px",
-            height: "38px",
-            borderRadius: "8px",
-            border: "none",
-            background: inactiveToolBackground,
-            color: panelTextColor,
-            display: "grid",
-            placeItems: "center",
-            cursor: undoDepth > 0 ? "pointer" : "default",
-            opacity: undoDepth > 0 ? 1 : 0.3,
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Undo2 size={19} strokeWidth={2.1} />
-        </button>
-
-        <button
-          type="button"
-          aria-label={t("Redo last change", "Ponów ostatnią zmianę")}
-          title={t("Redo", "Ponów")}
-          disabled={redoDepth === 0}
-          onClick={redoCanvasChange}
-          style={{
-            width: "38px",
-            height: "38px",
-            borderRadius: "8px",
-            border: "none",
-            background: inactiveToolBackground,
-            color: panelTextColor,
-            display: "grid",
-            placeItems: "center",
-            cursor: redoDepth > 0 ? "pointer" : "default",
-            opacity: redoDepth > 0 ? 1 : 0.3,
-            transition: "all 0.2s ease",
-          }}
-        >
-          <Redo2 size={19} strokeWidth={2.1} />
-        </button>
 
         <button
           aria-label={t("Upload files", "Prześlij pliki")}
@@ -16462,6 +17499,8 @@ export default function Page() {
 
         <button
           onClick={clearCanvas}
+          aria-label={t("Clear board", "Wyczyść tablicę")}
+          title={t("Clear board", "Wyczyść tablicę")}
           style={{
             width: "38px",
             height: "38px",
@@ -16479,7 +17518,286 @@ export default function Page() {
           <Trash2 size={17} />
         </button>
 
-        <div style={{ position: "relative" }}>
+        <button
+          type="button"
+          aria-expanded={showSpecialTools}
+          aria-label={
+            showSpecialTools
+              ? t("Hide special tools", "Ukryj narzędzia specjalne")
+              : t("Show special tools", "Pokaż narzędzia specjalne")
+          }
+          title={t("Special tools", "Narzędzia specjalne")}
+          onClick={() =>
+            setShowSpecialTools((previous) => {
+              if (previous) setShowBrainstormMenu(false);
+              return !previous;
+            })
+          }
+          style={{
+            width: "38px",
+            height: "24px",
+            borderRadius: "7px",
+            border: "none",
+            background: showSpecialTools
+              ? "rgba(124,58,237,0.14)"
+              : inactiveToolBackground,
+            color: showSpecialTools ? "#7c3aed" : panelTextColor,
+            display: "grid",
+            placeItems: "center",
+            padding: 0,
+            cursor: "pointer",
+            transition: "background 0.2s ease, color 0.2s ease",
+          }}
+        >
+          {showSpecialTools ? (
+            <ChevronUp size={16} strokeWidth={2.2} />
+          ) : (
+            <ChevronDown size={16} strokeWidth={2.2} />
+          )}
+        </button>
+
+        {showSpecialTools && (
+          <div
+            aria-label={t("Special tools", "Narzędzia specjalne")}
+            style={{
+              position: "absolute",
+              top: "calc(100% + 8px)",
+              left: 0,
+              width: "50px",
+              minHeight: "186px",
+              boxSizing: "border-box",
+              padding: "9px 6px",
+              borderRadius: "11px",
+              border: isInterfaceDarkMode
+                ? "1px solid rgba(255,255,255,0.08)"
+                : "1px solid rgba(148,163,184,0.18)",
+              background: toolbarBackground,
+              backdropFilter: "blur(10px)",
+              boxShadow: "0 10px 26px rgba(15,23,42,0.16)",
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              gap: "8px",
+            }}
+          >
+            <button
+              type="button"
+              aria-expanded={showBrainstormMenu}
+              aria-label={t("Brainstorm tools", "Narzędzia burzy mózgów")}
+              title={t("Brainstorm tools", "Narzędzia burzy mózgów")}
+              onClick={() => setShowBrainstormMenu((previous) => !previous)}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(75,143,255,0.2)",
+                background: showBrainstormMenu
+                  ? "rgba(124,58,237,0.14)"
+                  : "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" shapeRendering="geometricPrecision">
+                <defs>
+                  <linearGradient id="scriboo-brainstorm-gradient" x1="3" y1="3" x2="21" y2="21" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.48" stopColor="#4b8fff" />
+                    <stop offset="0.78" stopColor="#19c3bc" />
+                    <stop offset="1" stopColor="#30cf68" />
+                  </linearGradient>
+                </defs>
+                <path d="M7.45 14.15a6.1 6.1 0 1 1 9.1 0c-.95.78-1.35 1.55-1.48 2.35H8.93c-.13-.8-.53-1.57-1.48-2.35Z" stroke="url(#scriboo-brainstorm-gradient)" strokeWidth="2.05" strokeLinecap="round" strokeLinejoin="round" />
+                <path d="M9.05 16.5h5.9a1 1 0 0 1 1 1v1.55a1 1 0 0 1-1 1h-5.9a1 1 0 0 1-1-1V17.5a1 1 0 0 1 1-1Z" stroke="url(#scriboo-brainstorm-gradient)" strokeWidth="2.05" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              aria-label={t("Add unit converter", "Dodaj przelicznik jednostek")}
+              title={t("Unit converter", "Przelicznik jednostek")}
+              onClick={insertConverterObject}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(75,143,255,0.2)",
+                background: "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" shapeRendering="geometricPrecision">
+                <defs>
+                  <linearGradient id="scriboo-converter-icon-gradient" x1="3" y1="4" x2="21" y2="20" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.48" stopColor="#4b8fff" />
+                    <stop offset="0.78" stopColor="#19c3bc" />
+                    <stop offset="1" stopColor="#30cf68" />
+                  </linearGradient>
+                </defs>
+                <path d="M5 8h13.5M15.5 5l3 3-3 3M19 16H5.5M8.5 13l-3 3 3 3" stroke="url(#scriboo-converter-icon-gradient)" strokeWidth="2.05" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              aria-label={t("Add calculator", "Dodaj kalkulator")}
+              title={t("Calculator", "Kalkulator")}
+              onClick={insertCalculatorObject}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(75,143,255,0.2)",
+                background: "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" shapeRendering="geometricPrecision">
+                <defs>
+                  <linearGradient id="scriboo-calculator-icon-gradient" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.48" stopColor="#4b8fff" />
+                    <stop offset="0.78" stopColor="#19c3bc" />
+                    <stop offset="1" stopColor="#30cf68" />
+                  </linearGradient>
+                </defs>
+                <rect x="5" y="3.5" width="14" height="17" rx="2.5" stroke="url(#scriboo-calculator-icon-gradient)" strokeWidth="2" />
+                <path d="M8 7h8M8.5 11.5h.01M12 11.5h.01M15.5 11.5h.01M8.5 15h.01M12 15h.01M15.5 15h.01M8.5 18h.01M12 18h3.5" stroke="url(#scriboo-calculator-icon-gradient)" strokeWidth="2.1" strokeLinecap="round" />
+              </svg>
+            </button>
+
+            <button
+              type="button"
+              aria-label={t("Open personal layer", "Otwórz warstwę prywatną")}
+              title={t("Personal writing layer", "Prywatna warstwa tekstowa")}
+              onClick={() => setShowPersonalLayer(true)}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(75,143,255,0.2)",
+                background: showPersonalLayer
+                  ? "rgba(124,58,237,0.14)"
+                  : "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="23" height="23" viewBox="0 0 24 24" fill="none" shapeRendering="geometricPrecision">
+                <defs>
+                  <linearGradient id="scriboo-personal-layer-gradient" x1="4" y1="3" x2="20" y2="21" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.48" stopColor="#4b8fff" />
+                    <stop offset="0.78" stopColor="#19c3bc" />
+                    <stop offset="1" stopColor="#30cf68" />
+                  </linearGradient>
+                </defs>
+                <path d="M6 4.5h9.5L19 8v11.5H6V4.5Z" stroke="url(#scriboo-personal-layer-gradient)" strokeWidth="1.9" strokeLinejoin="round" />
+                <path d="M15.5 4.5V8H19M9 11h7M9 14h7M9 17h4.5" stroke="url(#scriboo-personal-layer-gradient)" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </button>
+
+            {showBrainstormMenu && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: "50%",
+                  left: "54px",
+                  transform: "translateY(-50%)",
+                  display: "flex",
+                  gap: "8px",
+                  padding: "8px",
+                  borderRadius: "11px",
+                  border: isInterfaceDarkMode
+                    ? "1px solid rgba(255,255,255,0.08)"
+                    : "1px solid rgba(148,163,184,0.18)",
+                  background: popoverBackground,
+                  boxShadow: "0 10px 26px rgba(15,23,42,0.18)",
+                }}
+              >
+            <button
+              type="button"
+              aria-label={t("Mind-map oval", "Owal mapy myśli")}
+              title={t("Mind-map oval", "Owal mapy myśli")}
+              onClick={() => selectShapeTool("oval")}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(124,58,237,0.14)",
+                background:
+                  tool === "oval"
+                    ? "rgba(124,58,237,0.14)"
+                    : "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="24" height="20" viewBox="0 0 24 20" fill="none">
+                <defs>
+                  <linearGradient id="scriboo-mind-node-gradient" x1="2" y1="3" x2="22" y2="17" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.48" stopColor="#4b8fff" />
+                    <stop offset="0.78" stopColor="#19c3bc" />
+                    <stop offset="1" stopColor="#30cf68" />
+                  </linearGradient>
+                </defs>
+                <ellipse cx="12" cy="10" rx="9" ry="5.5" stroke="url(#scriboo-mind-node-gradient)" strokeWidth="1.8" />
+              </svg>
+            </button>
+            <button
+              type="button"
+              aria-label={t("Mind-map connector", "Łącznik mapy myśli")}
+              title={t("Mind-map connector", "Łącznik mapy myśli")}
+              onClick={() => selectShapeTool("curve")}
+              style={{
+                width: "36px",
+                height: "36px",
+                borderRadius: "9px",
+                border: "1px solid rgba(75,143,255,0.14)",
+                background:
+                  tool === "curve"
+                    ? "rgba(75,143,255,0.14)"
+                    : "rgba(255,255,255,0.06)",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              <svg aria-hidden="true" width="24" height="20" viewBox="0 0 24 20" fill="none">
+                <defs>
+                  <linearGradient id="scriboo-mind-curve-gradient" x1="3" y1="4" x2="21" y2="16" gradientUnits="userSpaceOnUse">
+                    <stop stopColor="#8b46ff" />
+                    <stop offset="0.5" stopColor="#4b8fff" />
+                    <stop offset="1" stopColor="#19c3bc" />
+                  </linearGradient>
+                </defs>
+                <path d="M3 5C8 5 9 15 14 15s5-7 7-7" stroke="url(#scriboo-mind-curve-gradient)" strokeWidth="1.8" strokeLinecap="round" />
+              </svg>
+            </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        <div
+          aria-hidden="true"
+          style={{ position: "relative", display: "none" }}
+        >
           <button
             onClick={() => {
               setShowShapesMenu((prev) => !prev);
@@ -16493,18 +17811,58 @@ export default function Page() {
               borderRadius: "8px",
               border: "none",
               background: ["circle", "square", "triangle", "arrow", "line"].includes(tool)
-                ? "#7c3aed"
+                ? "rgba(124,58,237,0.14)"
                 : inactiveToolBackground,
-              color: ["circle", "square", "triangle", "arrow", "line"].includes(tool)
-                ? "#fff"
-                : panelTextColor,
+              color: panelTextColor,
               display: "flex",
               alignItems: "center",
               justifyContent: "center",
               cursor: "pointer",
             }}
           >
-            <Shapes size={17} />
+            <svg
+              aria-hidden="true"
+              width="23"
+              height="23"
+              viewBox="0 0 24 24"
+              fill="none"
+            >
+              <defs>
+                <linearGradient
+                  id="scriboo-brain-gradient"
+                  x1="2"
+                  y1="3"
+                  x2="22"
+                  y2="21"
+                  gradientUnits="userSpaceOnUse"
+                >
+                  <stop stopColor="#8b46ff" />
+                  <stop offset="0.48" stopColor="#4b8fff" />
+                  <stop offset="0.78" stopColor="#19c3bc" />
+                  <stop offset="1" stopColor="#30cf68" />
+                </linearGradient>
+              </defs>
+              <path
+                d="M7.45 14.15a6.1 6.1 0 1 1 9.1 0c-.95.78-1.35 1.55-1.48 2.35H8.93c-.13-.8-.53-1.57-1.48-2.35Z"
+                stroke="url(#scriboo-brain-gradient)"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M9.05 16.5h5.9a1 1 0 0 1 1 1v1.55a1 1 0 0 1-1 1h-5.9a1 1 0 0 1-1-1V17.5a1 1 0 0 1 1-1Z"
+                stroke="url(#scriboo-brain-gradient)"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+              <path
+                d="M12 1.8v1.35M4.8 4.8l.95.95M2 11h1.4M19.2 4.8l-.95.95M22 11h-1.4"
+                stroke="url(#scriboo-brain-gradient)"
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              />
+            </svg>
           </button>
 
           {showShapesMenu && (
