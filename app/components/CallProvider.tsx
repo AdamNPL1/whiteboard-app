@@ -23,6 +23,7 @@ import {
 
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
+import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
 
 type BoardContext = { id: string; name: string };
 type CallParticipant = {
@@ -193,6 +194,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const turnRefreshRef = useRef<number | null>(null);
   const connectionRetryRef = useRef<number | null>(null);
   const connectionTimeoutRef = useRef<number | null>(null);
+  const callStatsIntervalRef = useRef<number | null>(null);
   const reconnectAttemptsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
@@ -209,6 +211,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [call]);
   useEffect(() => {
     phaseRef.current = phase;
+    reportRealtimeDiagnostics({ callStage: phase });
   }, [phase]);
 
   const stopCallPoll = useCallback(() => {
@@ -366,6 +369,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
     }
+    if (callStatsIntervalRef.current !== null) {
+      window.clearInterval(callStatsIntervalRef.current);
+      callStatsIntervalRef.current = null;
+    }
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
     queuedCandidatesRef.current = [];
@@ -501,6 +508,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       sentAt: Date.now(),
       data,
     };
+    reportRealtimeDiagnostics({ callStage: `sending ${data.kind}`, error: "" });
     await channel.send({ type: "broadcast", event: "signal", payload: envelope });
   }, []);
 
@@ -549,6 +557,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         10_000
       );
       channel.subscribe((status, error) => {
+        reportRealtimeDiagnostics({
+          callStage: `signaling ${status.toLowerCase()}`,
+          error: error?.message ?? "",
+        });
         if (status === "SUBSCRIBED") {
           window.clearTimeout(timeout);
           resolve();
@@ -605,6 +617,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }>(`/api/calls/${activeCall.id}/turn-credentials`, { method: "POST" });
       const connection = new RTCPeerConnection({ iceServers: credentials.iceServers });
       peerConnectionRef.current = connection;
+      reportRealtimeDiagnostics({
+        callStage: callerCreatesOffer ? "creating caller connection" : "creating recipient connection",
+        signalingState: connection.signalingState,
+        iceState: connection.iceConnectionState,
+        connectionState: connection.connectionState,
+        reconnectAttempts: reconnectAttemptsRef.current,
+        error: "",
+      });
       stream.getTracks().forEach((track) => connection.addTrack(track, stream));
       const videoTransceiver = connection.addTransceiver("video", {
         direction: "recvonly",
@@ -654,6 +674,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.connectionState);
+        reportRealtimeDiagnostics({
+          connectionState: connection.connectionState,
+          signalingState: connection.signalingState,
+          iceState: connection.iceConnectionState,
+          reconnectAttempts: reconnectAttemptsRef.current,
+        });
         if (connection.connectionState === "connected") {
           if (connectionRetryRef.current !== null) {
             window.clearTimeout(connectionRetryRef.current);
@@ -673,6 +699,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             reconnectAttemptsRef.current < 2
           ) {
             reconnectAttemptsRef.current += 1;
+            reportRealtimeDiagnostics({ reconnectAttempts: reconnectAttemptsRef.current });
             void (async () => {
               const offer = await connection.createOffer({ iceRestart: true });
               await connection.setLocalDescription(offer);
@@ -692,7 +719,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       connection.oniceconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(connection.iceConnectionState);
+        reportRealtimeDiagnostics({
+          iceState: connection.iceConnectionState,
+          connectionState: connection.connectionState,
+        });
       };
+
+      connection.onsignalingstatechange = () => {
+        reportRealtimeDiagnostics({ signalingState: connection.signalingState });
+      };
+
+      if (callStatsIntervalRef.current !== null) {
+        window.clearInterval(callStatsIntervalRef.current);
+      }
+      const collectCallStats = async () => {
+        const reports = await connection.getStats();
+        let packetsSent = 0;
+        let packetsReceived = 0;
+        let route = "unknown";
+        reports.forEach((report) => {
+          if (report.type === "outbound-rtp" && report.kind === "audio") {
+            packetsSent += Number(report.packetsSent) || 0;
+          }
+          if (report.type === "inbound-rtp" && report.kind === "audio") {
+            packetsReceived += Number(report.packetsReceived) || 0;
+          }
+          if (
+            report.type === "candidate-pair" &&
+            report.state === "succeeded" &&
+            (report.nominated || report.selected)
+          ) {
+            const local = reports.get(report.localCandidateId);
+            const remote = reports.get(report.remoteCandidateId);
+            route =
+              local?.candidateType === "relay" || remote?.candidateType === "relay"
+                ? "TURN relay"
+                : `${local?.candidateType ?? "unknown"} → ${remote?.candidateType ?? "unknown"}`;
+          }
+        });
+        reportRealtimeDiagnostics({
+          audioPacketsSent: packetsSent,
+          audioPacketsReceived: packetsReceived,
+          route,
+        });
+      };
+      void collectCallStats().catch(() => undefined);
+      callStatsIntervalRef.current = window.setInterval(
+        () => void collectCallStats().catch(() => undefined),
+        2_000
+      );
 
       const refreshIn = Math.max(
         60_000,
@@ -855,6 +930,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (seenSignalsRef.current.size > 500) seenSignalsRef.current.clear();
 
       const signal = payload.data;
+      reportRealtimeDiagnostics({ callStage: `received ${signal.kind}` });
       if (signal.kind === "accepted") {
         if (activeUser.id === activeCall.callerUserId) {
           setPhase("connecting");

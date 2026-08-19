@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { CallProvider } from "@/app/components/CallProvider";
+import RealtimeDiagnostics from "@/app/components/RealtimeDiagnostics";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
 
@@ -33,6 +34,7 @@ export default function RootLayout({
       <body className="min-h-full flex flex-col">
         <LanguageProvider>
           <CallProvider>{children}</CallProvider>
+          <RealtimeDiagnostics />
         </LanguageProvider>
       </body>
     </html>

@@ -67,6 +67,7 @@ import { useLanguage } from "@/lib/i18n";
 import { useCall } from "@/app/components/CallProvider";
 import TurnstileWidget from "@/app/components/TurnstileWidget";
 import SupportChatbot from "@/app/components/SupportChatbot";
+import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
 import {
   LIVE_STROKE_PROTOCOL_VERSION,
   MAX_LIVE_STROKE_BATCH_POINTS,
@@ -1113,6 +1114,7 @@ export default function Page() {
           boardId,
           updatedAt,
           senderId: boardRealtimeClientIdRef.current,
+          sentAt: Date.now(),
         },
       })
       .catch(() => undefined);
@@ -1131,7 +1133,11 @@ export default function Page() {
       const channel = boardRealtimeChannelRef.current;
       if (!channel || !boardRealtimeReadyRef.current) return;
       void channel
-        .send({ type: "broadcast", event, payload })
+        .send({
+          type: "broadcast",
+          event,
+          payload: { ...payload, sentAt: Date.now() },
+        })
         .catch(() => undefined);
     },
     []
@@ -4702,7 +4708,21 @@ export default function Page() {
         config: { private: true, broadcast: { ack: false, self: false } },
       });
       channel = nextChannel;
+      const reportBoardEvent = (event: string, payload: unknown) => {
+        const sentAt =
+          payload && typeof payload === "object" && "sentAt" in payload
+            ? Number((payload as { sentAt?: unknown }).sentAt)
+            : NaN;
+        reportRealtimeDiagnostics({
+          boardLastEvent: `${event} at ${new Date().toLocaleTimeString()}`,
+          boardLatencyMs: Number.isFinite(sentAt)
+            ? Math.max(0, Date.now() - sentAt)
+            : null,
+          error: "",
+        });
+      };
       nextChannel.on("broadcast", { event: "board-saved" }, ({ payload }) => {
+        reportBoardEvent("board-saved", payload);
         const message = payload as {
           boardId?: unknown;
           updatedAt?: unknown;
@@ -4720,6 +4740,7 @@ export default function Page() {
         );
       });
       nextChannel.on("broadcast", { event: "stroke-start" }, ({ payload }) => {
+        reportBoardEvent("stroke-start", payload);
         const message = parseLiveStrokeStart(payload);
         if (
           !message ||
@@ -4748,6 +4769,7 @@ export default function Page() {
         requestCanvasRedraw();
       });
       nextChannel.on("broadcast", { event: "stroke-points" }, ({ payload }) => {
+        reportBoardEvent("stroke-points", payload);
         const message = parseLiveStrokePoints(payload);
         if (
           !message ||
@@ -4768,6 +4790,7 @@ export default function Page() {
         requestCanvasRedraw();
       });
       nextChannel.on("broadcast", { event: "stroke-end" }, ({ payload }) => {
+        reportBoardEvent("stroke-end", payload);
         const message = parseLiveStrokePoints(payload, { final: true });
         if (
           !message ||
@@ -4788,6 +4811,13 @@ export default function Page() {
       nextChannel.subscribe((status) => {
         if (cancelled) return;
         boardRealtimeReadyRef.current = status === "SUBSCRIBED";
+        reportRealtimeDiagnostics({
+          boardStatus: status.toLowerCase(),
+          error:
+            status === "CHANNEL_ERROR" || status === "TIMED_OUT"
+              ? `Board realtime ${status.toLowerCase()}`
+              : "",
+        });
         if (status !== "SUBSCRIBED") return;
         const pending = pendingBoardRealtimeMessageRef.current;
         if (!pending || pending.boardId !== activeBoardId) return;
@@ -4796,7 +4826,13 @@ export default function Page() {
       });
       boardRealtimeChannelRef.current = nextChannel;
     })().catch(() => {
-      if (!cancelled) boardRealtimeReadyRef.current = false;
+      if (!cancelled) {
+        boardRealtimeReadyRef.current = false;
+        reportRealtimeDiagnostics({
+          boardStatus: "error",
+          error: "Board realtime authentication or subscription failed",
+        });
+      }
     });
 
     return () => {
@@ -6072,6 +6108,7 @@ export default function Page() {
       if (activeText?.editingIndex === index) {
         continue;
       }
+      reportRealtimeDiagnostics({ boardStatus: "closed" });
 
       if (element.kind === "converter") {
         drawConverterElement(ctx, element);
