@@ -1084,6 +1084,11 @@ export default function Page() {
   } | null>(null);
   const boardRealtimeClientIdRef = useRef(crypto.randomUUID());
   const remoteLiveStrokesRef = useRef<Map<string, RemoteLiveStroke>>(new Map());
+  const remoteLiveTextsRef = useRef<
+    Map<string, { element: TextElement; updatedAt: number }>
+  >(new Map());
+  const localLiveTextRef = useRef<{ id: string; boardId: string } | null>(null);
+  const localLiveTextCommittedRef = useRef(false);
   const localLiveStrokeRef = useRef<{
     strokeId: string;
     sequence: number;
@@ -1129,7 +1134,15 @@ export default function Page() {
   }, []);
 
   const sendLiveStrokeMessage = useCallback(
-    (event: "stroke-start" | "stroke-points" | "stroke-end", payload: object) => {
+    (
+      event:
+        | "stroke-start"
+        | "stroke-points"
+        | "stroke-end"
+        | "text-preview"
+        | "text-end",
+      payload: object
+    ) => {
       const channel = boardRealtimeChannelRef.current;
       if (!channel || !boardRealtimeReadyRef.current) return;
       void channel
@@ -1142,6 +1155,60 @@ export default function Page() {
     },
     []
   );
+
+  useEffect(() => {
+    if (!activeBoardId || !boardRealtimeReadyRef.current) return;
+
+    if (!activeText) {
+      const previous = localLiveTextRef.current;
+      if (previous) {
+        sendLiveStrokeMessage("text-end", {
+          version: 1,
+          boardId: previous.boardId,
+          senderId: boardRealtimeClientIdRef.current,
+          textId: previous.id,
+          committed: localLiveTextCommittedRef.current,
+        });
+        localLiveTextRef.current = null;
+        localLiveTextCommittedRef.current = false;
+      }
+      return;
+    }
+
+    if (!localLiveTextRef.current || localLiveTextRef.current.boardId !== activeBoardId) {
+      localLiveTextRef.current = { id: crypto.randomUUID(), boardId: activeBoardId };
+      localLiveTextCommittedRef.current = false;
+    }
+    const liveText = localLiveTextRef.current;
+    const timer = window.setTimeout(() => {
+      sendLiveStrokeMessage("text-preview", {
+        version: 1,
+        boardId: activeBoardId,
+        senderId: boardRealtimeClientIdRef.current,
+        textId: liveText.id,
+        element: {
+          kind: "text",
+          point: activeText.point,
+          value: activeText.value.slice(0, 20_000),
+          color: activeText.color,
+          runs: activeText.runs,
+          fontFamily: activeText.fontFamily,
+          fontWeight: activeText.fontWeight,
+          fontSize: activeText.fontSize,
+          fontStyle: activeText.fontStyle,
+          underline: activeText.underline,
+          textAlign: activeText.textAlign,
+          width: Math.max(1, activeText.width),
+          height: Math.max(1, activeText.height),
+          measurementSpace: "screen",
+          measurementZoom: zoomRef.current || activeTextZoomRef.current || 1,
+          backgroundColor: activeText.backgroundColor,
+        },
+      });
+    }, 50);
+
+    return () => window.clearTimeout(timer);
+  }, [activeBoardId, activeText, sendLiveStrokeMessage]);
   const keepTextBoxInViewportRef = useRef(
     (screenPoint: Point, width: number, height: number) => ({
       screenPoint,
@@ -1879,6 +1946,7 @@ export default function Page() {
     setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
     remoteLiveStrokesRef.current.clear();
+    remoteLiveTextsRef.current.clear();
     setIsDrawing(false);
     setShapeStart(null);
     setSnapshot(null);
@@ -4695,6 +4763,7 @@ export default function Page() {
 
     const supabase = getSupabaseBrowserClient();
     const remoteStrokes = remoteLiveStrokesRef.current;
+    const remoteTexts = remoteLiveTextsRef.current;
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
 
@@ -4808,6 +4877,68 @@ export default function Page() {
         remote.stroke.points = message.points;
         requestCanvasRedraw();
       });
+      nextChannel.on("broadcast", { event: "text-preview" }, ({ payload }) => {
+        reportBoardEvent("text-preview", payload);
+        if (!payload || typeof payload !== "object") return;
+        const message = payload as {
+          version?: unknown;
+          boardId?: unknown;
+          senderId?: unknown;
+          textId?: unknown;
+          element?: unknown;
+        };
+        if (
+          message.version !== 1 ||
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current ||
+          typeof message.senderId !== "string" ||
+          typeof message.textId !== "string" ||
+          !message.element ||
+          typeof message.element !== "object"
+        ) return;
+        const element = message.element as Partial<TextElement>;
+        if (
+          element.kind !== "text" ||
+          typeof element.value !== "string" ||
+          element.value.length > 20_000 ||
+          !element.point ||
+          !Number.isFinite(element.point.x) ||
+          !Number.isFinite(element.point.y) ||
+          typeof element.color !== "string" ||
+          typeof element.fontFamily !== "string" ||
+          typeof element.fontSize !== "number" ||
+          typeof element.width !== "number" ||
+          typeof element.height !== "number"
+        ) return;
+        remoteTexts.set(
+          `${message.senderId}:${message.textId}`,
+          { element: element as TextElement, updatedAt: Date.now() }
+        );
+        requestCanvasRedraw();
+      });
+      nextChannel.on("broadcast", { event: "text-end" }, ({ payload }) => {
+        reportBoardEvent("text-end", payload);
+        if (!payload || typeof payload !== "object") return;
+        const message = payload as {
+          boardId?: unknown;
+          senderId?: unknown;
+          textId?: unknown;
+          committed?: unknown;
+        };
+        if (
+          message.boardId !== activeBoardId ||
+          typeof message.senderId !== "string" ||
+          typeof message.textId !== "string"
+        ) return;
+        const key = `${message.senderId}:${message.textId}`;
+        if (message.committed === true) {
+          const remote = remoteTexts.get(key);
+          if (remote) remote.updatedAt = Date.now();
+        } else {
+          remoteTexts.delete(key);
+        }
+        requestCanvasRedraw();
+      });
       nextChannel.subscribe((status) => {
         if (cancelled) return;
         boardRealtimeReadyRef.current = status === "SUBSCRIBED";
@@ -4842,7 +4973,9 @@ export default function Page() {
         window.clearTimeout(local.flushTimer);
       }
       localLiveStrokeRef.current = null;
+      localLiveTextRef.current = null;
       remoteStrokes.clear();
+      remoteTexts.clear();
       requestCanvasRedraw();
       if (boardRealtimeChannelRef.current === channel) {
         boardRealtimeChannelRef.current = null;
@@ -4868,6 +5001,12 @@ export default function Page() {
         const maximumLifetime = remote.completedAt ? 12_000 : 30_000;
         if (lifetime > maximumLifetime) {
           remoteLiveStrokesRef.current.delete(key);
+          removed = true;
+        }
+      }
+      for (const [key, remote] of remoteLiveTextsRef.current) {
+        if (now - remote.updatedAt > 30_000) {
+          remoteLiveTextsRef.current.delete(key);
           removed = true;
         }
       }
@@ -6193,6 +6332,10 @@ export default function Page() {
       drawStrokePath(ctx, stroke.points, stroke.width, stroke.style);
     }
 
+    for (const remote of remoteLiveTextsRef.current.values()) {
+      drawTextElement(ctx, remote.element);
+    }
+
     if (selectionBox) {
       drawSelectedStrokeHighlights(ctx, selectionBox);
       drawSelectionBox(ctx, selectionBox);
@@ -7308,7 +7451,10 @@ export default function Page() {
   const commitActiveText = () => {
     if (!activeText) return;
 
-    if (activeText.value.length > 0 || activeText.backgroundColor) {
+    const shouldCommit = activeText.value.length > 0 || Boolean(activeText.backgroundColor);
+    localLiveTextCommittedRef.current = shouldCommit;
+
+    if (shouldCommit) {
       const safeScreenFontSize = clampTextFontSize(activeText.fontSize);
       const commitZoom = zoomRef.current || activeTextZoomRef.current || 1;
       const nextText: TextElement = {
