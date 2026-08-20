@@ -4939,14 +4939,26 @@ export default function Page() {
         }
         requestCanvasRedraw();
       });
-      nextChannel.subscribe((status) => {
+      nextChannel.subscribe((status, subscriptionError) => {
         if (cancelled) return;
         boardRealtimeReadyRef.current = status === "SUBSCRIBED";
+        const subscriptionErrorMessage = subscriptionError?.message?.trim();
+        if (subscriptionError) {
+          console.error("Scriboo board realtime subscription failed", {
+            status,
+            boardId: activeBoardId,
+            error: subscriptionError,
+          });
+        }
         reportRealtimeDiagnostics({
           boardStatus: status.toLowerCase(),
           error:
             status === "CHANNEL_ERROR" || status === "TIMED_OUT"
-              ? `Board realtime ${status.toLowerCase()}`
+              ? `Board realtime ${status.toLowerCase()}${
+                  subscriptionErrorMessage
+                    ? `: ${subscriptionErrorMessage}`
+                    : " (no server details returned)"
+                }`
               : "",
         });
         if (status !== "SUBSCRIBED") return;
@@ -4956,12 +4968,17 @@ export default function Page() {
         broadcastBoardSaved(pending.boardId, pending.updatedAt);
       });
       boardRealtimeChannelRef.current = nextChannel;
-    })().catch(() => {
+    })().catch((error: unknown) => {
       if (!cancelled) {
+        const message =
+          error instanceof Error && error.message.trim()
+            ? error.message.trim()
+            : "Unknown authentication error";
+        console.error("Scriboo board realtime setup failed", error);
         boardRealtimeReadyRef.current = false;
         reportRealtimeDiagnostics({
           boardStatus: "error",
-          error: "Board realtime authentication or subscription failed",
+          error: `Board realtime authentication failed: ${message}`,
         });
       }
     });
