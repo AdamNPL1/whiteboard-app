@@ -1101,8 +1101,25 @@ export default function Page() {
   const boardChangeVersionRef = useRef(0);
   const latestSaveAttemptRef = useRef(0);
   const hasUnsavedBoardChangesRef = useRef(false);
+  const pendingLocalBoardClearRef = useRef(false);
+  const latestBoardDocumentRef = useRef<BoardDocument>({
+    elements,
+    canvasBackground,
+    customCanvasBackground,
+    gridMode,
+    gridOpacity,
+    calendarEntries,
+  });
   const boardSaveQueueRef = useRef<Promise<void>>(Promise.resolve());
   const boardUpdatedAtRef = useRef<Record<string, string>>({});
+  latestBoardDocumentRef.current = {
+    elements,
+    canvasBackground,
+    customCanvasBackground,
+    gridMode,
+    gridOpacity,
+    calendarEntries,
+  };
 
   const broadcastBoardSaved = useCallback((boardId: string, updatedAt: string) => {
     const channel = boardRealtimeChannelRef.current;
@@ -1139,6 +1156,7 @@ export default function Page() {
         | "stroke-start"
         | "stroke-points"
         | "stroke-end"
+        | "board-cleared"
         | "text-preview"
         | "text-end",
       payload: object
@@ -1943,6 +1961,7 @@ export default function Page() {
   const applyBoardDocument = (document: BoardDocument) => {
     suppressBoardAutosaveUntilRef.current = Date.now() + 1200;
     hasUnsavedBoardChangesRef.current = false;
+    pendingLocalBoardClearRef.current = false;
     setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
     remoteLiveStrokesRef.current.clear();
@@ -2010,14 +2029,7 @@ export default function Page() {
     const version = boardChangeVersionRef.current;
     const attempt = latestSaveAttemptRef.current + 1;
     latestSaveAttemptRef.current = attempt;
-    const documentSnapshot = {
-      elements,
-      canvasBackground,
-      customCanvasBackground,
-      gridMode,
-      gridOpacity,
-      calendarEntries,
-    };
+    const documentSnapshot = latestBoardDocumentRef.current;
 
     const saveOperation = boardSaveQueueRef.current
       .catch(() => undefined)
@@ -2078,6 +2090,7 @@ export default function Page() {
       if (attempt === latestSaveAttemptRef.current) {
         if (boardChangeVersionRef.current === version) {
           hasUnsavedBoardChangesRef.current = false;
+          pendingLocalBoardClearRef.current = false;
           setBoardSaveState("saved");
         } else {
           setBoardSaveState("dirty");
@@ -2097,6 +2110,18 @@ export default function Page() {
             })
           );
           if (latest.board?.id === boardId && latest.board.updatedAt) {
+            if (pendingLocalBoardClearRef.current) {
+              // A clear is a deletion operation, not an additive stroke
+              // conflict. Retrying against the newest revision preserves the
+              // empty/new document instead of merging deleted server objects
+              // back into it.
+              boardUpdatedAtRef.current[boardId] = latest.board.updatedAt;
+              setBoardSaveState("dirty");
+              window.setTimeout(() => {
+                void persistBoard(boardId).catch(() => undefined);
+              }, 0);
+              return;
+            }
             const serverElements = Array.isArray(latest.board.document.elements)
               ? latest.board.document.elements
               : [];
@@ -4875,6 +4900,29 @@ export default function Page() {
         remote.updatedAt = Date.now();
         remote.completedAt = Date.now();
         remote.stroke.points = message.points;
+        requestCanvasRedraw();
+      });
+      nextChannel.on("broadcast", { event: "board-cleared" }, ({ payload }) => {
+        reportBoardEvent("board-cleared", payload);
+        if (!payload || typeof payload !== "object") return;
+        const message = payload as {
+          boardId?: unknown;
+          senderId?: unknown;
+        };
+        if (
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current
+        ) return;
+        if (hasUnsavedBoardChangesRef.current || isDrawingRef.current) {
+          setBoardSaveState("conflict");
+          return;
+        }
+        suppressBoardAutosaveUntilRef.current = Date.now() + 1_200;
+        remoteStrokes.clear();
+        remoteTexts.clear();
+        setElements([]);
+        setActiveText(null);
+        setSelectedImageIndex(null);
         requestCanvasRedraw();
       });
       nextChannel.on("broadcast", { event: "text-preview" }, ({ payload }) => {
@@ -7899,9 +7947,19 @@ export default function Page() {
     if (!confirmed) return;
 
     recordCanvasHistory();
+    pendingLocalBoardClearRef.current = true;
+    latestBoardDocumentRef.current = {
+      ...latestBoardDocumentRef.current,
+      elements: [],
+    };
     setElements([]);
     setActiveText(null);
     setSelectedImageIndex(null);
+    sendLiveStrokeMessage("board-cleared", {
+      version: 1,
+      boardId: activeBoardId,
+      senderId: boardRealtimeClientIdRef.current,
+    });
 
     const canvas = canvasRef.current;
     if (!canvas) return;
