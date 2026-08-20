@@ -1100,6 +1100,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const supabase = getSupabaseBrowserClient();
     let channel: RealtimeChannel | null = null;
     let cancelled = false;
+    let notificationReady = false;
 
     void (async () => {
       // This is a private topic. Subscribe only after the authenticated
@@ -1124,6 +1125,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         });
       });
       nextChannel.subscribe((status, subscriptionError) => {
+        notificationReady = status === "SUBSCRIBED";
         const message = subscriptionError?.message?.trim();
         reportRealtimeDiagnostics({
           incomingCallStatus: status.toLowerCase(),
@@ -1152,7 +1154,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
     });
 
-    const pollForCalls = () =>
+    let lastFallbackPollAt = 0;
+    const pollForCalls = () => {
+      const now = Date.now();
+      // Realtime should deliver incoming calls instantly. Retain a slow safety
+      // poll for missed events, and poll quickly only while the channel is down.
+      if (notificationReady && now - lastFallbackPollAt < 30_000) return;
+      lastFallbackPollAt = now;
       void loadActiveCalls().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Unknown API error";
         console.error("Scriboo incoming-call polling failed", error);
@@ -1161,6 +1169,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           error: `Incoming-call polling failed: ${message}`,
         });
       });
+    };
     pollForCalls();
     const poll = window.setInterval(
       pollForCalls,

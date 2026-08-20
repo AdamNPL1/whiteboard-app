@@ -5035,24 +5035,30 @@ export default function Page() {
   useEffect(() => {
     if (!currentAccountId || !activeBoardId) return;
 
-    const recoverMissedBoardUpdate = () => {
+    const recoverMissedBoardUpdate = (force = false) => {
       if (document.visibilityState !== "visible" || !navigator.onLine) return;
+      // Live broadcasts are authoritative while the channel is healthy. The
+      // polling path exists only to recover while Realtime is disconnected;
+      // continuously downloading the full board caused avoidable database
+      // pressure and could make sharing/calling queries time out.
+      if (!force && boardRealtimeReadyRef.current) return;
       void refreshBoardFromRealtime(activeBoardId).catch(() => undefined);
     };
+    const recoverAfterWake = () => recoverMissedBoardUpdate(true);
 
     // Realtime remains the fast path. This modest fallback makes missed
     // broadcasts, tablet sleep/wake, and temporary channel failures recover
     // automatically instead of leaving two users permanently out of sync.
-    const interval = window.setInterval(recoverMissedBoardUpdate, 3_000);
-    window.addEventListener("focus", recoverMissedBoardUpdate);
-    window.addEventListener("online", recoverMissedBoardUpdate);
-    document.addEventListener("visibilitychange", recoverMissedBoardUpdate);
+    const interval = window.setInterval(recoverMissedBoardUpdate, 5_000);
+    window.addEventListener("focus", recoverAfterWake);
+    window.addEventListener("online", recoverAfterWake);
+    document.addEventListener("visibilitychange", recoverAfterWake);
 
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", recoverMissedBoardUpdate);
-      window.removeEventListener("online", recoverMissedBoardUpdate);
-      document.removeEventListener("visibilitychange", recoverMissedBoardUpdate);
+      window.removeEventListener("focus", recoverAfterWake);
+      window.removeEventListener("online", recoverAfterWake);
+      document.removeEventListener("visibilitychange", recoverAfterWake);
     };
   }, [activeBoardId, currentAccountId]);
 

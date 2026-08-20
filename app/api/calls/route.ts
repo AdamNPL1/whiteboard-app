@@ -18,7 +18,8 @@ export async function GET(request: NextRequest) {
       { calls: await getActiveCallsForUser(user.id) },
       { headers: { "Cache-Control": "no-store" } }
     );
-  } catch {
+  } catch (error) {
+    console.error("Could not load active calls", error);
     return NextResponse.json({ error: "Could not load calls." }, { status: 500 });
   }
 }
