@@ -1113,16 +1113,58 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       channel = nextChannel;
       nextChannel.on("broadcast", { event: "incoming-call" }, () => {
-        void loadActiveCalls().catch(() => undefined);
+        reportRealtimeDiagnostics({ incomingCallStatus: "event received" });
+        void loadActiveCalls().catch((error: unknown) => {
+          const message = error instanceof Error ? error.message : "Unknown API error";
+          console.error("Scriboo could not load the incoming call", error);
+          reportRealtimeDiagnostics({
+            incomingCallStatus: "event load failed",
+            error: `Incoming call load failed: ${message}`,
+          });
+        });
       });
-      nextChannel.subscribe();
+      nextChannel.subscribe((status, subscriptionError) => {
+        const message = subscriptionError?.message?.trim();
+        reportRealtimeDiagnostics({
+          incomingCallStatus: status.toLowerCase(),
+          error:
+            status === "CHANNEL_ERROR" || status === "TIMED_OUT"
+              ? `Incoming-call realtime ${status.toLowerCase()}${
+                  message ? `: ${message}` : " (no server details returned)"
+                }`
+              : "",
+        });
+        if (subscriptionError) {
+          console.error("Scriboo incoming-call subscription failed", {
+            status,
+            userId: user.id,
+            error: subscriptionError,
+          });
+        }
+      });
       userChannelRef.current = nextChannel;
-    })().catch(() => undefined);
+    })().catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : "Unknown setup error";
+      console.error("Scriboo incoming-call realtime setup failed", error);
+      reportRealtimeDiagnostics({
+        incomingCallStatus: "setup error",
+        error: `Incoming-call setup failed: ${message}`,
+      });
+    });
 
-    void loadActiveCalls().catch(() => undefined);
+    const pollForCalls = () =>
+      void loadActiveCalls().catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "Unknown API error";
+        console.error("Scriboo incoming-call polling failed", error);
+        reportRealtimeDiagnostics({
+          incomingCallStatus: "poll failed",
+          error: `Incoming-call polling failed: ${message}`,
+        });
+      });
+    pollForCalls();
     const poll = window.setInterval(
-      () => void loadActiveCalls().catch(() => undefined),
-      5_000
+      pollForCalls,
+      2_000
     );
 
     return () => {

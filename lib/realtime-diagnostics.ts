@@ -2,6 +2,7 @@ export type RealtimeDiagnosticsUpdate = {
   boardStatus?: string;
   boardLastEvent?: string;
   boardLatencyMs?: number | null;
+  incomingCallStatus?: string;
   callStage?: string;
   signalingState?: string;
   iceState?: string;
@@ -23,4 +24,3 @@ export const reportRealtimeDiagnostics = (update: RealtimeDiagnosticsUpdate) => 
     })
   );
 };
-
