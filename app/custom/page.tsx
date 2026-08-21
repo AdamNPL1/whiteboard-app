@@ -6542,6 +6542,25 @@ export default function Page() {
       drawTextElement(ctx, remote.element);
     }
 
+    const activeEraser = currentStroke.current;
+    if (
+      isDrawingRef.current &&
+      activeEraser?.tool === "eraser" &&
+      activeEraser.points.length > 0
+    ) {
+      const point = activeEraser.points[activeEraser.points.length - 1];
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, activeEraser.width / 2, 0, Math.PI * 2);
+      ctx.fillStyle = "rgba(148, 163, 184, 0.16)";
+      ctx.strokeStyle = "rgba(100, 116, 139, 0.9)";
+      ctx.lineWidth = 1.5 / Math.max(zoom, 0.1);
+      ctx.setLineDash([]);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
     if (selectionBox) {
       drawSelectedStrokeHighlights(ctx, selectionBox);
       drawSelectionBox(ctx, selectionBox);
@@ -7903,6 +7922,7 @@ export default function Page() {
       currentStroke.current = nextStroke;
       renderedLiveStrokePointCountRef.current = 1;
       if (tool === "pen") beginLivePenStroke(nextStroke);
+      if (tool === "eraser") scheduleRedrawCanvas();
     }
 
     isDrawingRef.current = true;
