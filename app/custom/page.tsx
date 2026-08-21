@@ -4898,8 +4898,25 @@ export default function Page() {
         if (!remote || message.sequence <= remote.sequence) return;
         remote.sequence = message.sequence;
         remote.updatedAt = Date.now();
-        remote.completedAt = Date.now();
         remote.stroke.points = message.points;
+        const committedStroke: Stroke = {
+          ...remote.stroke,
+          points: [...message.points],
+        };
+        // Promote the temporary preview into the local document immediately.
+        // The sender's subsequent board save remains authoritative and will
+        // replace this optimistic copy without a visible disappear/reappear.
+        remoteLiveStrokesRef.current.delete(key);
+        suppressBoardAutosaveUntilRef.current = Date.now() + 1_200;
+        setElements((previous) =>
+          committedStroke.id &&
+          previous.some(
+            (element) =>
+              element.kind === "stroke" && element.id === committedStroke.id
+          )
+            ? previous
+            : [...previous, committedStroke]
+        );
         requestCanvasRedraw();
       });
       nextChannel.on("broadcast", { event: "board-cleared" }, ({ payload }) => {
@@ -7732,6 +7749,7 @@ export default function Page() {
     const { x, y } = getCanvasCoordinates(e);
 
     if (isDrawableShapeTool(tool)) {
+      suppressBoardAutosaveUntilRef.current = 0;
       isDrawingRef.current = true;
       setIsDrawing(true);
       setShapeStart({ x, y });
@@ -7748,6 +7766,9 @@ export default function Page() {
 
     if (tool === "pen" || tool === "eraser") {
       e.preventDefault();
+      // A real local edit must never be mistaken for state applied by a recent
+      // remote refresh, even if the user begins drawing immediately afterward.
+      suppressBoardAutosaveUntilRef.current = 0;
       const nextStroke: Stroke = {
         kind: "stroke",
         id: tool === "pen" ? crypto.randomUUID() : undefined,
