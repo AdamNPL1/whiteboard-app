@@ -6562,8 +6562,8 @@ export default function Page() {
         ctx.beginPath();
         ctx.moveTo(previous.point.x, previous.point.y);
         ctx.lineTo(sample.point.x, sample.point.y);
-        ctx.strokeStyle = `rgba(100, 116, 139, ${0.42 * opacity})`;
-        ctx.lineWidth = Math.max(2 / Math.max(zoom, 0.1), sample.width * 0.18);
+        ctx.strokeStyle = `rgba(184, 194, 209, ${0.58 * opacity})`;
+        ctx.lineWidth = Math.max(3 / Math.max(zoom, 0.1), sample.width * 0.28);
         ctx.stroke();
       }
       ctx.restore();
