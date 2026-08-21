@@ -7830,6 +7830,10 @@ export default function Page() {
       return;
     }
 
+    // Drawing and erasing are primary-button actions. Ignoring middle/auxiliary
+    // pointer buttons prevents an eraser preview from becoming latched on.
+    if (e.button !== 0) return;
+
     if (tool === "cursor") {
       if (e.button === 0) {
         const point = getCanvasCoordinates(e);
@@ -8016,6 +8020,19 @@ export default function Page() {
     }
 
     if (!isDrawingRef.current) return;
+
+    if (
+      currentStroke.current &&
+      (currentStroke.current.tool === "pen" ||
+        currentStroke.current.tool === "eraser") &&
+      (e.buttons & 1) === 0
+    ) {
+      // Pointer capture can occasionally outlive a missed pointer-up event,
+      // especially while zoomed or when the pointer crosses browser UI. Stop
+      // the active path instead of letting a hover leave a snake-like trail.
+      stopDrawing(e);
+      return;
+    }
 
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
