@@ -402,7 +402,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [stopCallPoll, stopCallSounds]);
 
   const resetToIdle = useCallback(() => {
-    clearCallResources();
+    // Close the UI and invalidate asynchronous call work first. Browser media
+    // cleanup can occasionally throw on an already-closed track/connection;
+    // that must never leave the terminal panel stuck on screen.
+    phaseRef.current = "idle";
+    callRef.current = null;
+    isTerminatingCallRef.current = false;
+    setPhase("idle");
     setCall(null);
     setPeerName("");
     setCallBoardName("");
@@ -411,8 +417,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsMuted(false);
     setRemoteMuted(false);
     setConnectionState("");
-    isTerminatingCallRef.current = false;
-    setPhase("idle");
+    try {
+      clearCallResources();
+    } catch (error) {
+      console.warn("Scriboo call cleanup completed with an error", error);
+    }
   }, [clearCallResources]);
 
   useEffect(() => {
@@ -1190,6 +1199,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       callPollRef.current = window.setInterval(() => {
         void apiRequest<{ call: CallRecord }>(`/api/calls/${activeCall.id}`)
           .then(async ({ call: refreshed }) => {
+            if (
+              callRef.current?.id !== activeCall.id ||
+              phaseRef.current === "idle" ||
+              phaseRef.current === "ended"
+            ) {
+              return;
+            }
             setCall(refreshed);
             if (
               refreshed.status === "ringing" &&
