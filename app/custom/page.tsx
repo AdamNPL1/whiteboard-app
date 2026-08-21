@@ -1079,6 +1079,10 @@ export default function Page() {
   const renderedLiveStrokePointCountRef = useRef(0);
   const latestRedrawCanvasRef = useRef<() => void>(() => {});
   const pendingRedrawFrame = useRef<number | null>(null);
+  const eraserTrailFrameRef = useRef<number | null>(null);
+  const eraserTrailRef = useRef<
+    Array<{ point: Point; width: number; createdAt: number }>
+  >([]);
   const autosaveBoardTimeoutRef = useRef<number | null>(null);
   const boardRealtimeChannelRef = useRef<RealtimeChannel | null>(null);
   const boardRealtimeReadyRef = useRef(false);
@@ -6542,22 +6546,26 @@ export default function Page() {
       drawTextElement(ctx, remote.element);
     }
 
-    const activeEraser = currentStroke.current;
-    if (
-      isDrawingRef.current &&
-      activeEraser?.tool === "eraser" &&
-      activeEraser.points.length > 0
-    ) {
-      const point = activeEraser.points[activeEraser.points.length - 1];
+    const now = performance.now();
+    const visibleEraserTrail = eraserTrailRef.current.filter(
+      (sample) => now - sample.createdAt < 190
+    );
+    if (visibleEraserTrail.length > 0) {
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(point.x, point.y, activeEraser.width / 2, 0, Math.PI * 2);
-      ctx.fillStyle = "rgba(148, 163, 184, 0.16)";
-      ctx.strokeStyle = "rgba(100, 116, 139, 0.9)";
-      ctx.lineWidth = 1.5 / Math.max(zoom, 0.1);
+      ctx.lineCap = "round";
+      ctx.lineJoin = "round";
       ctx.setLineDash([]);
-      ctx.fill();
-      ctx.stroke();
+      for (let index = 1; index < visibleEraserTrail.length; index += 1) {
+        const previous = visibleEraserTrail[index - 1];
+        const sample = visibleEraserTrail[index];
+        const opacity = Math.max(0, 1 - (now - sample.createdAt) / 190);
+        ctx.beginPath();
+        ctx.moveTo(previous.point.x, previous.point.y);
+        ctx.lineTo(sample.point.x, sample.point.y);
+        ctx.strokeStyle = `rgba(100, 116, 139, ${0.42 * opacity})`;
+        ctx.lineWidth = Math.max(2 / Math.max(zoom, 0.1), sample.width * 0.18);
+        ctx.stroke();
+      }
       ctx.restore();
     }
 
@@ -6574,6 +6582,23 @@ export default function Page() {
 
   const scheduleRedrawCanvas = () => {
     requestCanvasRedraw();
+  };
+
+  const scheduleEraserTrailAnimation = () => {
+    if (eraserTrailFrameRef.current !== null) return;
+    const animate = () => {
+      const now = performance.now();
+      eraserTrailRef.current = eraserTrailRef.current.filter(
+        (sample) => now - sample.createdAt < 190
+      );
+      requestCanvasRedraw();
+      if (eraserTrailRef.current.length > 0) {
+        eraserTrailFrameRef.current = window.requestAnimationFrame(animate);
+      } else {
+        eraserTrailFrameRef.current = null;
+      }
+    };
+    eraserTrailFrameRef.current = window.requestAnimationFrame(animate);
   };
 
   useEffect(() => {
@@ -6627,6 +6652,10 @@ export default function Page() {
 
       if (pendingPenCursorFrame.current !== null) {
         window.cancelAnimationFrame(pendingPenCursorFrame.current);
+      }
+
+      if (eraserTrailFrameRef.current !== null) {
+        window.cancelAnimationFrame(eraserTrailFrameRef.current);
       }
 
       if (autosaveBoardTimeoutRef.current !== null) {
@@ -7644,6 +7673,17 @@ export default function Page() {
     }
 
     stroke.points.push(point);
+    if (stroke.tool === "eraser") {
+      eraserTrailRef.current.push({
+        point,
+        width: stroke.width,
+        createdAt: performance.now(),
+      });
+      if (eraserTrailRef.current.length > 28) {
+        eraserTrailRef.current.splice(0, eraserTrailRef.current.length - 28);
+      }
+      scheduleEraserTrailAnimation();
+    }
     return true;
   };
 
@@ -7922,7 +7962,12 @@ export default function Page() {
       currentStroke.current = nextStroke;
       renderedLiveStrokePointCountRef.current = 1;
       if (tool === "pen") beginLivePenStroke(nextStroke);
-      if (tool === "eraser") scheduleRedrawCanvas();
+      if (tool === "eraser") {
+        eraserTrailRef.current = [
+          { point: { x, y }, width: eraserWidth, createdAt: performance.now() },
+        ];
+        scheduleEraserTrailAnimation();
+      }
     }
 
     isDrawingRef.current = true;
