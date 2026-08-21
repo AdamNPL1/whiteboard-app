@@ -69,6 +69,10 @@ import TurnstileWidget from "@/app/components/TurnstileWidget";
 import SupportChatbot from "@/app/components/SupportChatbot";
 import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
 import {
+  getBoardDocumentByteLength,
+  validateBoardDocumentPayload,
+} from "@/lib/board-document-limits";
+import {
   LIVE_STROKE_PROTOCOL_VERSION,
   MAX_LIVE_STROKE_BATCH_POINTS,
   MAX_LIVE_STROKE_POINTS,
@@ -1081,6 +1085,7 @@ export default function Page() {
   const pendingBoardRealtimeMessageRef = useRef<{
     boardId: string;
     updatedAt: string;
+    document?: BoardDocument;
   } | null>(null);
   const boardRealtimeClientIdRef = useRef(crypto.randomUUID());
   const remoteLiveStrokesRef = useRef<Map<string, RemoteLiveStroke>>(new Map());
@@ -1124,13 +1129,21 @@ export default function Page() {
     calendarEntries,
   };
 
-  const broadcastBoardSaved = useCallback((boardId: string, updatedAt: string) => {
+  const broadcastBoardSaved = useCallback((
+    boardId: string,
+    updatedAt: string,
+    document?: BoardDocument
+  ) => {
     const channel = boardRealtimeChannelRef.current;
     if (!channel || !boardId || !updatedAt) return;
     if (!boardRealtimeReadyRef.current) {
-      pendingBoardRealtimeMessageRef.current = { boardId, updatedAt };
+      pendingBoardRealtimeMessageRef.current = { boardId, updatedAt, document };
       return;
     }
+    const realtimeDocument =
+      document && getBoardDocumentByteLength(document) <= 180_000
+        ? document
+        : undefined;
     void channel
       .send({
         type: "broadcast",
@@ -1140,6 +1153,7 @@ export default function Page() {
           updatedAt,
           senderId: boardRealtimeClientIdRef.current,
           sentAt: Date.now(),
+          document: realtimeDocument,
         },
       })
       .catch(() => undefined);
@@ -2084,7 +2098,7 @@ export default function Page() {
                 : board
             )
           );
-          broadcastBoardSaved(boardId, savedUpdatedAt);
+          broadcastBoardSaved(boardId, savedUpdatedAt, savedBoard.document);
         }
       });
 
@@ -4852,6 +4866,7 @@ export default function Page() {
           boardId?: unknown;
           updatedAt?: unknown;
           senderId?: unknown;
+          document?: unknown;
         };
         if (
           message.senderId === boardRealtimeClientIdRef.current ||
@@ -4859,6 +4874,57 @@ export default function Page() {
           typeof message.updatedAt !== "string"
         ) {
           return;
+        }
+        if (
+          message.document &&
+          validateBoardDocumentPayload(message.document) === null &&
+          !hasUnsavedBoardChangesRef.current &&
+          !isDrawingRef.current
+        ) {
+          const knownUpdatedAt = boardUpdatedAtRef.current[activeBoardId];
+          if (
+            !knownUpdatedAt ||
+            new Date(message.updatedAt).getTime() >
+              new Date(knownUpdatedAt).getTime()
+          ) {
+            const realtimeDocument = message.document as BoardDocument;
+            const serverElements = realtimeDocument.elements;
+            const serverStrokeIds = new Set(
+              serverElements
+                .filter(
+                  (element): element is Stroke =>
+                    element.kind === "stroke" && typeof element.id === "string"
+                )
+                .map((stroke) => stroke.id as string)
+            );
+            const mergedElements = [...serverElements];
+            for (const [strokeId, pending] of pendingRemoteCommittedStrokesRef.current) {
+              if (pending.boardId !== activeBoardId) continue;
+              if (serverStrokeIds.has(strokeId)) {
+                pendingRemoteCommittedStrokesRef.current.delete(strokeId);
+              } else {
+                mergedElements.push(pending.stroke);
+              }
+            }
+            const mergedDocument = {
+              ...realtimeDocument,
+              elements: mergedElements,
+            };
+            boardUpdatedAtRef.current[activeBoardId] = message.updatedAt;
+            setBoards((previousBoards) =>
+              previousBoards.map((board) =>
+                board.id === activeBoardId
+                  ? {
+                      ...board,
+                      updatedAt: message.updatedAt as string,
+                      previewDocument: mergedDocument,
+                    }
+                  : board
+              )
+            );
+            applyBoardDocument(mergedDocument, { preserveRealtime: true });
+            return;
+          }
         }
         void refreshBoardFromRealtime(activeBoardId, message.updatedAt).catch(
           () => undefined
@@ -5073,7 +5139,11 @@ export default function Page() {
         const pending = pendingBoardRealtimeMessageRef.current;
         if (!pending || pending.boardId !== activeBoardId) return;
         pendingBoardRealtimeMessageRef.current = null;
-        broadcastBoardSaved(pending.boardId, pending.updatedAt);
+        broadcastBoardSaved(
+          pending.boardId,
+          pending.updatedAt,
+          pending.document
+        );
       });
       boardRealtimeChannelRef.current = nextChannel;
     })().catch((error: unknown) => {
