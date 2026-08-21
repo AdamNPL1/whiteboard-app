@@ -1087,6 +1087,9 @@ export default function Page() {
   const remoteLiveTextsRef = useRef<
     Map<string, { element: TextElement; updatedAt: number }>
   >(new Map());
+  const pendingRemoteCommittedStrokesRef = useRef<
+    Map<string, { boardId: string; stroke: Stroke; updatedAt: number }>
+  >(new Map());
   const localLiveTextRef = useRef<{ id: string; boardId: string } | null>(null);
   const localLiveTextCommittedRef = useRef(false);
   const localLiveStrokeRef = useRef<{
@@ -1958,14 +1961,19 @@ export default function Page() {
     setCanResendConfirmation(false);
   };
 
-  const applyBoardDocument = (document: BoardDocument) => {
+  const applyBoardDocument = (
+    document: BoardDocument,
+    options: { preserveRealtime?: boolean } = {}
+  ) => {
     suppressBoardAutosaveUntilRef.current = Date.now() + 1200;
     hasUnsavedBoardChangesRef.current = false;
     pendingLocalBoardClearRef.current = false;
     setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
-    remoteLiveStrokesRef.current.clear();
-    remoteLiveTextsRef.current.clear();
+    if (!options.preserveRealtime) {
+      remoteLiveStrokesRef.current.clear();
+      remoteLiveTextsRef.current.clear();
+    }
     setIsDrawing(false);
     setShapeStart(null);
     setSnapshot(null);
@@ -4657,7 +4665,30 @@ export default function Page() {
             : board
         )
       );
-      applyBoardDocument(data.board.document);
+      const serverElements = Array.isArray(data.board.document.elements)
+        ? data.board.document.elements
+        : [];
+      const serverStrokeIds = new Set(
+        serverElements
+          .filter(
+            (element): element is Stroke =>
+              element.kind === "stroke" && typeof element.id === "string"
+          )
+          .map((stroke) => stroke.id as string)
+      );
+      const mergedElements = [...serverElements];
+      for (const [strokeId, pending] of pendingRemoteCommittedStrokesRef.current) {
+        if (pending.boardId !== boardId) continue;
+        if (serverStrokeIds.has(strokeId)) {
+          pendingRemoteCommittedStrokesRef.current.delete(strokeId);
+        } else {
+          mergedElements.push(pending.stroke);
+        }
+      }
+      applyBoardDocument(
+        { ...data.board.document, elements: mergedElements },
+        { preserveRealtime: true }
+      );
     }
   );
 
@@ -4907,6 +4938,13 @@ export default function Page() {
         // The sender's subsequent board save remains authoritative and will
         // replace this optimistic copy without a visible disappear/reappear.
         remoteLiveStrokesRef.current.delete(key);
+        if (committedStroke.id) {
+          pendingRemoteCommittedStrokesRef.current.set(committedStroke.id, {
+            boardId: activeBoardId,
+            stroke: committedStroke,
+            updatedAt: Date.now(),
+          });
+        }
         suppressBoardAutosaveUntilRef.current = Date.now() + 1_200;
         setElements((previous) =>
           committedStroke.id &&
@@ -4937,6 +4975,11 @@ export default function Page() {
         suppressBoardAutosaveUntilRef.current = Date.now() + 1_200;
         remoteStrokes.clear();
         remoteTexts.clear();
+        for (const [strokeId, pending] of pendingRemoteCommittedStrokesRef.current) {
+          if (pending.boardId === activeBoardId) {
+            pendingRemoteCommittedStrokesRef.current.delete(strokeId);
+          }
+        }
         setElements([]);
         setActiveText(null);
         setSelectedImageIndex(null);
@@ -5090,6 +5133,11 @@ export default function Page() {
         if (now - remote.updatedAt > 30_000) {
           remoteLiveTextsRef.current.delete(key);
           removed = true;
+        }
+      }
+      for (const [strokeId, pending] of pendingRemoteCommittedStrokesRef.current) {
+        if (now - pending.updatedAt > 120_000) {
+          pendingRemoteCommittedStrokesRef.current.delete(strokeId);
         }
       }
       if (removed) requestCanvasRedraw();
@@ -7969,6 +8017,11 @@ export default function Page() {
 
     recordCanvasHistory();
     pendingLocalBoardClearRef.current = true;
+    for (const [strokeId, pending] of pendingRemoteCommittedStrokesRef.current) {
+      if (pending.boardId === activeBoardId) {
+        pendingRemoteCommittedStrokesRef.current.delete(strokeId);
+      }
+    }
     latestBoardDocumentRef.current = {
       ...latestBoardDocumentRef.current,
       elements: [],
