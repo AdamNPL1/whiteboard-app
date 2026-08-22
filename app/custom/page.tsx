@@ -1075,6 +1075,7 @@ export default function Page() {
   }, []);
 
   const currentStroke = useRef<Stroke | null>(null);
+  const activeEraserElementsRef = useRef<CanvasElement[] | null>(null);
   const isDrawingRef = useRef(false);
   const renderedLiveStrokePointCountRef = useRef(0);
   const latestRedrawCanvasRef = useRef<() => void>(() => {});
@@ -1988,6 +1989,7 @@ export default function Page() {
     pendingLocalBoardClearRef.current = false;
     setBoardSaveState(typeof navigator !== "undefined" && !navigator.onLine ? "offline" : "saved");
     currentStroke.current = null;
+    activeEraserElementsRef.current = null;
     if (!options.preserveRealtime) {
       remoteLiveStrokesRef.current.clear();
       remoteLiveTextsRef.current.clear();
@@ -6450,15 +6452,13 @@ export default function Page() {
     const activeEraserStroke =
       currentStroke.current?.tool === "eraser" ? currentStroke.current : null;
     const visibleElements = activeEraserStroke
-      ? eraseElements(elements, activeEraserStroke)
+      ? activeEraserElementsRef.current ?? elements
       : elements;
 
     for (const [index, element] of visibleElements.entries()) {
       if (activeText?.editingIndex === index) {
         continue;
       }
-      reportRealtimeDiagnostics({ boardStatus: "closed" });
-
       if (element.kind === "converter") {
         drawConverterElement(ctx, element);
         continue;
@@ -7674,6 +7674,14 @@ export default function Page() {
 
     stroke.points.push(point);
     if (stroke.tool === "eraser") {
+      const eraserSegment: Stroke = {
+        ...stroke,
+        points: previousPoint ? [previousPoint, point] : [point],
+      };
+      activeEraserElementsRef.current = eraseElements(
+        activeEraserElementsRef.current ?? elements,
+        eraserSegment
+      );
       eraserTrailRef.current.push({
         point,
         width: stroke.width,
@@ -7963,6 +7971,7 @@ export default function Page() {
       renderedLiveStrokePointCountRef.current = 1;
       if (tool === "pen") beginLivePenStroke(nextStroke);
       if (tool === "eraser") {
+        activeEraserElementsRef.current = eraseElements(elements, nextStroke);
         eraserTrailRef.current = [
           { point: { x, y }, width: eraserWidth, createdAt: performance.now() },
         ];
@@ -8275,13 +8284,10 @@ export default function Page() {
 
     if (currentStroke.current) {
       if (currentStroke.current.tool === "eraser") {
-        const eraserStroke = {
-          ...currentStroke.current,
-          points: [...currentStroke.current.points],
-        };
-
         recordCanvasHistory();
-        setElements((prev) => eraseElements(prev, eraserStroke));
+        const erasedElements = activeEraserElementsRef.current;
+        setElements((previous) => erasedElements ?? previous);
+        activeEraserElementsRef.current = null;
         currentStroke.current = null;
         isDrawingRef.current = false;
         renderedLiveStrokePointCountRef.current = 0;
