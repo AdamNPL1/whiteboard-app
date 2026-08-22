@@ -7950,8 +7950,6 @@ export default function Page() {
     const ctx = canvasRef.current?.getContext("2d");
     if (!ctx) return;
 
-    e.currentTarget.setPointerCapture(e.pointerId);
-
     if (e.button === 2) {
       e.preventDefault();
       const imageIndex = findImageAtPoint(getCanvasCoordinates(e));
@@ -7976,6 +7974,7 @@ export default function Page() {
     // Drawing and erasing are primary-button actions. Ignoring middle/auxiliary
     // pointer buttons prevents an eraser preview from becoming latched on.
     if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     setImageLockMenu(null);
 
     if (tool === "cursor") {
@@ -8489,6 +8488,19 @@ export default function Page() {
     }
   };
 
+  const handleCanvasContextMenu = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    e.preventDefault();
+    const imageIndex = findImageAtPoint(getCanvasCoordinates(e));
+    if (imageIndex === -1) {
+      setImageLockMenu(null);
+      return;
+    }
+    setSelectedImageIndex(imageIndex);
+    setSelectionBox(null);
+    setSelectionMenu(null);
+    setImageLockMenu({ index: imageIndex, x: e.clientX, y: e.clientY });
+  };
+
   const toggleImageLock = (index: number) => {
     const image = elements[index];
     if (!image || image.kind !== "image") {
@@ -8808,7 +8820,7 @@ export default function Page() {
           }
         }}
         onClick={handleCanvasClick}
-        onContextMenu={(e) => e.preventDefault()}
+        onContextMenu={handleCanvasContextMenu}
         onDragOver={(event) => {
           if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) {
             event.preventDefault();
