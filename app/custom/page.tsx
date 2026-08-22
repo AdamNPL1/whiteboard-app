@@ -1075,8 +1075,38 @@ export default function Page() {
     }
   });
 
+  const handleDeleteSelectedImage = useEffectEvent((event: KeyboardEvent) => {
+    if (event.key !== "Delete" || selectedImageIndex === null) return;
+
+    const target = event.target as HTMLElement | null;
+    if (
+      target?.isContentEditable ||
+      target?.tagName === "INPUT" ||
+      target?.tagName === "TEXTAREA" ||
+      target?.tagName === "SELECT"
+    ) {
+      return;
+    }
+
+    const selectedImage = elements[selectedImageIndex];
+    if (!selectedImage || selectedImage.kind !== "image") {
+      setSelectedImageIndex(null);
+      return;
+    }
+
+    event.preventDefault();
+    recordCanvasHistory();
+    setElements((previous) =>
+      previous.filter((_, index) => index !== selectedImageIndex)
+    );
+    setSelectedImageIndex(null);
+  });
+
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => handleUndoRedoShortcut(event);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      handleUndoRedoShortcut(event);
+      handleDeleteSelectedImage(event);
+    };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, []);
