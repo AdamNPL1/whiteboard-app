@@ -76,6 +76,7 @@ type SignalEnvelope = {
   data: SignalData;
 };
 type CurrentUser = { id: string; name: string; email: string };
+type CameraDevice = { deviceId: string; label: string };
 
 type CallContextValue = {
   setBoardContext: (board: BoardContext | null) => void;
@@ -171,6 +172,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isCameraOn, setIsCameraOn] = useState(false);
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
+  const [cameraDevices, setCameraDevices] = useState<CameraDevice[]>([]);
+  const [selectedCameraId, setSelectedCameraId] = useState("");
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
 
   const userRef = useRef<CurrentUser | null>(null);
@@ -1469,7 +1472,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [requestRenegotiation, sendSignal]);
 
-  const startCamera = useCallback(async () => {
+  const refreshCameraDevices = useCallback(async () => {
+    if (!navigator.mediaDevices?.enumerateDevices) return;
+    const devices = await navigator.mediaDevices.enumerateDevices();
+    const cameras = devices
+      .filter((device) => device.kind === "videoinput")
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `${t("Camera", "Kamera")} ${index + 1}`,
+      }));
+    setCameraDevices(cameras);
+    setSelectedCameraId((current) =>
+      current && cameras.some((camera) => camera.deviceId === current)
+        ? current
+        : cameras[0]?.deviceId ?? ""
+    );
+  }, [t]);
+
+  useEffect(() => {
+    if (phase !== "connected" || !navigator.mediaDevices) return;
+    void refreshCameraDevices().catch(() => undefined);
+    const handleDeviceChange = () => {
+      void refreshCameraDevices().catch(() => undefined);
+    };
+    navigator.mediaDevices.addEventListener?.("devicechange", handleDeviceChange);
+    return () => {
+      navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
+    };
+  }, [phase, refreshCameraDevices]);
+
+  const startCamera = useCallback(async (cameraId = selectedCameraId) => {
     if (isCameraStarting || localCameraTrackRef.current) return;
     if (!navigator.mediaDevices?.getUserMedia) {
       setCameraMessage(
@@ -1489,6 +1521,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         cameraStream = await navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
+            ...(cameraId ? { deviceId: { exact: cameraId } } : {}),
             width: { ideal: 1280 },
             height: { ideal: 720 },
             frameRate: { ideal: 24, max: 30 },
@@ -1498,7 +1531,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       } catch (error) {
         // Some virtual, mobile, and older camera drivers reject optional
         // preferences. Retry without them before reporting a camera failure.
-        if (!(error instanceof DOMException) || error.name !== "OverconstrainedError") {
+        if (
+          cameraId ||
+          !(error instanceof DOMException) ||
+          error.name !== "OverconstrainedError"
+        ) {
           throw error;
         }
         cameraStream = await navigator.mediaDevices.getUserMedia({
@@ -1508,6 +1545,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       const cameraTrack = cameraStream.getVideoTracks()[0];
       if (!cameraTrack) throw new Error("CAMERA_TRACK_MISSING");
+      const activeCameraId = cameraTrack.getSettings().deviceId;
+      if (activeCameraId) setSelectedCameraId(activeCameraId);
+      void refreshCameraDevices().catch(() => undefined);
       try {
         cameraTrack.contentHint = "motion";
       } catch {
@@ -1579,7 +1619,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsCameraStarting(false);
     }
-  }, [isCameraStarting, requestRenegotiation, sendSignal, stopCamera, t]);
+  }, [isCameraStarting, refreshCameraDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
 
   useEffect(() => {
     if (!isCameraOn || !localCameraTrackRef.current || !localVideoRef.current) return;
@@ -1879,6 +1919,45 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
+          {phase === "connected" && cameraDevices.length > 0 && (
+            <label
+              style={{
+                display: "grid",
+                gap: "5px",
+                color: "#475569",
+                fontSize: "11px",
+                fontWeight: 700,
+              }}
+            >
+              {t("Camera", "Kamera")}
+              <select
+                value={selectedCameraId}
+                disabled={isCameraOn || isCameraStarting}
+                onChange={(event) => {
+                  setSelectedCameraId(event.target.value);
+                  setCameraMessage("");
+                }}
+                style={{
+                  width: "100%",
+                  minWidth: 0,
+                  height: "34px",
+                  padding: "0 9px",
+                  border: "1px solid #cbd5e1",
+                  borderRadius: "9px",
+                  background: isCameraOn ? "#f1f5f9" : "#ffffff",
+                  color: "#334155",
+                  fontSize: "12px",
+                }}
+              >
+                {cameraDevices.map((camera) => (
+                  <option key={camera.deviceId} value={camera.deviceId}>
+                    {camera.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          )}
+
           {phase === "incoming" ? (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
               <button type="button" onClick={() => void declineCall()} style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}>
@@ -1903,7 +1982,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {phase === "connected" && (
                 <button
                   type="button"
-                  onClick={() => (isCameraOn ? void stopCamera() : void startCamera())}
+                  onClick={() => (isCameraOn ? void stopCamera() : void startCamera(selectedCameraId))}
                   disabled={isCameraStarting}
                   aria-pressed={isCameraOn}
                   style={{
