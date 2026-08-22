@@ -1841,7 +1841,12 @@ export default function Page() {
     // The interface signs out immediately. Keep the authenticated session just
     // long enough to finish saving the active board, then clear both the server
     // cookie and the browser client's cached session.
-    await boardSave;
+    // Never let a slow board write hold the authenticated session (and the
+    // call/realtime background work tied to it) open indefinitely.
+    await Promise.race([
+      boardSave,
+      new Promise<null>((resolve) => window.setTimeout(() => resolve(null), 1_500)),
+    ]);
     await fetch("/api/auth/logout", { method: "POST" }).catch(() => null);
     await getSupabaseBrowserClient().auth.signOut({ scope: "local" }).catch(() => null);
     window.dispatchEvent(new Event("scriboo-auth-changed"));

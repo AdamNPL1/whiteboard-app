@@ -195,6 +195,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const connectionRetryRef = useRef<number | null>(null);
   const connectionTimeoutRef = useRef<number | null>(null);
   const callStatsIntervalRef = useRef<number | null>(null);
+  const callStatsBusyRef = useRef(false);
+  const identityRefreshRef = useRef<Promise<void> | null>(null);
+  const identityRefreshQueuedRef = useRef(false);
+  const activeCallsRequestRef = useRef<Promise<void> | null>(null);
+  const callStatusPollBusyRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
@@ -373,6 +378,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(callStatsIntervalRef.current);
       callStatsIntervalRef.current = null;
     }
+    callStatsBusyRef.current = false;
+    callStatusPollBusyRef.current = false;
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
     queuedCandidatesRef.current = [];
@@ -560,25 +567,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       signalHandlerRef.current(payload);
     });
 
-    await new Promise<void>((resolve, reject) => {
-      const timeout = window.setTimeout(
-        () => reject(new Error("Realtime connection timed out.")),
-        10_000
-      );
-      channel.subscribe((status, error) => {
-        reportRealtimeDiagnostics({
-          callStage: `signaling ${status.toLowerCase()}`,
-          error: error?.message ?? "",
+    try {
+      await new Promise<void>((resolve, reject) => {
+        const timeout = window.setTimeout(
+          () => reject(new Error("Realtime connection timed out.")),
+          10_000
+        );
+        channel.subscribe((status, error) => {
+          reportRealtimeDiagnostics({
+            callStage: `signaling ${status.toLowerCase()}`,
+            error: error?.message ?? "",
+          });
+          if (status === "SUBSCRIBED") {
+            window.clearTimeout(timeout);
+            resolve();
+          } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+            window.clearTimeout(timeout);
+            reject(error ?? new Error("Realtime connection failed."));
+          }
         });
-        if (status === "SUBSCRIBED") {
-          window.clearTimeout(timeout);
-          resolve();
-        } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
-          window.clearTimeout(timeout);
-          reject(error ?? new Error("Realtime connection failed."));
-        }
       });
-    });
+    } catch (error) {
+      void supabase.removeChannel(channel);
+      throw error;
+    }
     callChannelRef.current = channel;
   }, []);
 
@@ -772,9 +784,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           route,
         });
       };
-      void collectCallStats().catch(() => undefined);
+      callStatsBusyRef.current = true;
+      void collectCallStats()
+        .catch(() => undefined)
+        .finally(() => {
+          callStatsBusyRef.current = false;
+        });
       callStatsIntervalRef.current = window.setInterval(
-        () => void collectCallStats().catch(() => undefined),
+        () => {
+          if (callStatsBusyRef.current) return;
+          callStatsBusyRef.current = true;
+          void collectCallStats()
+            .catch(() => undefined)
+            .finally(() => {
+              callStatsBusyRef.current = false;
+            });
+        },
         2_000
       );
 
@@ -1045,38 +1070,60 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const loadActiveCalls = useCallback(async () => {
     if (!userRef.current) return;
-    const data = await apiRequest<{ calls: CallRecord[] }>("/api/calls");
-    const current = callRef.current;
-    if (current) {
-      const refreshed = data.calls.find((candidate) => candidate.id === current.id);
-      if (refreshed) {
-        setCall(refreshed);
-      } else if (["incoming", "outgoing"].includes(phaseRef.current)) {
-        clearCallResources();
-        setMessage(t("No answer.", "Brak odpowiedzi."));
-        setPhase("ended");
+    if (activeCallsRequestRef.current) return activeCallsRequestRef.current;
+    const request = (async () => {
+      const data = await apiRequest<{ calls: CallRecord[] }>("/api/calls");
+      const current = callRef.current;
+      if (current) {
+        const refreshed = data.calls.find((candidate) => candidate.id === current.id);
+        if (refreshed) {
+          setCall(refreshed);
+        } else if (["incoming", "outgoing"].includes(phaseRef.current)) {
+          clearCallResources();
+          setMessage(t("No answer.", "Brak odpowiedzi."));
+          setPhase("ended");
+        }
+        return;
       }
-      return;
-    }
-    const incoming = data.calls.find(
-      (candidate) =>
-        candidate.recipientUserId === userRef.current?.id && candidate.status === "ringing"
-    );
-    if (incoming) await showIncomingCall(incoming);
+      const incoming = data.calls.find(
+        (candidate) =>
+          candidate.recipientUserId === userRef.current?.id && candidate.status === "ringing"
+      );
+      if (incoming) await showIncomingCall(incoming);
+    })().finally(() => {
+      activeCallsRequestRef.current = null;
+    });
+    activeCallsRequestRef.current = request;
+    return request;
   }, [clearCallResources, showIncomingCall, t]);
 
   const refreshIdentity = useCallback(async () => {
-    try {
-      const response = await fetch("/api/auth/me", { cache: "no-store" });
-      if (!response.ok) {
-        setUser(null);
-        return;
-      }
-      const data = (await response.json()) as { user?: CurrentUser | null };
-      setUser(data.user?.id ? data.user : null);
-    } catch {
-      setUser(null);
+    if (identityRefreshRef.current) {
+      identityRefreshQueuedRef.current = true;
+      return identityRefreshRef.current;
     }
+    const request = (async () => {
+      try {
+        const response = await fetch("/api/auth/me", { cache: "no-store" });
+        if (!response.ok) {
+          setUser(null);
+          return;
+        }
+        const data = (await response.json()) as { user?: CurrentUser | null };
+        setUser(data.user?.id ? data.user : null);
+      } catch {
+        // A brief network interruption must not log the user out locally and
+        // tear down calling while the authenticated session still exists.
+      }
+    })().finally(() => {
+      identityRefreshRef.current = null;
+      if (identityRefreshQueuedRef.current) {
+        identityRefreshQueuedRef.current = false;
+        window.setTimeout(() => void refreshIdentity(), 0);
+      }
+    });
+    identityRefreshRef.current = request;
+    return request;
   }, []);
 
   useEffect(() => {
@@ -1197,6 +1244,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     (activeCall: CallRecord) => {
       stopCallPoll();
       callPollRef.current = window.setInterval(() => {
+        if (callStatusPollBusyRef.current) return;
+        callStatusPollBusyRef.current = true;
         void apiRequest<{ call: CallRecord }>(`/api/calls/${activeCall.id}`)
           .then(async ({ call: refreshed }) => {
             if (
@@ -1237,7 +1286,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               );
             }
           })
-          .catch(() => undefined);
+          .catch(() => undefined)
+          .finally(() => {
+            callStatusPollBusyRef.current = false;
+          });
       }, 2_000);
     },
     [finishRemoteCall, preparePeerConnection, stopCallPoll, t]
@@ -1246,6 +1298,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const startCall = useCallback(
     async (participant: CallParticipant) => {
       if (!board || !user) return;
+      phaseRef.current = "connecting";
       setParticipants([]);
       setMessage("");
       setPeerName(participant.name);
@@ -1298,6 +1351,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const openCallChooser = useCallback(async () => {
     if (!board || !user || phaseRef.current !== "idle") return;
+    phaseRef.current = "choosing";
     setMessage("");
     setPhase("choosing");
     try {
@@ -1327,6 +1381,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const acceptCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return;
+    if (phaseRef.current === "connecting" || phaseRef.current === "connected") return;
+    phaseRef.current = "connecting";
     setMessage("");
     setPhase("connecting");
     try {
@@ -1351,11 +1407,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const declineCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return resetToIdle();
-    await apiRequest(`/api/calls/${activeCall.id}`, {
+    // Close locally first. A slow API must never make Decline look frozen.
+    resetToIdle();
+    void apiRequest(`/api/calls/${activeCall.id}`, {
       method: "PATCH",
       body: JSON.stringify({ action: "decline" }),
     }).catch(() => undefined);
-    resetToIdle();
   }, [resetToIdle]);
 
   const endCall = useCallback(async () => {
@@ -1364,7 +1421,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
     isTerminatingCallRef.current = true;
     phaseRef.current = "ended";
-    await sendSignal({ kind: "ended" }).catch(() => undefined);
+    // Signal and persist in the background; local media and UI must close on
+    // the click even when Realtime acknowledgement is delayed or unavailable.
+    void sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
     void apiRequest(`/api/calls/${activeCall.id}`, {
       method: "PATCH",
