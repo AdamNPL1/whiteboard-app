@@ -36,6 +36,7 @@ import {
   List,
   ListOrdered,
   Lock,
+  LockOpen,
   Mail,
   Clock3,
   History,
@@ -175,6 +176,7 @@ type ImageElement = {
   src: string;
   name: string;
   rotation?: number;
+  locked?: boolean;
 };
 type ConverterKind = "km-mi" | "kg-lb" | "c-f" | "gb-mb" | "cm-in";
 type ConverterElement = {
@@ -1002,6 +1004,11 @@ export default function Page() {
 
   const [elements, setElements] = useState<CanvasElement[]>([]);
   const [selectedImageIndex, setSelectedImageIndex] = useState<number | null>(null);
+  const [imageLockMenu, setImageLockMenu] = useState<{
+    index: number;
+    x: number;
+    y: number;
+  } | null>(null);
   const undoStackRef = useRef<CanvasElement[][]>([]);
   const redoStackRef = useRef<CanvasElement[][]>([]);
   const [undoDepth, setUndoDepth] = useState(0);
@@ -7947,6 +7954,14 @@ export default function Page() {
 
     if (e.button === 2) {
       e.preventDefault();
+      const imageIndex = findImageAtPoint(getCanvasCoordinates(e));
+      if (imageIndex !== -1) {
+        setSelectedImageIndex(imageIndex);
+        setSelectionBox(null);
+        setImageLockMenu({ index: imageIndex, x: e.clientX, y: e.clientY });
+        return;
+      }
+      setImageLockMenu(null);
       isPanningRef.current = true;
       didPanRef.current = false;
       setIsPanning(true);
@@ -7961,6 +7976,7 @@ export default function Page() {
     // Drawing and erasing are primary-button actions. Ignoring middle/auxiliary
     // pointer buttons prevents an eraser preview from becoming latched on.
     if (e.button !== 0) return;
+    setImageLockMenu(null);
 
     if (tool === "cursor") {
       if (e.button === 0) {
@@ -8383,6 +8399,7 @@ export default function Page() {
     if (selectedImageIndex === null) return;
     const image = elements[selectedImageIndex];
     if (!image || image.kind !== "image") return;
+    if (image.locked) return;
     e.preventDefault();
     e.stopPropagation();
     e.currentTarget.setPointerCapture(e.pointerId);
@@ -8470,6 +8487,25 @@ export default function Page() {
     if (e.currentTarget.hasPointerCapture(e.pointerId)) {
       e.currentTarget.releasePointerCapture(e.pointerId);
     }
+  };
+
+  const toggleImageLock = (index: number) => {
+    const image = elements[index];
+    if (!image || image.kind !== "image") {
+      setImageLockMenu(null);
+      return;
+    }
+    recordCanvasHistory();
+    imageTransformRef.current = null;
+    setElements((previous) =>
+      previous.map((element, elementIndex) =>
+        elementIndex === index && element.kind === "image"
+          ? { ...element, locked: !element.locked }
+          : element
+      )
+    );
+    setSelectedImageIndex(index);
+    setImageLockMenu(null);
   };
 
   const selectShapeTool = (nextTool: ShapeTool) => {
@@ -9208,6 +9244,61 @@ export default function Page() {
         </aside>
       )}
 
+      {imageLockMenu && (() => {
+        const menuImage = elements[imageLockMenu.index];
+        if (!menuImage || menuImage.kind !== "image") return null;
+        const isLocked = Boolean(menuImage.locked);
+        const viewportWidth = typeof window === "undefined" ? 1024 : window.innerWidth;
+        const viewportHeight = typeof window === "undefined" ? 768 : window.innerHeight;
+        return (
+          <div
+            role="menu"
+            aria-label={t("Image options", "Opcje obrazu")}
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{
+              position: "fixed",
+              left: `${Math.min(imageLockMenu.x, Math.max(12, viewportWidth - 190))}px`,
+              top: `${Math.min(imageLockMenu.y, Math.max(topBarHeight + 12, viewportHeight - 70))}px`,
+              zIndex: 230,
+              minWidth: "174px",
+              padding: "7px",
+              border: "1px solid rgba(148,163,184,0.28)",
+              borderRadius: "12px",
+              background: isInterfaceDarkMode ? "#252b45" : "#ffffff",
+              boxShadow: "0 14px 38px rgba(15,23,42,0.22)",
+            }}
+          >
+            <button
+              type="button"
+              role="menuitem"
+              onClick={() => toggleImageLock(imageLockMenu.index)}
+              style={{
+                width: "100%",
+                minHeight: "38px",
+                padding: "0 11px",
+                border: "none",
+                borderRadius: "9px",
+                background: isLocked
+                  ? "rgba(124,58,237,0.12)"
+                  : "transparent",
+                color: isInterfaceDarkMode ? "#f8fafc" : "#334155",
+                display: "flex",
+                alignItems: "center",
+                gap: "9px",
+                fontSize: "13px",
+                fontWeight: 750,
+                cursor: "pointer",
+              }}
+            >
+              {isLocked ? <LockOpen size={16} /> : <Lock size={16} />}
+              {isLocked
+                ? t("Unlock image", "Odblokuj obraz")
+                : t("Lock image", "Zablokuj obraz")}
+            </button>
+          </div>
+        );
+      })()}
+
       {selectedImageIndex !== null && (() => {
         const selectedImage = elements[selectedImageIndex];
         if (!selectedImage || selectedImage.kind !== "image") return null;
@@ -9230,7 +9321,18 @@ export default function Page() {
         return (
           <div
             aria-label={t("Selected image", "Wybrany obraz")}
-            onPointerDown={(event) => beginImageTransform(event, "move")}
+            onPointerDown={(event) => {
+              if (!selectedImage.locked) beginImageTransform(event, "move");
+            }}
+            onContextMenu={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              setImageLockMenu({
+                index: selectedImageIndex,
+                x: event.clientX,
+                y: event.clientY,
+              });
+            }}
             {...transformEvents}
             style={{
               position: "fixed",
@@ -9238,16 +9340,18 @@ export default function Page() {
               top: `${selectedImage.point.y * zoom + offset.y + topBarHeight}px`,
               width: `${selectedImage.width * zoom}px`,
               height: `${selectedImage.height * zoom}px`,
-              border: "2px solid #7c3aed",
+              border: selectedImage.locked
+                ? "2px solid #64748b"
+                : "2px solid #7c3aed",
               boxSizing: "border-box",
               transform: `rotate(${selectedImage.rotation ?? 0}deg)`,
               transformOrigin: "center",
-              cursor: "move",
+              cursor: selectedImage.locked ? "not-allowed" : "move",
               touchAction: "none",
               zIndex: 12,
             }}
           >
-            <div
+            {!selectedImage.locked && <div
               aria-hidden="true"
               style={{
                 position: "absolute",
@@ -9259,8 +9363,8 @@ export default function Page() {
                 transform: "translateX(-50%)",
                 pointerEvents: "none",
               }}
-            />
-            <div
+            />}
+            {!selectedImage.locked && <div
               aria-label={t("Rotate image", "Obróć obraz")}
               onPointerDown={(event) => beginImageTransform(event, "rotate")}
               {...transformEvents}
@@ -9273,8 +9377,8 @@ export default function Page() {
                 transform: "translate(-50%, -50%)",
                 cursor: "grab",
               }}
-            />
-            {[
+            />}
+            {!selectedImage.locked && [
               { left: "0%", top: "0%", cursor: "nwse-resize" },
               { left: "100%", top: "0%", cursor: "nesw-resize" },
               { left: "0%", top: "100%", cursor: "nesw-resize" },
@@ -9294,6 +9398,26 @@ export default function Page() {
                 }}
               />
             ))}
+            {selectedImage.locked && (
+              <div
+                aria-label={t("Image locked", "Obraz zablokowany")}
+                style={{
+                  position: "absolute",
+                  right: "7px",
+                  top: "7px",
+                  width: "26px",
+                  height: "26px",
+                  borderRadius: "8px",
+                  background: "rgba(15,23,42,0.72)",
+                  color: "#ffffff",
+                  display: "grid",
+                  placeItems: "center",
+                  pointerEvents: "none",
+                }}
+              >
+                <Lock size={14} />
+              </div>
+            )}
           </div>
         );
       })()}
