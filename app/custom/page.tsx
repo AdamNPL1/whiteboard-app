@@ -659,7 +659,6 @@ export default function Page() {
   const [showEraserMenu, setShowEraserMenu] = useState(false);
 
   const [shapeStart, setShapeStart] = useState<Point | null>(null);
-  const [snapshot, setSnapshot] = useState<ImageData | null>(null);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [zoom, setZoom] = useState(1);
   const [penWidth, setPenWidth] = useState(4);
@@ -1076,6 +1075,8 @@ export default function Page() {
 
   const currentStroke = useRef<Stroke | null>(null);
   const activeEraserElementsRef = useRef<CanvasElement[] | null>(null);
+  const accountRefreshPromiseRef = useRef<Promise<void> | null>(null);
+  const lastAccountRefreshAtRef = useRef(0);
   const isDrawingRef = useRef(false);
   const renderedLiveStrokePointCountRef = useRef(0);
   const latestRedrawCanvasRef = useRef<() => void>(() => {});
@@ -1944,33 +1945,45 @@ export default function Page() {
   };
 
   const loadCurrentAccount = async () => {
-    const data = (await fetch("/api/auth/me", {
-      cache: "no-store",
-    })
-      .then((response) => response.json())
-      .catch(() => ({ user: null }))) as { user: PublicAccount | null };
-
-    setCurrentAccountId(data.user?.id ?? "");
-    setCurrentAccountName(data.user?.name ?? "");
-    setCurrentAccountEmail(data.user?.email ?? "");
-    setCurrentAccountPlan(data.user?.plan ?? "basic");
-    setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
-    setCurrentSubscriptionCancelAtPeriodEnd(
-      data.user?.subscriptionCancelAtPeriodEnd ?? false
-    );
-    setCurrentSubscriptionCurrentPeriodEnd(
-      data.user?.subscriptionCurrentPeriodEnd ?? null
-    );
-
-    if (data.user && typeof window !== "undefined") {
-      const currentUrl = new URL(window.location.href);
-      const welcome = currentUrl.searchParams.get("welcome");
-      if (welcome === "login" || welcome === "created") {
-        showWelcomeCelebration(data.user.name, welcome);
-        currentUrl.searchParams.delete("welcome");
-        window.history.replaceState({}, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
-      }
+    if (accountRefreshPromiseRef.current) {
+      return accountRefreshPromiseRef.current;
     }
+    if (Date.now() - lastAccountRefreshAtRef.current < 750) return;
+
+    const refresh = (async () => {
+      const data = (await fetch("/api/auth/me", {
+        cache: "no-store",
+      })
+        .then((response) => response.json())
+        .catch(() => ({ user: null }))) as { user: PublicAccount | null };
+
+      setCurrentAccountId(data.user?.id ?? "");
+      setCurrentAccountName(data.user?.name ?? "");
+      setCurrentAccountEmail(data.user?.email ?? "");
+      setCurrentAccountPlan(data.user?.plan ?? "basic");
+      setCurrentSubscriptionStatus(data.user?.subscriptionStatus ?? "inactive");
+      setCurrentSubscriptionCancelAtPeriodEnd(
+        data.user?.subscriptionCancelAtPeriodEnd ?? false
+      );
+      setCurrentSubscriptionCurrentPeriodEnd(
+        data.user?.subscriptionCurrentPeriodEnd ?? null
+      );
+
+      if (data.user && typeof window !== "undefined") {
+        const currentUrl = new URL(window.location.href);
+        const welcome = currentUrl.searchParams.get("welcome");
+        if (welcome === "login" || welcome === "created") {
+          showWelcomeCelebration(data.user.name, welcome);
+          currentUrl.searchParams.delete("welcome");
+          window.history.replaceState({}, "", `${currentUrl.pathname}${currentUrl.search}${currentUrl.hash}`);
+        }
+      }
+      lastAccountRefreshAtRef.current = Date.now();
+    })().finally(() => {
+      accountRefreshPromiseRef.current = null;
+    });
+    accountRefreshPromiseRef.current = refresh;
+    return refresh;
   };
 
   const closeAuthModal = () => {
@@ -1996,7 +2009,6 @@ export default function Page() {
     }
     setIsDrawing(false);
     setShapeStart(null);
-    setSnapshot(null);
     shapeEnd.current = null;
     setActiveText(null);
     setSelectedImageIndex(null);
@@ -6546,6 +6558,25 @@ export default function Page() {
       drawTextElement(ctx, remote.element);
     }
 
+    if (
+      isDrawingRef.current &&
+      shapeStart &&
+      shapeEnd.current &&
+      isDrawableShapeTool(tool)
+    ) {
+      drawShape(
+        ctx,
+        tool,
+        shapeStart.x,
+        shapeStart.y,
+        shapeEnd.current.x,
+        shapeEnd.current.y,
+        penWidth,
+        tool === "ruler" ? classicRulerColor : penColor,
+        strokeStyle
+      );
+    }
+
     const now = performance.now();
     const visibleEraserTrail = eraserTrailRef.current.filter(
       (sample) => now - sample.createdAt < 190
@@ -7124,10 +7155,6 @@ export default function Page() {
       );
     };
 
-    const moveText = (e: MouseEvent) => {
-      moveOrResizeText(e.clientX, e.clientY);
-    };
-
     const moveTextPointer = (e: PointerEvent) => {
       moveOrResizeText(e.clientX, e.clientY);
     };
@@ -7139,14 +7166,10 @@ export default function Page() {
       textResizeStart.current = null;
     };
 
-    window.addEventListener("mousemove", moveText);
-    window.addEventListener("mouseup", stopMovingText);
     window.addEventListener("pointermove", moveTextPointer);
     window.addEventListener("pointerup", stopMovingText);
 
     return () => {
-      window.removeEventListener("mousemove", moveText);
-      window.removeEventListener("mouseup", stopMovingText);
       window.removeEventListener("pointermove", moveTextPointer);
       window.removeEventListener("pointerup", stopMovingText);
     };
@@ -7943,13 +7966,7 @@ export default function Page() {
       setIsDrawing(true);
       setShapeStart({ x, y });
       shapeEnd.current = { x, y };
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-
-      const dpr = window.devicePixelRatio || 1;
-      setSnapshot(
-        ctx.getImageData(0, 0, canvas.clientWidth * dpr, canvas.clientHeight * dpr)
-      );
+      requestCanvasRedraw();
       return;
     }
 
@@ -8113,16 +8130,9 @@ export default function Page() {
 
     const { x, y } = getCanvasCoordinates(e);
 
-    if (isDrawableShapeTool(tool) && shapeStart && snapshot) {
+    if (isDrawableShapeTool(tool) && shapeStart) {
       shapeEnd.current = { x, y };
-      ctx.putImageData(snapshot, 0, 0);
-
-      ctx.save();
-      ctx.translate(offset.x, offset.y);
-      ctx.scale(zoom, zoom);
-      drawShape(ctx, tool, shapeStart.x, shapeStart.y, x, y);
-      ctx.restore();
-
+      requestCanvasRedraw();
       return;
     }
 
@@ -8293,7 +8303,6 @@ export default function Page() {
         renderedLiveStrokePointCountRef.current = 0;
         setIsDrawing(false);
         setShapeStart(null);
-        setSnapshot(null);
         shapeEnd.current = null;
         return;
       }
@@ -8318,7 +8327,6 @@ export default function Page() {
     isDrawingRef.current = false;
     setIsDrawing(false);
     setShapeStart(null);
-    setSnapshot(null);
     shapeEnd.current = null;
 
     if (e && tool === "pen") {
