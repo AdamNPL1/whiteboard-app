@@ -613,6 +613,7 @@ export default function Page() {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const fileUploadRef = useRef<HTMLInputElement | null>(null);
   const importedImageCacheRef = useRef<Map<string, HTMLImageElement>>(new Map());
+  const lastCanvasPointerClientRef = useRef<Point | null>(null);
   const imageTransformRef = useRef<{
     mode: "move" | "resize" | "rotate";
     pointerId: number;
@@ -7489,7 +7490,7 @@ export default function Page() {
     );
   };
 
-  const importImageFiles = async (files: File[]) => {
+  const importImageFiles = async (files: File[], pasteClientPoint?: Point) => {
     const imageFiles = files.filter((file) => file.type.startsWith("image/"));
     if (!imageFiles.length) {
       window.alert(t("Please choose an image file.", "Wybierz plik obrazu."));
@@ -7499,9 +7500,15 @@ export default function Page() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
+    const pointIsOnCanvas =
+      pasteClientPoint &&
+      pasteClientPoint.x >= rect.left &&
+      pasteClientPoint.x <= rect.right &&
+      pasteClientPoint.y >= rect.top &&
+      pasteClientPoint.y <= rect.bottom;
     const center = getCanvasCoordinatesFromClient(
-      rect.left + rect.width / 2,
-      rect.top + rect.height / 2
+      pointIsOnCanvas ? pasteClientPoint.x : rect.left + rect.width / 2,
+      pointIsOnCanvas ? pasteClientPoint.y : rect.top + rect.height / 2
     );
 
     const imported = await Promise.all(
@@ -7573,6 +7580,31 @@ export default function Page() {
     setSelectedImageIndex(firstImportedIndex);
     setTool("cursor");
   };
+
+  useEffect(() => {
+    const pasteClipboardImages = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLInputElement ||
+        target instanceof HTMLTextAreaElement ||
+        (target instanceof HTMLElement && target.isContentEditable)
+      ) {
+        return;
+      }
+
+      const imageFiles = Array.from(event.clipboardData?.items ?? [])
+        .filter((item) => item.kind === "file" && item.type.startsWith("image/"))
+        .map((item) => item.getAsFile())
+        .filter((file): file is File => file !== null);
+      if (!imageFiles.length) return;
+
+      event.preventDefault();
+      void importImageFiles(imageFiles, lastCanvasPointerClientRef.current ?? undefined);
+    };
+
+    window.addEventListener("paste", pasteClipboardImages);
+    return () => window.removeEventListener("paste", pasteClipboardImages);
+  });
 
   const movePenCursorElement = (point: Point) => {
     const cursorElement = penCursorElementRef.current;
@@ -7905,6 +7937,7 @@ export default function Page() {
   };
 
   const startDrawing = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    lastCanvasPointerClientRef.current = { x: e.clientX, y: e.clientY };
     syncPenCursorPoint(e);
 
     const ctx = canvasRef.current?.getContext("2d");
@@ -8085,6 +8118,7 @@ export default function Page() {
   };
 
   const draw = (e: React.PointerEvent<HTMLCanvasElement>) => {
+    lastCanvasPointerClientRef.current = { x: e.clientX, y: e.clientY };
     syncPenCursorPoint(e);
 
     if (isPanningRef.current && panStart.current) {
@@ -8739,6 +8773,20 @@ export default function Page() {
         }}
         onClick={handleCanvasClick}
         onContextMenu={(e) => e.preventDefault()}
+        onDragOver={(event) => {
+          if (Array.from(event.dataTransfer.items).some((item) => item.kind === "file")) {
+            event.preventDefault();
+            event.dataTransfer.dropEffect = "copy";
+          }
+        }}
+        onDrop={(event) => {
+          const imageFiles = Array.from(event.dataTransfer.files).filter((file) =>
+            file.type.startsWith("image/")
+          );
+          if (!imageFiles.length) return;
+          event.preventDefault();
+          void importImageFiles(imageFiles, { x: event.clientX, y: event.clientY });
+        }}
         onWheel={handleWheel}
         style={{
           position: "fixed",
