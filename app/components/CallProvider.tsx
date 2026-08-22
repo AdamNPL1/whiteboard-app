@@ -1517,31 +1517,59 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setCameraMessage("");
     let cameraStream: MediaStream | null = null;
     try {
-      try {
-        cameraStream = await navigator.mediaDevices.getUserMedia({
+      const openCamera = (deviceId?: string) =>
+        navigator.mediaDevices.getUserMedia({
           audio: false,
           video: {
-            ...(cameraId ? { deviceId: { exact: cameraId } } : {}),
+            ...(deviceId ? { deviceId: { exact: deviceId } } : {}),
             width: { ideal: 1280 },
             height: { ideal: 720 },
             frameRate: { ideal: 24, max: 30 },
             facingMode: { ideal: "user" },
           },
         });
-      } catch (error) {
-        // Some virtual, mobile, and older camera drivers reject optional
-        // preferences. Retry without them before reporting a camera failure.
+
+      try {
+        cameraStream = await openCamera(cameraId || undefined);
+      } catch (initialError) {
         if (
-          cameraId ||
-          !(error instanceof DOMException) ||
-          error.name !== "OverconstrainedError"
+          initialError instanceof DOMException &&
+          ["NotAllowedError", "SecurityError"].includes(initialError.name)
         ) {
-          throw error;
+          throw initialError;
         }
-        cameraStream = await navigator.mediaDevices.getUserMedia({
-          audio: false,
-          video: true,
-        });
+
+        // A laptop's default/integrated camera can be disabled or busy while a
+        // USB webcam is healthy. Try every other detected camera before failing.
+        const devices = await navigator.mediaDevices.enumerateDevices();
+        const alternateCameraIds = devices
+          .filter(
+            (device) =>
+              device.kind === "videoinput" &&
+              Boolean(device.deviceId) &&
+              device.deviceId !== cameraId
+          )
+          .map((device) => device.deviceId);
+        for (const alternateCameraId of alternateCameraIds) {
+          try {
+            cameraStream = await openCamera(alternateCameraId);
+            break;
+          } catch {
+            // Continue until all connected cameras have been tried.
+          }
+        }
+
+        if (!cameraStream && cameraId) {
+          try {
+            cameraStream = await navigator.mediaDevices.getUserMedia({
+              audio: false,
+              video: true,
+            });
+          } catch {
+            // Report the original error below; it best describes the failure.
+          }
+        }
+        if (!cameraStream) throw initialError;
       }
       const cameraTrack = cameraStream.getVideoTracks()[0];
       if (!cameraTrack) throw new Error("CAMERA_TRACK_MISSING");
@@ -1592,7 +1620,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           )
         );
       }
-    } catch {
+    } catch (error) {
       const failedTrack = localCameraTrackRef.current;
       const failedSender = localVideoSenderRef.current;
       const failedTransceiver = localVideoTransceiverRef.current;
@@ -1610,6 +1638,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (track !== failedTrack) track.stop();
       });
       setIsCameraOn(false);
+      if (error instanceof DOMException && error.name === "NotAllowedError") {
+        setCameraMessage(
+          t(
+            "Camera access is blocked. Click the lock icon beside the address, allow Camera, then reload Scriboo.",
+            "Dostęp do kamery jest zablokowany. Kliknij kłódkę obok adresu, zezwól na kamerę i odśwież Scriboo."
+          )
+        );
+        return;
+      }
+      if (error instanceof DOMException && error.name === "NotReadableError") {
+        setCameraMessage(
+          t(
+            "Windows can see the camera, but it is busy or unavailable. Close Camera, Zoom, Teams, OBS, or Discord, reconnect the USB webcam, then try again.",
+            "Windows widzi kamerę, ale jest ona zajęta lub niedostępna. Zamknij aplikacje Kamera, Zoom, Teams, OBS lub Discord, podłącz ponownie kamerę USB i spróbuj jeszcze raz."
+          )
+        );
+        return;
+      }
+      if (
+        error instanceof DOMException &&
+        ["NotFoundError", "OverconstrainedError"].includes(error.name)
+      ) {
+        setCameraMessage(
+          t(
+            "The selected camera is no longer available. Reconnect it or choose another camera from the list.",
+            "Wybrana kamera nie jest już dostępna. Podłącz ją ponownie lub wybierz inną kamerę z listy."
+          )
+        );
+        return;
+      }
       setCameraMessage(
         t(
           "Camera permission was denied or no camera is available. Audio is still connected.",
