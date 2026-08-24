@@ -178,6 +178,67 @@ type ImageElement = {
   rotation?: number;
   locked?: boolean;
 };
+
+const importedImageTargetBytes = 750 * 1024;
+const importedImageMaximumDimension = 1920;
+
+const getDataUrlByteLength = (dataUrl: string) => {
+  const separatorIndex = dataUrl.indexOf(",");
+  if (separatorIndex < 0) return new TextEncoder().encode(dataUrl).byteLength;
+  const metadata = dataUrl.slice(0, separatorIndex);
+  const payload = dataUrl.slice(separatorIndex + 1);
+  if (!metadata.includes(";base64")) {
+    return new TextEncoder().encode(decodeURIComponent(payload)).byteLength;
+  }
+  const padding = payload.endsWith("==") ? 2 : payload.endsWith("=") ? 1 : 0;
+  return Math.max(0, Math.floor((payload.length * 3) / 4) - padding);
+};
+
+const optimizeImportedImage = async (
+  image: HTMLImageElement,
+  originalDataUrl: string
+) => {
+  if (
+    getDataUrlByteLength(originalDataUrl) <= importedImageTargetBytes &&
+    Math.max(image.naturalWidth, image.naturalHeight) <=
+      importedImageMaximumDimension
+  ) {
+    return originalDataUrl;
+  }
+
+  let maximumDimension = importedImageMaximumDimension;
+  let quality = 0.86;
+  let bestDataUrl = originalDataUrl;
+
+  for (let attempt = 0; attempt < 7; attempt += 1) {
+    const scale = Math.min(
+      1,
+      maximumDimension / Math.max(image.naturalWidth, image.naturalHeight)
+    );
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.naturalWidth * scale));
+    canvas.height = Math.max(1, Math.round(image.naturalHeight * scale));
+    const context = canvas.getContext("2d", { alpha: true });
+    if (!context) throw new Error("IMAGE_OPTIMIZATION_UNAVAILABLE");
+    context.imageSmoothingEnabled = true;
+    context.imageSmoothingQuality = "high";
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    bestDataUrl = canvas.toDataURL("image/webp", quality);
+    if (getDataUrlByteLength(bestDataUrl) <= importedImageTargetBytes) {
+      return bestDataUrl;
+    }
+    if (quality > 0.58) {
+      quality -= 0.09;
+    } else {
+      maximumDimension = Math.max(720, Math.round(maximumDimension * 0.78));
+    }
+  }
+
+  if (getDataUrlByteLength(bestDataUrl) > importedImageTargetBytes * 1.25) {
+    throw new Error("IMAGE_OPTIMIZATION_TOO_LARGE");
+  }
+  return bestDataUrl;
+};
 type ConverterKind = "km-mi" | "kg-lb" | "c-f" | "gb-mb" | "cm-in";
 type ConverterElement = {
   kind: "converter";
@@ -7567,29 +7628,36 @@ export default function Page() {
 
               const image = new Image();
               image.onerror = () => resolve(null);
-              image.onload = () => {
-                const maxWidth = Math.max(240, rect.width / zoomRef.current * 0.55);
-                const maxHeight = Math.max(180, rect.height / zoomRef.current * 0.55);
-                const scale = Math.min(
-                  1,
-                  maxWidth / image.naturalWidth,
-                  maxHeight / image.naturalHeight
-                );
-                const width = Math.max(1, image.naturalWidth * scale);
-                const height = Math.max(1, image.naturalHeight * scale);
-                const src = reader.result as string;
-                importedImageCacheRef.current.set(src, image);
-                resolve({
-                  kind: "image",
-                  point: {
-                    x: center.x - width / 2 + index * 24,
-                    y: center.y - height / 2 + index * 24,
-                  },
-                  width,
-                  height,
-                  src,
-                  name: file.name,
-                });
+              image.onload = async () => {
+                try {
+                  const maxWidth = Math.max(240, rect.width / zoomRef.current * 0.55);
+                  const maxHeight = Math.max(180, rect.height / zoomRef.current * 0.55);
+                  const scale = Math.min(
+                    1,
+                    maxWidth / image.naturalWidth,
+                    maxHeight / image.naturalHeight
+                  );
+                  const width = Math.max(1, image.naturalWidth * scale);
+                  const height = Math.max(1, image.naturalHeight * scale);
+                  const src = await optimizeImportedImage(
+                    image,
+                    reader.result as string
+                  );
+                  importedImageCacheRef.current.set(src, image);
+                  resolve({
+                    kind: "image",
+                    point: {
+                      x: center.x - width / 2 + index * 24,
+                      y: center.y - height / 2 + index * 24,
+                    },
+                    width,
+                    height,
+                    src,
+                    name: file.name,
+                  });
+                } catch {
+                  resolve(null);
+                }
               };
               image.src = reader.result;
             };
