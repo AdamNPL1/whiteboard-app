@@ -691,14 +691,18 @@ export default function Page() {
     startAngle?: number;
     didRecordHistory?: boolean;
   } | null>(null);
-  const calculatorDragRef = useRef<{
-    mode: "move" | "resize";
+  const converterDragRef = useRef<{
     index: number;
     pointerId: number;
     startClient: Point;
     startPoint: Point;
-    startWidth: number;
-    startHeight: number;
+    didRecordHistory: boolean;
+  } | null>(null);
+  const calculatorDragRef = useRef<{
+    index: number;
+    pointerId: number;
+    startClient: Point;
+    startPoint: Point;
     didRecordHistory: boolean;
   } | null>(null);
   const backgroundColorInputRef = useRef<HTMLInputElement | null>(null);
@@ -2284,28 +2288,10 @@ export default function Page() {
                 typeof element.id === "string" &&
                 !serverStrokeIds.has(element.id)
             );
-            const serverImageIds = new Set(
-              serverElements
-                .filter(
-                  (element): element is ImageElement =>
-                    element.kind === "image" && typeof element.id === "string"
-                )
-                .map((image) => image.id as string)
-            );
-            const missingLocalImages = documentSnapshot.elements.filter(
-              (element): element is ImageElement =>
-                element.kind === "image" &&
-                typeof element.id === "string" &&
-                !serverImageIds.has(element.id)
-            );
 
-            if (missingLocalStrokes.length > 0 || missingLocalImages.length > 0) {
+            if (missingLocalStrokes.length > 0) {
               boardUpdatedAtRef.current[boardId] = latest.board.updatedAt;
-              setElements([
-                ...serverElements,
-                ...missingLocalStrokes,
-                ...missingLocalImages,
-              ]);
+              setElements([...serverElements, ...missingLocalStrokes]);
               setBoardSaveState("dirty");
               return;
             }
@@ -5409,15 +5395,16 @@ export default function Page() {
   useEffect(() => {
     if (!currentAccountId || !activeBoardId) return;
 
-    const recoverMissedBoardUpdate = () => {
+    const recoverMissedBoardUpdate = (force = false) => {
       if (document.visibilityState !== "visible" || !navigator.onLine) return;
-      // Realtime is the fast path, but an individual payload may still be
-      // dropped while the channel itself remains subscribed. Keep this slow
-      // authoritative check active so images and other completed objects can
-      // never remain missing indefinitely.
+      // Live broadcasts are authoritative while the channel is healthy. The
+      // polling path exists only to recover while Realtime is disconnected;
+      // continuously downloading the full board caused avoidable database
+      // pressure and could make sharing/calling queries time out.
+      if (!force && boardRealtimeReadyRef.current) return;
       void refreshBoardFromRealtime(activeBoardId).catch(() => undefined);
     };
-    const recoverAfterWake = () => recoverMissedBoardUpdate();
+    const recoverAfterWake = () => recoverMissedBoardUpdate(true);
 
     // Realtime remains the fast path. This modest fallback makes missed
     // broadcasts, tablet sleep/wake, and temporary channel failures recover
@@ -6644,12 +6631,12 @@ export default function Page() {
         continue;
       }
       if (element.kind === "converter") {
-        // Interactive workspace tools are rendered as fixed screen overlays.
-        // Do not paint a second zoomed/panned copy onto the board canvas.
+        drawConverterElement(ctx, element);
         continue;
       }
 
       if (element.kind === "calculator") {
+        drawCalculatorElement(ctx, element);
         continue;
       }
 
@@ -7531,6 +7518,53 @@ export default function Page() {
     );
   };
 
+  const beginConverterDrag = (
+    event: React.PointerEvent<HTMLElement>,
+    index: number,
+    converter: ConverterElement
+  ) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    converterDragRef.current = {
+      index,
+      pointerId: event.pointerId,
+      startClient: { x: event.clientX, y: event.clientY },
+      startPoint: converter.point,
+      didRecordHistory: false,
+    };
+  };
+
+  const moveConverter = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = converterDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (!drag.didRecordHistory) {
+      recordCanvasHistory();
+      drag.didRecordHistory = true;
+    }
+    const dx = (event.clientX - drag.startClient.x) / zoomRef.current;
+    const dy = (event.clientY - drag.startClient.y) / zoomRef.current;
+    setElements((previous) =>
+      previous.map((element, index) =>
+        index === drag.index && element.kind === "converter"
+          ? {
+              ...element,
+              point: { x: drag.startPoint.x + dx, y: drag.startPoint.y + dy },
+            }
+          : element
+      )
+    );
+  };
+
+  const endConverterDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    converterDragRef.current = null;
+  };
+
   const insertCalculatorObject = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
@@ -7552,7 +7586,7 @@ export default function Page() {
     ]);
   };
 
-  const beginCalculatorResize = (
+  const beginCalculatorDrag = (
     event: React.PointerEvent<HTMLElement>,
     index: number,
     calculator: CalculatorElement
@@ -7561,13 +7595,10 @@ export default function Page() {
     event.stopPropagation();
     event.currentTarget.setPointerCapture(event.pointerId);
     calculatorDragRef.current = {
-      mode: "resize",
       index,
       pointerId: event.pointerId,
       startClient: { x: event.clientX, y: event.clientY },
       startPoint: calculator.point,
-      startWidth: calculator.width,
-      startHeight: calculator.height,
       didRecordHistory: false,
     };
   };
@@ -7586,16 +7617,10 @@ export default function Page() {
     setElements((previous) =>
       previous.map((element, index) =>
         index === drag.index && element.kind === "calculator"
-          ? drag.mode === "resize"
-            ? {
-                ...element,
-                width: Math.min(420, Math.max(170, drag.startWidth + dx)),
-                height: Math.min(600, Math.max(250, drag.startHeight + dy)),
-              }
-            : {
-                ...element,
-                point: { x: drag.startPoint.x + dx, y: drag.startPoint.y + dy },
-              }
+          ? {
+              ...element,
+              point: { x: drag.startPoint.x + dx, y: drag.startPoint.y + dy },
+            }
           : element
       )
     );
@@ -8992,16 +9017,6 @@ export default function Page() {
       {!showBoardsMenu &&
         elements.map((element, index) => {
           if (element.kind !== "converter") return null;
-          const floatingToolTop =
-            topBarHeight +
-            14 +
-            elements.slice(0, index).reduce(
-              (total, previous) =>
-                previous.kind === "converter" || previous.kind === "calculator"
-                  ? total + previous.height + 12
-                  : total,
-              0
-            );
           const option =
             converterOptions.find((item) => item.value === element.converter) ??
             converterOptions[0];
@@ -9014,10 +9029,10 @@ export default function Page() {
               onMouseDown={(event) => event.stopPropagation()}
               style={{
                 position: "fixed",
-                right: "14px",
-                top: `${floatingToolTop}px`,
+                left: `${element.point.x * zoom + offset.x}px`,
+                top: `${element.point.y * zoom + offset.y + topBarHeight}px`,
                 width: `${element.width}px`,
-                height: `${element.height}px`,
+                minHeight: `${element.height}px`,
                 boxSizing: "border-box",
                 padding: "12px",
                 borderRadius: "18px",
@@ -9025,6 +9040,8 @@ export default function Page() {
                 background: "rgba(255,255,255,0.98)",
                 color: "#0f172a",
                 boxShadow: "0 12px 32px rgba(15,23,42,0.16)",
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left",
                 zIndex: 11,
                 display: "grid",
                 gap: "8px",
@@ -9032,11 +9049,17 @@ export default function Page() {
               }}
             >
               <div
+                onPointerDown={(event) => beginConverterDrag(event, index, element)}
+                onPointerMove={moveConverter}
+                onPointerUp={endConverterDrag}
+                onPointerCancel={endConverterDrag}
                 style={{
                   display: "flex",
                   alignItems: "center",
                   justifyContent: "space-between",
                   gap: "8px",
+                  cursor: "grab",
+                  touchAction: "none",
                 }}
               >
                 <strong style={{ fontSize: "14px" }}>
@@ -9143,16 +9166,6 @@ export default function Page() {
       {!showBoardsMenu &&
         elements.map((element, index) => {
           if (element.kind !== "calculator") return null;
-          const floatingToolTop =
-            topBarHeight +
-            14 +
-            elements.slice(0, index).reduce(
-              (total, previous) =>
-                previous.kind === "converter" || previous.kind === "calculator"
-                  ? total + previous.height + 12
-                  : total,
-              0
-            );
           const result = calculateExpression(element.expression);
           const keys = ["C", "(", ")", "÷", "7", "8", "9", "×", "4", "5", "6", "-", "1", "2", "3", "+", "⌫", "0", ".", "="];
           return (
@@ -9163,8 +9176,8 @@ export default function Page() {
               onMouseDown={(event) => event.stopPropagation()}
               style={{
                 position: "fixed",
-                right: "14px",
-                top: `${floatingToolTop}px`,
+                left: `${element.point.x * zoom + offset.x}px`,
+                top: `${element.point.y * zoom + offset.y + topBarHeight}px`,
                 width: `${element.width}px`,
                 minHeight: `${element.height}px`,
                 boxSizing: "border-box",
@@ -9174,15 +9187,20 @@ export default function Page() {
                 background: "rgba(255,255,255,0.98)",
                 color: "#0f172a",
                 boxShadow: "0 12px 32px rgba(15,23,42,0.16)",
+                transform: `scale(${zoom})`,
+                transformOrigin: "top left",
                 zIndex: 11,
                 display: "grid",
-                gridTemplateRows: "auto auto minmax(0, 1fr)",
                 gap: "9px",
                 fontFamily: appSansFontFamily,
               }}
             >
               <div
-                style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}
+                onPointerDown={(event) => beginCalculatorDrag(event, index, element)}
+                onPointerMove={moveCalculator}
+                onPointerUp={endCalculatorDrag}
+                onPointerCancel={endCalculatorDrag}
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", cursor: "grab", touchAction: "none" }}
               >
                 <strong style={{ fontSize: "14px" }}>{t("Calculator", "Kalkulator")}</strong>
                 <button
@@ -9202,7 +9220,7 @@ export default function Page() {
                 <span style={{ width: "100%", color: "#64748b", fontSize: "12px", textAlign: "right", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{element.expression || "0"}</span>
                 <strong style={{ fontSize: "19px", letterSpacing: "-0.02em" }}>{result === null ? "—" : formatConvertedValue(result)}</strong>
               </div>
-              <div style={{ minHeight: 0, display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gridTemplateRows: "repeat(5, minmax(0, 1fr))", gap: "6px" }}>
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(4, 1fr)", gap: "6px" }}>
                 {keys.map((key) => (
                   <button
                     key={key}
@@ -9216,8 +9234,7 @@ export default function Page() {
                       } else setCalculatorExpression(index, element.expression + key);
                     }}
                     style={{
-                      minHeight: 0,
-                      height: "100%",
+                      height: "31px",
                       border: "none",
                       borderRadius: "8px",
                       background: ["÷", "×", "-", "+", "="].includes(key) ? "#ede9fe" : key === "C" ? "#fee2e2" : "#f1f5f9",
@@ -9231,33 +9248,6 @@ export default function Page() {
                   </button>
                 ))}
               </div>
-              <button
-                type="button"
-                aria-label={t("Resize calculator", "Zmień rozmiar kalkulatora")}
-                title={t("Drag to resize", "Przeciągnij, aby zmienić rozmiar")}
-                onPointerDown={(event) => beginCalculatorResize(event, index, element)}
-                onPointerMove={moveCalculator}
-                onPointerUp={endCalculatorDrag}
-                onPointerCancel={endCalculatorDrag}
-                style={{
-                  position: "absolute",
-                  right: "4px",
-                  bottom: "4px",
-                  width: "20px",
-                  height: "20px",
-                  padding: 0,
-                  border: "none",
-                  borderRadius: "6px",
-                  background: "transparent",
-                  color: "#8b5cf6",
-                  cursor: "nwse-resize",
-                  touchAction: "none",
-                }}
-              >
-                <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true">
-                  <path d="M7 16h9V7M11 16l5-5" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
-                </svg>
-              </button>
             </section>
           );
         })}
