@@ -170,6 +170,7 @@ type TextElement = {
 };
 type ImageElement = {
   kind: "image";
+  id?: string;
   point: Point;
   width: number;
   height: number;
@@ -179,8 +180,10 @@ type ImageElement = {
   locked?: boolean;
 };
 
-const importedImageTargetBytes = 750 * 1024;
-const importedImageMaximumDimension = 1920;
+// Keep the base64-expanded Realtime payload below Supabase's 256 KB Free
+// project limit. The same optimized source is also persisted in the board.
+const importedImageTargetBytes = 135 * 1024;
+const importedImageMaximumDimension = 1600;
 
 const getDataUrlByteLength = (dataUrl: string) => {
   const separatorIndex = dataUrl.indexOf(",");
@@ -199,6 +202,7 @@ const optimizeImportedImage = async (
   originalDataUrl: string
 ) => {
   if (
+    originalDataUrl.startsWith("data:image/webp;base64,") &&
     getDataUrlByteLength(originalDataUrl) <= importedImageTargetBytes &&
     Math.max(image.naturalWidth, image.naturalHeight) <=
       importedImageMaximumDimension
@@ -1280,7 +1284,8 @@ export default function Page() {
         | "stroke-end"
         | "board-cleared"
         | "text-preview"
-        | "text-end",
+        | "text-end"
+        | "image-added",
       payload: object
     ) => {
       const channel = boardRealtimeChannelRef.current;
@@ -5173,6 +5178,56 @@ export default function Page() {
         setSelectedImageIndex(null);
         requestCanvasRedraw();
       });
+      nextChannel.on("broadcast", { event: "image-added" }, ({ payload }) => {
+        reportBoardEvent("image-added", payload);
+        if (!payload || typeof payload !== "object") return;
+        const message = payload as {
+          version?: unknown;
+          boardId?: unknown;
+          senderId?: unknown;
+          image?: unknown;
+        };
+        if (
+          message.version !== 1 ||
+          message.boardId !== activeBoardId ||
+          message.senderId === boardRealtimeClientIdRef.current ||
+          typeof message.senderId !== "string" ||
+          !message.image ||
+          typeof message.image !== "object"
+        ) return;
+        const image = message.image as Partial<ImageElement>;
+        if (
+          image.kind !== "image" ||
+          typeof image.id !== "string" ||
+          image.id.length > 100 ||
+          !image.point ||
+          !Number.isFinite(image.point.x) ||
+          !Number.isFinite(image.point.y) ||
+          !Number.isFinite(image.width) ||
+          !Number.isFinite(image.height) ||
+          (image.width as number) <= 0 ||
+          (image.height as number) <= 0 ||
+          (image.width as number) > 20_000 ||
+          (image.height as number) > 20_000 ||
+          typeof image.src !== "string" ||
+          !image.src.startsWith("data:image/webp;base64,") ||
+          getDataUrlByteLength(image.src) > importedImageTargetBytes * 1.25 ||
+          typeof image.name !== "string" ||
+          image.name.length > 500
+        ) return;
+
+        const receivedImage = image as ImageElement;
+        suppressBoardAutosaveUntilRef.current = Date.now() + 1_200;
+        setElements((previous) =>
+          previous.some(
+            (element) =>
+              element.kind === "image" && element.id === receivedImage.id
+          )
+            ? previous
+            : [...previous, receivedImage]
+        );
+        requestCanvasRedraw();
+      });
       nextChannel.on("broadcast", { event: "text-preview" }, ({ payload }) => {
         reportBoardEvent("text-preview", payload);
         if (!payload || typeof payload !== "object") return;
@@ -7646,6 +7701,7 @@ export default function Page() {
                   importedImageCacheRef.current.set(src, image);
                   resolve({
                     kind: "image",
+                    id: crypto.randomUUID(),
                     point: {
                       x: center.x - width / 2 + index * 24,
                       y: center.y - height / 2 + index * 24,
@@ -7682,6 +7738,14 @@ export default function Page() {
     const firstImportedIndex = elements.length;
     recordCanvasHistory();
     setElements((previous) => [...previous, ...validImages]);
+    for (const image of validImages) {
+      sendLiveStrokeMessage("image-added", {
+        version: 1,
+        boardId: activeBoardId,
+        senderId: boardRealtimeClientIdRef.current,
+        image,
+      });
+    }
     setSelectedImageIndex(firstImportedIndex);
     setTool("cursor");
   };
