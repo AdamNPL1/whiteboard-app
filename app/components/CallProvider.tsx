@@ -12,8 +12,10 @@ import {
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   LoaderCircle,
+  Maximize2,
   Mic,
   MicOff,
+  Minus,
   Phone,
   PhoneOff,
   Video,
@@ -176,6 +178,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [cameraDevices, setCameraDevices] = useState<CameraDevice[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
+  const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
+  const [callPanelPosition, setCallPanelPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
 
   const userRef = useRef<CurrentUser | null>(null);
   const callRef = useRef<CallRecord | null>(null);
@@ -212,6 +219,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callAudioContextRef = useRef<AudioContext | null>(null);
   const callSoundIntervalRef = useRef<number | null>(null);
   const activeCallTonesRef = useRef(new Set<OscillatorNode>());
+  const callPanelRef = useRef<HTMLElement | null>(null);
+  const callPanelDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
 
   useEffect(() => {
     userRef.current = user;
@@ -430,6 +443,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsMuted(false);
     setRemoteMuted(false);
     setConnectionState("");
+    setIsCallPanelMinimized(false);
     try {
       clearCallResources();
     } catch (error) {
@@ -862,77 +876,77 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (connectionTimeoutRef.current === null) {
         connectionTimeoutRef.current = window.setTimeout(() => {
           void (async () => {
-          const latestConnection = peerConnectionRef.current;
-          const latestCall = callRef.current;
-          if (
-            !latestCall ||
-            latestConnection?.connectionState === "connected" ||
-            isTerminatingCallRef.current ||
-            phaseRef.current === "ended"
-          ) {
-            return;
-          }
+            const latestConnection = peerConnectionRef.current;
+            const latestCall = callRef.current;
+            if (
+              !latestCall ||
+              latestConnection?.connectionState === "connected" ||
+              isTerminatingCallRef.current ||
+              phaseRef.current === "ended"
+            ) {
+              return;
+            }
 
-          // A remote hang-up can reach the database at the same moment as the
-          // connection diagnostic. Terminal call state must win that race.
-          const refreshed = await apiRequest<{ call: CallRecord }>(
-            `/api/calls/${latestCall.id}`
-          ).catch(() => null);
-          if (
-            isTerminatingCallRef.current ||
-            ["ended"].includes(phaseRef.current) ||
-            peerConnectionRef.current?.connectionState === "connected"
-          ) {
-            return;
-          }
-          if (
-            refreshed &&
-            ["declined", "cancelled", "missed", "ended"].includes(
-              refreshed.call.status
-            )
-          ) {
+            // A remote hang-up can reach the database at the same moment as the
+            // connection diagnostic. Terminal call state must win that race.
+            const refreshed = await apiRequest<{ call: CallRecord }>(
+              `/api/calls/${latestCall.id}`
+            ).catch(() => null);
+            if (
+              isTerminatingCallRef.current ||
+              ["ended"].includes(phaseRef.current) ||
+              peerConnectionRef.current?.connectionState === "connected"
+            ) {
+              return;
+            }
+            if (
+              refreshed &&
+              ["declined", "cancelled", "missed", "ended"].includes(
+                refreshed.call.status
+              )
+            ) {
+              isTerminatingCallRef.current = true;
+              phaseRef.current = "ended";
+              clearCallResources();
+              setConnectionState("");
+              setMessage(
+                refreshed.call.status === "declined"
+                  ? t("Call declined.", "Połączenie odrzucone.")
+                  : refreshed.call.status === "missed"
+                    ? t("No answer.", "Brak odpowiedzi.")
+                    : t("Call ended.", "Połączenie zakończone.")
+              );
+              setPhase("ended");
+              return;
+            }
+
+            const relayAvailable = localCandidateTypesRef.current.has("relay");
+            const remoteRelayReceived = remoteCandidateTypesRef.current.has("relay");
             isTerminatingCallRef.current = true;
-            phaseRef.current = "ended";
+            void sendSignal({ kind: "ended" }).catch(() => undefined);
+            void apiRequest(`/api/calls/${latestCall.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({ action: "end" }),
+              keepalive: true,
+            }).catch(() => undefined);
             clearCallResources();
-            setConnectionState("");
             setMessage(
-              refreshed.call.status === "declined"
-                ? t("Call declined.", "Połączenie odrzucone.")
-                : refreshed.call.status === "missed"
-                  ? t("No answer.", "Brak odpowiedzi.")
-                  : t("Call ended.", "Połączenie zakończone.")
-            );
-            setPhase("ended");
-            return;
-          }
-
-          const relayAvailable = localCandidateTypesRef.current.has("relay");
-          const remoteRelayReceived = remoteCandidateTypesRef.current.has("relay");
-          isTerminatingCallRef.current = true;
-          void sendSignal({ kind: "ended" }).catch(() => undefined);
-          void apiRequest(`/api/calls/${latestCall.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ action: "end" }),
-            keepalive: true,
-          }).catch(() => undefined);
-          clearCallResources();
-          setMessage(
-            !relayAvailable
-              ? t(
+              !relayAvailable
+                ? t(
                   "The call could not reach the network relay. Check the network and try again. (ICE-R0)",
                   "PoÅ‚Ä…czenie nie mogÅ‚o dotrzeÄ‡ do przekaÅºnika sieciowego. SprawdÅº sieÄ‡ i sprÃ³buj ponownie. (ICE-R0)"
                 )
-              : !remoteRelayReceived
-                ? t(
+                : !remoteRelayReceived
+                  ? t(
                     "The network relay was available, but relay information was not received from the other device. Please try again. (ICE-R1)",
                     "PrzekaÅºnik sieciowy byÅ‚ dostÄ™pny, ale nie otrzymano informacji o przekaÅºniku z drugiego urzÄ…dzenia. SprÃ³buj ponownie. (ICE-R1)"
                   )
-                : t(
+                  : t(
                     "Both devices reached the network relay, but the call could not connect. Please try again. (ICE-R2)",
                     "Oba urzÄ…dzenia dotarÅ‚y do przekaÅºnika sieciowego, ale nie udaÅ‚o siÄ™ poÅ‚Ä…czyÄ‡. SprÃ³buj ponownie. (ICE-R2)"
                   )
-          );
-          setPhase("error");
+            );
+            setPhase("error");
           })();
         }, 25_000);
       }
@@ -1743,6 +1757,51 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               : t("Connected", "Połączono")
             : message;
 
+  const beginCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (
+      (event.target as HTMLElement).closest(
+        "button, input, select, option, label, video, audio, a"
+      )
+    ) return;
+    const panel = callPanelRef.current;
+    if (!panel) return;
+    const rect = panel.getBoundingClientRect();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    callPanelDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setCallPanelPosition({ left: rect.left, top: rect.top });
+  };
+
+  const moveCallPanel = (event: React.PointerEvent<HTMLElement>) => {
+    const drag = callPanelDragRef.current;
+    const panel = callPanelRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !panel) return;
+    event.preventDefault();
+    const margin = 8;
+    const rect = panel.getBoundingClientRect();
+    setCallPanelPosition({
+      left: Math.min(
+        Math.max(margin, event.clientX - drag.offsetX),
+        Math.max(margin, window.innerWidth - rect.width - margin)
+      ),
+      top: Math.min(
+        Math.max(margin, event.clientY - drag.offsetY),
+        Math.max(margin, window.innerHeight - rect.height - margin)
+      ),
+    });
+  };
+
+  const endCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    callPanelDragRef.current = null;
+  };
+
   return (
     <CallContext.Provider value={contextValue}>
       {children}
@@ -1839,17 +1898,23 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       {phase !== "idle" && phase !== "choosing" && (
         <section
+          ref={callPanelRef}
           className="scriboo-call-panel"
           aria-label={t("Audio call", "Połączenie audio")}
+          onPointerDown={beginCallPanelDrag}
+          onPointerMove={moveCallPanel}
+          onPointerUp={endCallPanelDrag}
+          onPointerCancel={endCallPanelDrag}
           style={{
             position: "fixed",
-            right: "18px",
-            top: "74px",
+            right: callPanelPosition ? "auto" : "18px",
+            left: callPanelPosition ? `${callPanelPosition.left}px` : "auto",
+            top: callPanelPosition ? `${callPanelPosition.top}px` : "74px",
             zIndex: 210,
             width: "min(350px, calc(100vw - 36px))",
             maxHeight: "calc(100dvh - 92px)",
-            overflowY: "auto",
-            padding: "18px",
+            overflowY: isCallPanelMinimized ? "hidden" : "auto",
+            padding: isCallPanelMinimized ? "10px 12px" : "18px",
             borderRadius: "20px",
             border: "1px solid rgba(203,213,225,0.88)",
             background: "rgba(255,255,255,0.97)",
@@ -1857,22 +1922,94 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             boxShadow: "0 24px 70px rgba(15,23,42,0.24)",
             backdropFilter: "blur(18px)",
             display: "grid",
-            gap: "13px",
+            gap: isCallPanelMinimized ? 0 : "13px",
           }}
         >
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: isCallPanelMinimized ? "9px" : "12px",
+              cursor: callPanelDragRef.current ? "grabbing" : "grab",
+              touchAction: "none",
+              userSelect: "none",
+            }}
+          >
             <span style={{ width: "42px", height: "42px", borderRadius: "999px", background: "linear-gradient(135deg,#7c3aed,#60a5fa)", color: "white", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
               <Phone size={18} />
             </span>
-            <div style={{ minWidth: 0, display: "grid", gap: "3px" }}>
+            <div style={{ minWidth: 0, display: "grid", gap: "3px", flex: 1 }}>
               <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peerName || t("Audio call", "Połączenie audio")}</strong>
               <span style={{ color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{callBoardName}</span>
             </div>
+            <button
+              type="button"
+              aria-label={isCallPanelMinimized ? t("Restore call panel", "Przywróć panel połączenia") : t("Minimize call panel", "Zminimalizuj panel połączenia")}
+              title={isCallPanelMinimized ? t("Restore", "Przywróć") : t("Minimize", "Zminimalizuj")}
+              onClick={() => setIsCallPanelMinimized((isMinimized) => !isMinimized)}
+              style={{
+                width: "32px",
+                height: "32px",
+                flex: "0 0 auto",
+                border: "1px solid #e2e8f0",
+                borderRadius: "9px",
+                background: "#f8fafc",
+                color: "#475569",
+                display: "grid",
+                placeItems: "center",
+                padding: 0,
+                cursor: "pointer",
+              }}
+            >
+              {isCallPanelMinimized ? <Maximize2 size={15} /> : <Minus size={16} />}
+            </button>
           </div>
+          {!isCallPanelMinimized && (
+            <>
           <div aria-live="polite" style={{ color: phase === "error" ? "#b91c1c" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {statusText || connectionState}
           </div>
+          {phase === "connected" && (
+            <label
+              style={{
+                display: "grid",
+                gap: "8px",
+                padding: "12px",
+                borderRadius: "12px",
+                border: "1px solid #e2e8f0",
+                background: "#f8fafc",
+              }}
+            >
+              <span
+                style={{
+                  color: "#475569",
+                  fontSize: "13px",
+                  fontWeight: 650,
+                }}
+              >
+                {t("Call volume", "Głośność rozmowy")}
+              </span>
 
+              <input
+                type="range"
+                min="0"
+                max="1"
+                step="0.05"
+                defaultValue="1"
+                aria-label={t("Call volume", "Głośność rozmowy")}
+                onChange={(event) => {
+                  if (remoteAudioRef.current) {
+                    remoteAudioRef.current.volume = Number(event.target.value);
+                  }
+                }}
+                style={{
+                  width: "100%",
+                  accentColor: "#7c3aed",
+                  cursor: "pointer",
+                }}
+              />
+            </label>
+          )}
           {isCallToneBlocked && (phase === "incoming" || phase === "outgoing") && (
             <button
               type="button"
@@ -2083,6 +2220,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 <PhoneOff size={17} /> {phase === "outgoing" ? t("Cancel", "Anuluj") : t("End", "Zakończ")}
               </button>
             </div>
+          )}
+            </>
           )}
         </section>
       )}

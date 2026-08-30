@@ -7376,6 +7376,13 @@ export default function Page() {
   ) => getCanvasCoordinatesFromClient(e.clientX, e.clientY);
 
   const insertConverterObject = () => {
+    if (elements.some((element) => element.kind === "converter")) {
+      recordCanvasHistory();
+      setElements((previous) =>
+        previous.filter((element) => element.kind !== "converter")
+      );
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -7591,6 +7598,13 @@ export default function Page() {
   };
 
   const insertCalculatorObject = () => {
+    if (elements.some((element) => element.kind === "calculator")) {
+      recordCanvasHistory();
+      setElements((previous) =>
+        previous.filter((element) => element.kind !== "calculator")
+      );
+      return;
+    }
     const canvas = canvasRef.current;
     if (!canvas) return;
     const rect = canvas.getBoundingClientRect();
@@ -18496,7 +18510,11 @@ export default function Page() {
 
             <button
               type="button"
-              aria-label={t("Add unit converter", "Dodaj przelicznik jednostek")}
+              aria-label={
+                elements.some((element) => element.kind === "converter")
+                  ? t("Close unit converter", "Zamknij przelicznik jednostek")
+                  : t("Add unit converter", "Dodaj przelicznik jednostek")
+              }
               title={t("Unit converter", "Przelicznik jednostek")}
               onClick={insertConverterObject}
               style={{
@@ -18504,7 +18522,9 @@ export default function Page() {
                 height: "36px",
                 borderRadius: "9px",
                 border: "1px solid rgba(75,143,255,0.2)",
-                background: "rgba(255,255,255,0.06)",
+                background: elements.some((element) => element.kind === "converter")
+                  ? "rgba(124,58,237,0.14)"
+                  : "rgba(255,255,255,0.06)",
                 display: "grid",
                 placeItems: "center",
                 padding: 0,
@@ -18526,7 +18546,11 @@ export default function Page() {
 
             <button
               type="button"
-              aria-label={t("Add calculator", "Dodaj kalkulator")}
+              aria-label={
+                elements.some((element) => element.kind === "calculator")
+                  ? t("Close calculator", "Zamknij kalkulator")
+                  : t("Add calculator", "Dodaj kalkulator")
+              }
               title={t("Calculator", "Kalkulator")}
               onClick={insertCalculatorObject}
               style={{
@@ -18534,7 +18558,9 @@ export default function Page() {
                 height: "36px",
                 borderRadius: "9px",
                 border: "1px solid rgba(75,143,255,0.2)",
-                background: "rgba(255,255,255,0.06)",
+                background: elements.some((element) => element.kind === "calculator")
+                  ? "rgba(124,58,237,0.14)"
+                  : "rgba(255,255,255,0.06)",
                 display: "grid",
                 placeItems: "center",
                 padding: 0,
@@ -18557,9 +18583,13 @@ export default function Page() {
 
             <button
               type="button"
-              aria-label={t("Open personal layer", "Otwórz warstwę prywatną")}
+              aria-label={
+                showPersonalLayer
+                  ? t("Close personal layer", "Zamknij warstwę prywatną")
+                  : t("Open personal layer", "Otwórz warstwę prywatną")
+              }
               title={t("Personal writing layer", "Prywatna warstwa tekstowa")}
-              onClick={() => setShowPersonalLayer(true)}
+              onClick={() => setShowPersonalLayer((isOpen) => !isOpen)}
               style={{
                 width: "36px",
                 height: "36px",
