@@ -478,8 +478,14 @@ export default function Page() {
   const darkCanvasColor = "#111111";
   const neonCanvasBackground = "neon";
   const neonCanvasBaseColor = "#070816";
-  const classicRulerColor = "#d0a12b";
-  const classicRulerTextColor = "#3b2908";
+  const rulerGradientStops = [
+    { offset: 0, color: "#8b46ff" },
+    { offset: 0.46, color: "#4b8fff" },
+    { offset: 0.78, color: "#19c3bc" },
+    { offset: 1, color: "#30cf68" },
+  ] as const;
+  const rulerFallbackColor = rulerGradientStops[0].color;
+  const rulerTextColor = "#ffffff";
   const floralCanvasBackground = "floral";
   const floralBackgroundImage = "/floral-background.png";
   const floralBackgroundTile = { width: 1600, height: 900 };
@@ -4559,23 +4565,38 @@ export default function Page() {
         );
         const labelX = (element.start.x + element.end.x) / 2;
         const labelY = (element.start.y + element.end.y) / 2 - 12;
+        const rulerGradientId = `scriboo-ruler-gradient-${index}`;
         return (
           <g key={index}>
+            <defs>
+              <linearGradient
+                id={rulerGradientId}
+                x1={element.start.x}
+                y1={element.start.y}
+                x2={element.end.x}
+                y2={element.end.y}
+                gradientUnits="userSpaceOnUse"
+              >
+                {rulerGradientStops.map((stop) => (
+                  <stop key={stop.offset} offset={stop.offset} stopColor={stop.color} />
+                ))}
+              </linearGradient>
+            </defs>
             <line
               x1={element.start.x}
               y1={element.start.y}
               x2={element.end.x}
               y2={element.end.y}
-              stroke={classicRulerColor}
+              stroke={`url(#${rulerGradientId})`}
               strokeWidth={element.width}
               strokeLinecap="round"
             />
-            <circle cx={element.start.x} cy={element.start.y} r={3} fill={classicRulerColor} />
-            <circle cx={element.end.x} cy={element.end.y} r={3} fill={classicRulerColor} />
+            <circle cx={element.start.x} cy={element.start.y} r={3} fill={rulerFallbackColor} />
+            <circle cx={element.end.x} cy={element.end.y} r={3} fill={rulerGradientStops[3].color} />
             <text
               x={labelX}
               y={labelY}
-              fill={classicRulerColor}
+              fill={`url(#${rulerGradientId})`}
               fontSize="12"
               fontWeight="700"
               textAnchor="middle"
@@ -6137,7 +6158,11 @@ export default function Page() {
       ctx.rotate(angle);
       ctx.setLineDash([]);
       ctx.lineCap = "round";
-      ctx.strokeStyle = classicRulerColor;
+      const rulerGradient = ctx.createLinearGradient(0, 0, length, 0);
+      rulerGradientStops.forEach((stop) => {
+        rulerGradient.addColorStop(stop.offset, stop.color);
+      });
+      ctx.strokeStyle = rulerGradient;
       ctx.beginPath();
       ctx.moveTo(0, 0);
       ctx.lineTo(length, 0);
@@ -6162,11 +6187,11 @@ export default function Page() {
       const labelWidth = ctx.measureText(label).width + 14;
       const labelX = length / 2;
       const labelY = -19;
-      ctx.fillStyle = classicRulerColor;
+      ctx.fillStyle = rulerGradient;
       ctx.beginPath();
       ctx.roundRect(labelX - labelWidth / 2, labelY - 10, labelWidth, 20, 7);
       ctx.fill();
-      ctx.fillStyle = classicRulerTextColor;
+      ctx.fillStyle = rulerTextColor;
       ctx.fillText(label, labelX, labelY + 0.5);
       ctx.restore();
       return;
@@ -6731,7 +6756,7 @@ export default function Page() {
         shapeEnd.current.x,
         shapeEnd.current.y,
         penWidth,
-        tool === "ruler" ? classicRulerColor : penColor,
+        tool === "ruler" ? rulerFallbackColor : penColor,
         strokeStyle
       );
     }
@@ -8502,7 +8527,7 @@ export default function Page() {
           start: shapeStart,
           end: finalShapeEnd,
           width: penWidth,
-          color: tool === "ruler" ? classicRulerColor : penColor,
+          color: tool === "ruler" ? rulerFallbackColor : penColor,
           style: strokeStyle,
         },
       ]);
@@ -9338,7 +9363,7 @@ export default function Page() {
               outline: "none",
               background: "transparent",
               color: "#111827",
-              fontFamily: "Georgia, 'Times New Roman', serif",
+              fontFamily: '"Lato", Arial, Helvetica, sans-serif',
               fontSize: "25px",
               fontWeight: 700,
               letterSpacing: "-0.025em",
@@ -9370,7 +9395,7 @@ export default function Page() {
                 "linear-gradient(90deg, transparent 0, transparent 27px, rgba(248,113,113,0.2) 28px, transparent 29px), repeating-linear-gradient(180deg, transparent 0, transparent 27px, rgba(148,163,184,0.18) 28px, transparent 29px)",
               backgroundPosition: "0 10px",
               color: "#263246",
-              fontFamily: "Georgia, 'Times New Roman', serif",
+              fontFamily: '"Lato", Arial, Helvetica, sans-serif',
               fontSize: "16px",
               lineHeight: "29px",
               caretColor: "#6d28d9",
