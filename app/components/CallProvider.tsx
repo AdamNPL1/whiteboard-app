@@ -218,6 +218,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const identityRefreshQueuedRef = useRef(false);
   const activeCallsRequestRef = useRef<Promise<void> | null>(null);
   const callStatusPollBusyRef = useRef(false);
+  const callHeartbeatRef = useRef<number | null>(null);
+  const callHeartbeatBusyRef = useRef(false);
   const reconnectAttemptsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
@@ -405,6 +407,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
     callStatsBusyRef.current = false;
     callStatusPollBusyRef.current = false;
+    if (callHeartbeatRef.current !== null) {
+      window.clearInterval(callHeartbeatRef.current);
+      callHeartbeatRef.current = null;
+    }
+    callHeartbeatBusyRef.current = false;
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
     queuedCandidatesRef.current = [];
@@ -446,6 +453,41 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (channel) void getSupabaseBrowserClient().removeChannel(channel);
   }, [stopCallPoll, stopCallSounds]);
 
+  const persistCallTermination = useCallback(
+    async (activeCall: CallRecord, action: "cancel" | "end") => {
+      const retryDelays = [0, 1_000, 3_000];
+      for (const delay of retryDelays) {
+        if (delay) {
+          await new Promise<void>((resolve) => window.setTimeout(resolve, delay));
+        }
+        try {
+          if (action === "end") {
+            await apiRequest(`/api/calls/${activeCall.id}`, {
+              method: "PATCH",
+              body: JSON.stringify({
+                action: "begin-ending",
+                reason: "hangup_requested",
+              }),
+              keepalive: true,
+            });
+          }
+          await apiRequest(`/api/calls/${activeCall.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({
+              action,
+              reason: action === "end" ? "local_hangup" : "caller_cancelled",
+            }),
+            keepalive: true,
+          });
+          return;
+        } catch {
+          // State transitions are idempotent, so a lost response can be retried.
+        }
+      }
+    },
+    []
+  );
+
   const resetToIdle = useCallback(() => {
     // Close the UI and invalidate asynchronous call work first. Browser media
     // cleanup can occasionally throw on an already-closed track/connection;
@@ -476,6 +518,74 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const timeout = window.setTimeout(resetToIdle, 4_000);
     return () => window.clearTimeout(timeout);
   }, [phase, resetToIdle]);
+
+  const heartbeatCallId = call?.id;
+  const heartbeatCallStatus = call?.status;
+
+  useEffect(() => {
+    if (
+      !heartbeatCallId ||
+      !["accepted", "ending"].includes(heartbeatCallStatus ?? "") ||
+      !["connecting", "connected"].includes(phase)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const sendHeartbeat = async () => {
+      if (cancelled || callHeartbeatBusyRef.current) return;
+      callHeartbeatBusyRef.current = true;
+      try {
+        await apiRequest(`/api/calls/${heartbeatCallId}/heartbeat`, {
+          method: "POST",
+        });
+      } catch {
+        // Transient failures are tolerated. The server expires a participant
+        // only after the heartbeat lease becomes stale.
+      } finally {
+        callHeartbeatBusyRef.current = false;
+      }
+    };
+
+    void sendHeartbeat();
+    callHeartbeatRef.current = window.setInterval(() => {
+      void sendHeartbeat();
+    }, 15_000);
+    const sendAfterResume = () => void sendHeartbeat();
+    window.addEventListener("focus", sendAfterResume);
+    document.addEventListener("visibilitychange", sendAfterResume);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", sendAfterResume);
+      document.removeEventListener("visibilitychange", sendAfterResume);
+      if (callHeartbeatRef.current !== null) {
+        window.clearInterval(callHeartbeatRef.current);
+        callHeartbeatRef.current = null;
+      }
+      callHeartbeatBusyRef.current = false;
+    };
+  }, [heartbeatCallId, heartbeatCallStatus, phase]);
+
+  useEffect(() => {
+    const finishOnPageExit = () => {
+      const activeCall = callRef.current;
+      if (!activeCall || activeCall.status === "ended") return;
+      void fetch(`/api/calls/${activeCall.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          action: ["accepted", "ending"].includes(activeCall.status)
+            ? "end"
+            : "cancel",
+          reason: "page_closed",
+        }),
+        cache: "no-store",
+        keepalive: true,
+      });
+    };
+    window.addEventListener("pagehide", finishOnPageExit);
+    return () => window.removeEventListener("pagehide", finishOnPageExit);
+  }, []);
 
   useEffect(() => {
     if (
@@ -1651,18 +1761,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         startStatusPoll(data.call);
       } catch (error) {
         if (createdCall) {
-          void apiRequest(`/api/calls/${createdCall.id}`, {
-            method: "PATCH",
-            body: JSON.stringify({ action: "cancel" }),
-            keepalive: true,
-          }).catch(() => undefined);
+          void persistCallTermination(createdCall, "cancel");
         }
         clearCallResources();
         setMessage(error instanceof Error ? error.message : "Could not start the call.");
         setPhase("error");
       }
     },
-    [board, clearCallResources, connectCallChannel, getMicrophone, startStatusPoll, t, user]
+    [board, clearCallResources, connectCallChannel, getMicrophone, persistCallTermination, startStatusPoll, t, user]
   );
 
   const openCallChooser = useCallback(async () => {
@@ -1761,25 +1867,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     // the click even when Realtime acknowledgement is delayed or unavailable.
     void sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
-    void (async () => {
-      if (action === "end") {
-        await apiRequest(`/api/calls/${activeCall.id}`, {
-          method: "PATCH",
-          body: JSON.stringify({ action: "begin-ending", reason: "hangup_requested" }),
-          keepalive: true,
-        });
-      }
-      await apiRequest(`/api/calls/${activeCall.id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ action, reason: "local_hangup" }),
-        keepalive: true,
-      });
-    })().catch(() => undefined);
+    void persistCallTermination(activeCall, action);
     clearCallResources();
     setConnectionState("");
     setMessage(t("Call ended.", "Połączenie zakończone."));
     setPhase("ended");
-  }, [clearCallResources, resetToIdle, sendSignal, setConnectionState, t]);
+  }, [clearCallResources, persistCallTermination, resetToIdle, sendSignal, setConnectionState, t]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !isMuted;

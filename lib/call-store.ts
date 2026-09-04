@@ -45,6 +45,8 @@ type CallSessionRow = {
   version?: number;
   state_changed_at?: string;
   state_reason?: string;
+  caller_last_seen_at?: string | null;
+  recipient_last_seen_at?: string | null;
 };
 
 type BoardRow = {
@@ -60,7 +62,7 @@ type ShareRow = {
 };
 
 const callColumns =
-  "id,board_id,caller_user_id,recipient_user_id,status,outcome,version,state_changed_at,state_reason,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id";
+  "id,board_id,caller_user_id,recipient_user_id,status,outcome,version,state_changed_at,state_reason,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id,caller_last_seen_at,recipient_last_seen_at";
 
 const normalizeStoredStatus = (
   status: StoredCallStatus
@@ -93,6 +95,8 @@ const mapCallSession = (row: CallSessionRow): CallSession => ({
   declinedAt: row.declined_at ?? undefined,
   endedAt: row.ended_at ?? undefined,
   endedByUserId: row.ended_by_user_id ?? undefined,
+  callerLastSeenAt: row.caller_last_seen_at ?? undefined,
+  recipientLastSeenAt: row.recipient_last_seen_at ?? undefined,
 });
 
 const unwrapRpcRow = (data: unknown): CallSessionRow | null => {
@@ -114,6 +118,7 @@ const normalizeDatabaseCallError = (message: string) => {
     "CALL_CANNOT_DECLINE",
     "CALL_CANNOT_CANCEL",
     "CALL_CANNOT_END",
+    "CALL_NOT_ACTIVE",
     "CALL_INVALID_ACTION",
     "CALL_TRANSITION_CONFLICT",
     "CALL_INVALID_PARTICIPANT_STATE",
@@ -192,7 +197,7 @@ export const startBoardCall = async (
   clientRequestId: string
 ) => {
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
-    "start_board_call",
+    "start_board_call_with_heartbeat",
     {
       p_board_id: boardId,
       p_caller_user_id: callerUserId,
@@ -200,6 +205,7 @@ export const startBoardCall = async (
       p_client_request_id: clientRequestId,
       p_ring_seconds: 45,
       p_session_seconds: 24 * 60 * 60,
+      p_stale_seconds: 60,
     }
   );
 
@@ -235,6 +241,7 @@ export const getCallSessionForUser = async (callId: string, userId: string) => {
 export const getActiveCallsForUser = async (userId: string) => {
   await expireCalls();
   const now = new Date().toISOString();
+  const staleBefore = Date.now() - 60_000;
   const { data, error } = await getSupabaseServiceRoleClient()
     .from("call_sessions")
     .select(callColumns)
@@ -248,9 +255,16 @@ export const getActiveCallsForUser = async (userId: string) => {
   return ((data ?? []) as CallSessionRow[])
     .map(mapCallSession)
     .filter(
-      (call) =>
-        ["accepted", "ending"].includes(call.status) ||
-        new Date(call.ringExpiresAt).getTime() > Date.now()
+      (call) => {
+        if (["creating", "ringing"].includes(call.status)) {
+          return new Date(call.ringExpiresAt).getTime() > Date.now();
+        }
+        const initialPresence = call.acceptedAt ?? call.updatedAt;
+        return (
+          new Date(call.callerLastSeenAt ?? initialPresence).getTime() > staleBefore &&
+          new Date(call.recipientLastSeenAt ?? initialPresence).getTime() > staleBefore
+        );
+      }
     );
 };
 
@@ -277,6 +291,17 @@ export const transitionBoardCall = async (
     }
   );
 
+  if (error) throw new Error(normalizeDatabaseCallError(error.message));
+  const row = unwrapRpcRow(data);
+  if (!row) throw new Error("CALL_DATABASE_ERROR");
+  return mapCallSession(row);
+};
+
+export const heartbeatBoardCall = async (callId: string, userId: string) => {
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "heartbeat_board_call",
+    { p_call_id: callId, p_user_id: userId }
+  );
   if (error) throw new Error(normalizeDatabaseCallError(error.message));
   const row = unwrapRpcRow(data);
   if (!row) throw new Error("CALL_DATABASE_ERROR");

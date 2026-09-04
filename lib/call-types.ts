@@ -37,6 +37,8 @@ export type CallRecord = {
   declinedAt?: string;
   endedAt?: string;
   endedByUserId?: string;
+  callerLastSeenAt?: string;
+  recipientLastSeenAt?: string;
 };
 
 export type CallParticipantState = {
