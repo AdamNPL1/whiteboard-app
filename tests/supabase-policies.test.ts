@@ -82,6 +82,19 @@ describe("Supabase write boundaries", () => {
     );
   });
 
+  it("keeps durable signaling short-lived and server-owned", () => {
+    const sql = readSql("reliable-call-signaling.sql");
+
+    expect(sql).toContain("kind in ('offer', 'answer')");
+    expect(sql).toContain("interval '10 minutes'");
+    expect(sql).toContain("call_signal_payload_size_check");
+    expect(sql).toContain(
+      "revoke all on table public.call_signal_messages from anon, authenticated"
+    );
+    expect(sql).toContain("call_signal_messages_select_participant");
+    expect(sql).toContain("cleanup_expired_call_signals");
+  });
+
   it("limits private board Realtime topics to authorized board participants", () => {
     const sql = readSql("board-realtime.sql");
 

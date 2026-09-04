@@ -8,6 +8,8 @@ const mocks = vi.hoisted(() => ({
   startCall: vi.fn(),
   transitionCall: vi.fn(),
   updateParticipantState: vi.fn(),
+  saveSignal: vi.fn(),
+  getSignals: vi.fn(),
   generateTurn: vi.fn(),
 }));
 
@@ -24,6 +26,10 @@ vi.mock("@/lib/call-store", () => ({
 vi.mock("@/lib/cloudflare-turn", () => ({
   generateCloudflareTurnCredentials: mocks.generateTurn,
 }));
+vi.mock("@/lib/call-signal-store", () => ({
+  saveDurableCallSignal: mocks.saveSignal,
+  getRecoverableCallSignals: mocks.getSignals,
+}));
 vi.mock("@/lib/rate-limit", () => ({
   enforceRateLimit: vi.fn().mockResolvedValue({ allowed: true }),
   rateLimitResponse: vi.fn(),
@@ -36,6 +42,10 @@ import { POST as startCall } from "@/app/api/calls/route";
 import { PATCH as transitionCall } from "@/app/api/calls/[callId]/route";
 import { POST as getTurnCredentials } from "@/app/api/calls/[callId]/turn-credentials/route";
 import { PATCH as updateParticipantState } from "@/app/api/calls/[callId]/participant-state/route";
+import {
+  GET as recoverSignals,
+  POST as persistSignal,
+} from "@/app/api/calls/[callId]/signals/route";
 
 const caller = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -81,6 +91,8 @@ describe("call API authorization", () => {
       stateChangedAt: new Date().toISOString(),
       version: 2,
     });
+    mocks.saveSignal.mockResolvedValue(undefined);
+    mocks.getSignals.mockResolvedValue([]);
   });
 
   it("requires authentication before starting a call", async () => {
@@ -168,6 +180,54 @@ describe("call API authorization", () => {
     expect(mocks.updateParticipantState).toHaveBeenCalledWith(
       callId, caller.id, "connected", "ice_connected", 1
     );
+  });
+
+  it("persists an authorized offer for reconnect recovery", async () => {
+    const signal = {
+      protocolVersion: 1,
+      callId,
+      senderUserId: caller.id,
+      messageId: "55555555-5555-4555-8555-555555555555",
+      sentAt: Date.now(),
+      sequenceNumber: 1,
+      signalingVersion: 2,
+      generation: 1,
+      data: { kind: "offer", description: { type: "offer", sdp: "v=0" } },
+    };
+    const response = await persistSignal(
+      request(`/api/calls/${callId}/signals`, "POST", signal),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(201);
+    expect(mocks.saveSignal).toHaveBeenCalledWith(caller.id, signal);
+  });
+
+  it("rejects transient ICE candidates from durable storage", async () => {
+    const response = await persistSignal(
+      request(`/api/calls/${callId}/signals`, "POST", {
+        protocolVersion: 1,
+        callId,
+        senderUserId: caller.id,
+        messageId: "55555555-5555-4555-8555-555555555555",
+        sentAt: Date.now(),
+        sequenceNumber: 1,
+        signalingVersion: 2,
+        generation: 1,
+        data: { kind: "ice-candidate", candidate: { candidate: "candidate" } },
+      }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(400);
+    expect(mocks.saveSignal).not.toHaveBeenCalled();
+  });
+
+  it("loads missed durable signals for the requested version", async () => {
+    const response = await recoverSignals(
+      request(`/api/calls/${callId}/signals?version=2`, "GET"),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.getSignals).toHaveBeenCalledWith(callId, caller.id, 2);
   });
 
   it("issues TURN credentials only for an accepted active call", async () => {

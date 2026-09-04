@@ -32,6 +32,21 @@ import {
   browserCallReducer,
   initialBrowserCallState,
 } from "@/lib/browser-call-state";
+import {
+  CALL_SIGNAL_MAX_ATTEMPTS,
+  CALL_SIGNAL_PROTOCOL_VERSION,
+  callSignalRetryDelayMs,
+  createPendingCallSignal,
+  decideOfferCollision,
+  isCallSignalEnvelope,
+  isDurableCallSignal,
+  shouldRetryCallSignal,
+} from "@/lib/call-signaling";
+import type {
+  CallSignalData,
+  CallSignalEnvelope,
+  PendingCallSignal,
+} from "@/lib/call-signaling";
 import type {
   CallRecord,
   ParticipantConnectionState,
@@ -52,24 +67,6 @@ type CallPhase =
   | "connected"
   | "ended"
   | "error";
-type SignalData =
-  | { kind: "accepted" }
-  | { kind: "declined" }
-  | { kind: "ended" }
-  | { kind: "mute"; muted: boolean }
-  | { kind: "video-state"; enabled: boolean }
-  | { kind: "renegotiate" }
-  | { kind: "offer"; description: RTCSessionDescriptionInit }
-  | { kind: "answer"; description: RTCSessionDescriptionInit }
-  | { kind: "ice-candidate"; candidate: RTCIceCandidateInit };
-type SignalEnvelope = {
-  callId: string;
-  senderUserId: string;
-  messageId: string;
-  sentAt: number;
-  generation: number;
-  data: SignalData;
-};
 type CurrentUser = { id: string; name: string; email: string };
 type CameraDevice = { deviceId: string; label: string };
 
@@ -105,20 +102,6 @@ const apiRequest = async <T,>(
   };
   if (!response.ok) throw new Error(data.error || "Call request failed.");
   return data;
-};
-
-const isSignalEnvelope = (value: unknown): value is SignalEnvelope => {
-  if (!value || typeof value !== "object") return false;
-  const signal = value as Partial<SignalEnvelope>;
-  return (
-    typeof signal.callId === "string" &&
-    typeof signal.senderUserId === "string" &&
-    typeof signal.messageId === "string" &&
-    typeof signal.sentAt === "number" &&
-    Number.isSafeInteger(signal.generation) &&
-    Number(signal.generation) >= 0 &&
-    Boolean(signal.data && typeof signal.data === "object")
-  );
 };
 
 const readCandidateType = (candidate: RTCIceCandidateInit | RTCIceCandidate) => {
@@ -211,9 +194,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
-  const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
+  const queuedCandidatesRef = useRef<
+    Array<{ generation: number; candidate: RTCIceCandidateInit }>
+  >([]);
   const seenSignalsRef = useRef(new Set<string>());
   const negotiationGenerationRef = useRef(0);
+  const signalingVersionRef = useRef(1);
+  const signalSequenceRef = useRef(0);
+  const pendingSignalsRef = useRef(new Map<string, PendingCallSignal>());
+  const signalRetryIntervalRef = useRef<number | null>(null);
+  const signalingRecoveryRef = useRef<() => void>(() => undefined);
+  const makingOfferRef = useRef(false);
+  const ignoreOfferRef = useRef(false);
+  const settingRemoteAnswerRef = useRef(false);
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
@@ -244,6 +237,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [user]);
   useEffect(() => {
     callRef.current = call;
+    if (call?.status === "accepted") signalingVersionRef.current = call.version;
   }, [call]);
   useEffect(() => {
     phaseRef.current = phase;
@@ -416,6 +410,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     queuedCandidatesRef.current = [];
     seenSignalsRef.current.clear();
     negotiationGenerationRef.current = 0;
+    signalingVersionRef.current = 1;
+    signalSequenceRef.current = 0;
+    pendingSignalsRef.current.clear();
+    makingOfferRef.current = false;
+    ignoreOfferRef.current = false;
+    settingRemoteAnswerRef.current = false;
+    if (signalRetryIntervalRef.current !== null) {
+      window.clearInterval(signalRetryIntervalRef.current);
+      signalRetryIntervalRef.current = null;
+    }
     reconnectAttemptsRef.current = 0;
     localCandidateTypesRef.current.clear();
     remoteCandidateTypesRef.current.clear();
@@ -546,25 +550,45 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [t]);
 
-  const sendSignal = useCallback(async (data: SignalData) => {
+  const sendSignal = useCallback(async (
+    data: CallSignalData,
+    version = signalingVersionRef.current,
+    generation = negotiationGenerationRef.current
+  ) => {
     const activeCall = callRef.current;
     const activeUser = userRef.current;
     const channel = callChannelRef.current;
     if (!activeCall || !activeUser || !channel) return;
 
-    const envelope: SignalEnvelope = {
+    signalSequenceRef.current += 1;
+    const envelope: CallSignalEnvelope = {
+      protocolVersion: CALL_SIGNAL_PROTOCOL_VERSION,
       callId: activeCall.id,
       senderUserId: activeUser.id,
       messageId: crypto.randomUUID(),
       sentAt: Date.now(),
-      generation: negotiationGenerationRef.current,
+      sequenceNumber: signalSequenceRef.current,
+      signalingVersion: version,
+      generation,
       data,
     };
+    if (isDurableCallSignal(data)) {
+      await apiRequest(`/api/calls/${activeCall.id}/signals`, {
+        method: "POST",
+        body: JSON.stringify(envelope),
+      });
+    }
+    if (data.kind !== "ack") {
+      pendingSignalsRef.current.set(
+        envelope.messageId,
+        createPendingCallSignal(envelope)
+      );
+    }
     reportRealtimeDiagnostics({ callStage: `sending ${data.kind}`, error: "" });
     await channel.send({ type: "broadcast", event: "signal", payload: envelope });
   }, []);
 
-  const createAndSendOffer = useCallback(async () => {
+  const createAndSendOffer = useCallback(async (iceRestart = false) => {
     const connection = peerConnectionRef.current;
     if (!connection || connection.signalingState !== "stable") return;
     const videoTransceiver = localVideoTransceiverRef.current;
@@ -573,13 +597,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
       );
     }
-    negotiationGenerationRef.current += 1;
-    const offer = await connection.createOffer();
-    await connection.setLocalDescription(offer);
-    await sendSignal({
-      kind: "offer",
-      description: await getGatheredLocalDescription(connection),
-    });
+    makingOfferRef.current = true;
+    try {
+      negotiationGenerationRef.current += 1;
+      const offer = await connection.createOffer(
+        iceRestart ? { iceRestart: true } : undefined
+      );
+      await connection.setLocalDescription(offer);
+      await sendSignal({
+        kind: "offer",
+        description: await getGatheredLocalDescription(connection),
+      });
+    } finally {
+      makingOfferRef.current = false;
+    }
   }, [sendSignal]);
 
   const requestRenegotiation = useCallback(async () => {
@@ -592,6 +623,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       await sendSignal({ kind: "renegotiate" });
     }
   }, [createAndSendOffer, sendSignal]);
+
+  const resendPendingSignals = useCallback(() => {
+    const channel = callChannelRef.current;
+    const activeCallId = callRef.current?.id;
+    if (!channel || !activeCallId) return;
+    const now = Date.now();
+    for (const [messageId, pending] of pendingSignalsRef.current) {
+      if (
+        pending.envelope.callId !== activeCallId ||
+        pending.expiresAt <= now ||
+        pending.attempts >= CALL_SIGNAL_MAX_ATTEMPTS
+      ) {
+        pendingSignalsRef.current.delete(messageId);
+        continue;
+      }
+      if (!shouldRetryCallSignal(pending, now)) continue;
+      pending.attempts += 1;
+      pending.nextAttemptAt = now + callSignalRetryDelayMs(pending.attempts);
+      void channel.send({
+        type: "broadcast",
+        event: "signal",
+        payload: pending.envelope,
+      }).catch(() => undefined);
+    }
+  }, []);
 
   const connectCallChannel = useCallback(async (activeCall: CallRecord) => {
     const existing = callChannelRef.current;
@@ -609,6 +665,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     channel.on("broadcast", { event: "signal" }, ({ payload }) => {
       signalHandlerRef.current(payload);
     });
+    callChannelRef.current = channel;
+    let subscribedOnce = false;
 
     try {
       await new Promise<void>((resolve, reject) => {
@@ -623,6 +681,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
           if (status === "SUBSCRIBED") {
             window.clearTimeout(timeout);
+            if (subscribedOnce) {
+              signalingRecoveryRef.current();
+              for (const pending of pendingSignalsRef.current.values()) {
+                pending.nextAttemptAt = 0;
+              }
+              resendPendingSignals();
+            }
+            subscribedOnce = true;
             resolve();
           } else if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
             window.clearTimeout(timeout);
@@ -631,11 +697,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         });
       });
     } catch (error) {
+      if (callChannelRef.current === channel) callChannelRef.current = null;
       void supabase.removeChannel(channel);
       throw error;
     }
-    callChannelRef.current = channel;
-  }, []);
+    if (signalRetryIntervalRef.current !== null) {
+      window.clearInterval(signalRetryIntervalRef.current);
+    }
+    signalRetryIntervalRef.current = window.setInterval(resendPendingSignals, 500);
+  }, [resendPendingSignals]);
 
   const refreshTurnConfiguration = useCallback(async (activeCall: CallRecord) => {
     const data = await apiRequest<{
@@ -689,8 +759,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const connection = peerConnectionRef.current;
     if (!connection?.remoteDescription) return;
     const candidates = queuedCandidatesRef.current.splice(0);
-    for (const candidate of candidates) {
-      await connection.addIceCandidate(candidate).catch(() => undefined);
+    for (const queued of candidates) {
+      if (queued.generation > negotiationGenerationRef.current) {
+        queuedCandidatesRef.current.push(queued);
+      } else if (queued.generation === negotiationGenerationRef.current) {
+        await connection.addIceCandidate(queued.candidate).catch(() => undefined);
+      }
     }
   }, []);
 
@@ -798,13 +872,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               reconnectAttemptsRef.current += 1;
               void refreshTurnConfiguration(latestCall)
                 .then(async () => {
-                  negotiationGenerationRef.current += 1;
-                  const offer = await connection.createOffer({ iceRestart: true });
-                  await connection.setLocalDescription(offer);
-                  await sendSignal({
-                    kind: "offer",
-                    description: await getGatheredLocalDescription(connection),
-                  });
+                  await createAndSendOffer(true);
                 })
                 .catch(() => {
                   reportParticipantState("failed", "ice_restart_failed");
@@ -823,13 +891,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             reconnectAttemptsRef.current += 1;
             reportRealtimeDiagnostics({ reconnectAttempts: reconnectAttemptsRef.current });
             void (async () => {
-              negotiationGenerationRef.current += 1;
-              const offer = await connection.createOffer({ iceRestart: true });
-              await connection.setLocalDescription(offer);
-              await sendSignal({
-                kind: "offer",
-                description: await getGatheredLocalDescription(connection),
-              });
+              await createAndSendOffer(true);
             })().catch(() => {
               reportParticipantState("failed", "ice_restart_failed");
               reportCallFailure("ice_restart_failed");
@@ -918,13 +980,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }, refreshIn);
 
       if (callerCreatesOffer) {
-        negotiationGenerationRef.current += 1;
-        const offer = await connection.createOffer();
-        await connection.setLocalDescription(offer);
-        await sendSignal({
-          kind: "offer",
-          description: await getGatheredLocalDescription(connection),
-        });
+        await createAndSendOffer();
       }
 
       if (connectionRetryRef.current === null) {
@@ -943,13 +999,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           void refreshTurnConfiguration(latestCall)
             .then(async () => {
               latestConnection.restartIce();
-              negotiationGenerationRef.current += 1;
-              const retryOffer = await latestConnection.createOffer({ iceRestart: true });
-              await latestConnection.setLocalDescription(retryOffer);
-              await sendSignal({
-                kind: "offer",
-                description: await getGatheredLocalDescription(latestConnection),
-              });
+              await createAndSendOffer(true);
             })
             .catch(() => undefined);
         }, 10_000);
@@ -1036,7 +1086,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
@@ -1054,7 +1104,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const handleSignal = useCallback(
     async (payload: unknown) => {
-      if (!isSignalEnvelope(payload)) return;
+      if (!isCallSignalEnvelope(payload)) return;
       const activeCall = callRef.current;
       const activeUser = userRef.current;
       if (
@@ -1065,23 +1115,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         ![activeCall.callerUserId, activeCall.recipientUserId].includes(
           payload.senderUserId
         ) ||
-        Math.abs(Date.now() - payload.sentAt) > 2 * 60 * 1000 ||
-        seenSignalsRef.current.has(payload.messageId)
+        Math.abs(Date.now() - payload.sentAt) > 10 * 60 * 1000
       ) {
         return;
       }
-      seenSignalsRef.current.add(payload.messageId);
-      if (seenSignalsRef.current.size > 500) seenSignalsRef.current.clear();
-
       const signal = payload.data;
+      if (signal.kind === "ack") {
+        const pending = pendingSignalsRef.current.get(signal.acknowledgedMessageId);
+        if (
+          pending &&
+          pending.envelope.sequenceNumber === signal.acknowledgedSequence &&
+          pending.envelope.signalingVersion === payload.signalingVersion &&
+          pending.envelope.generation === payload.generation
+        ) {
+          pendingSignalsRef.current.delete(signal.acknowledgedMessageId);
+        }
+        return;
+      }
+      const currentVersion = signalingVersionRef.current;
       if (
-        ["answer", "ice-candidate"].includes(signal.kind) &&
+        (signal.kind === "accepted" && payload.signalingVersion < currentVersion) ||
+        (signal.kind !== "accepted" && payload.signalingVersion !== currentVersion)
+      ) return;
+      void sendSignal(
+        {
+          kind: "ack",
+          acknowledgedMessageId: payload.messageId,
+          acknowledgedSequence: payload.sequenceNumber,
+        },
+        payload.signalingVersion,
+        payload.generation
+      ).catch(() => undefined);
+      if (seenSignalsRef.current.has(payload.messageId)) return;
+      seenSignalsRef.current.add(payload.messageId);
+      if (seenSignalsRef.current.size > 500) {
+        const oldestMessageId = seenSignalsRef.current.values().next().value;
+        if (oldestMessageId) seenSignalsRef.current.delete(oldestMessageId);
+      }
+
+      if (
+        signal.kind === "answer" &&
         payload.generation !== negotiationGenerationRef.current
       ) {
         return;
       }
       if (signal.kind === "offer") {
         if (payload.generation < negotiationGenerationRef.current) return;
+        queuedCandidatesRef.current = queuedCandidatesRef.current.filter(
+          (queued) => queued.generation >= payload.generation
+        );
         negotiationGenerationRef.current = payload.generation;
       }
       reportRealtimeDiagnostics({ callStage: `received ${signal.kind}` });
@@ -1092,6 +1174,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (!authoritative || callRef.current?.id !== activeCall.id) return;
         dispatchBrowserCall({ type: "server-record", call: authoritative.call });
         callRef.current = authoritative.call;
+        signalingVersionRef.current = authoritative.call.version;
         if (
           authoritative.call.status === "accepted" &&
           activeUser.id === activeCall.callerUserId
@@ -1149,7 +1232,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (signal.kind === "offer") {
         if (phaseRef.current !== "connected") setPhase("connecting");
         const connection = await preparePeerConnection(activeCall, false);
-        if (connection.signalingState !== "stable") return;
+        const polite = activeUser.id === activeCall.recipientUserId;
+        const collision = decideOfferCollision({
+          makingOffer: makingOfferRef.current,
+          settingRemoteAnswer: settingRemoteAnswerRef.current,
+          signalingState: connection.signalingState,
+          polite,
+        });
+        ignoreOfferRef.current = collision.ignore;
+        if (ignoreOfferRef.current) return;
+        if (collision.rollback) {
+          await connection.setLocalDescription({ type: "rollback" });
+        }
         await connection.setRemoteDescription(signal.description);
         const videoTransceiver = localVideoTransceiverRef.current;
         if (videoTransceiver && videoTransceiver.direction !== "stopped") {
@@ -1169,16 +1263,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (signal.kind === "answer") {
         const connection = peerConnectionRef.current;
         if (!connection) return;
-        await connection.setRemoteDescription(signal.description);
-        await flushQueuedCandidates();
+        settingRemoteAnswerRef.current = true;
+        try {
+          await connection.setRemoteDescription(signal.description);
+          await flushQueuedCandidates();
+          ignoreOfferRef.current = false;
+        } finally {
+          settingRemoteAnswerRef.current = false;
+        }
         return;
       }
       if (signal.kind === "ice-candidate") {
+        if (ignoreOfferRef.current) return;
+        if (payload.generation < negotiationGenerationRef.current) return;
         const candidateType = readCandidateType(signal.candidate);
         if (candidateType) remoteCandidateTypesRef.current.add(candidateType);
         const connection = peerConnectionRef.current;
-        if (!connection?.remoteDescription) {
-          queuedCandidatesRef.current.push(signal.candidate);
+        if (
+          payload.generation > negotiationGenerationRef.current ||
+          !connection?.remoteDescription
+        ) {
+          queuedCandidatesRef.current.push({
+            generation: payload.generation,
+            candidate: signal.candidate,
+          });
         } else {
           await connection.addIceCandidate(signal.candidate).catch(() => undefined);
         }
@@ -1191,6 +1299,43 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setMessage(t("Could not establish the audio connection.", "Nie udało się nawiązać połączenia audio."));
     });
   };
+
+  const recoverSignaling = useCallback(async () => {
+    const activeCall = callRef.current;
+    if (!activeCall || activeCall.status !== "accepted") return;
+    const version = signalingVersionRef.current;
+    const recovered = await apiRequest<{ signals: CallSignalEnvelope[] }>(
+      `/api/calls/${activeCall.id}/signals?version=${version}`
+    );
+    if (callRef.current?.id !== activeCall.id) return;
+    for (const envelope of recovered.signals) {
+      signalHandlerRef.current(envelope);
+    }
+  }, []);
+  signalingRecoveryRef.current = () => {
+    void recoverSignaling().catch(() => undefined);
+  };
+
+  useEffect(() => {
+    const recoverAfterWake = () => {
+      if (document.visibilityState === "hidden" || !navigator.onLine) return;
+      void getSupabaseBrowserClient().realtime.setAuth().catch(() => undefined);
+      void recoverSignaling().catch(() => undefined);
+      for (const pending of pendingSignalsRef.current.values()) {
+        pending.nextAttemptAt = 0;
+      }
+      resendPendingSignals();
+    };
+    const handleVisibility = () => recoverAfterWake();
+    window.addEventListener("online", recoverAfterWake);
+    window.addEventListener("pageshow", recoverAfterWake);
+    document.addEventListener("visibilitychange", handleVisibility);
+    return () => {
+      window.removeEventListener("online", recoverAfterWake);
+      window.removeEventListener("pageshow", recoverAfterWake);
+      document.removeEventListener("visibilitychange", handleVisibility);
+    };
+  }, [recoverSignaling, resendPendingSignals]);
 
   const loadCallContext = useCallback(async (activeCall: CallRecord) => {
     const context = await apiRequest<{
@@ -1410,7 +1555,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             ) {
               return;
             }
+            if (refreshed.version < (callRef.current?.version ?? 0)) return;
             dispatchBrowserCall({ type: "server-record", call: refreshed });
+            callRef.current = refreshed;
+            if (refreshed.status === "accepted") {
+              signalingVersionRef.current = refreshed.version;
+            }
             if (
               refreshed.status === "ringing" &&
               new Date(refreshed.ringExpiresAt).getTime() <= Date.now()
@@ -1562,6 +1712,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       );
       dispatchBrowserCall({ type: "server-record", call: data.call });
       callRef.current = data.call;
+      signalingVersionRef.current = data.call.version;
       await preparePeerConnection(data.call, false);
       await sendSignal({ kind: "accepted" });
       startStatusPoll(data.call);
