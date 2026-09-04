@@ -28,7 +28,12 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
 import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
 import { getLocalVideoDirection } from "@/lib/call-video";
+import { CallReconnectionController } from "@/lib/call-reconnection";
+import { CallMediaWatchdog } from "@/lib/call-media-watchdog";
+import { TurnCredentialLoader } from "@/lib/turn-credential-loader";
+import { resolveCallStatusKind } from "@/lib/call-status";
 import {
+  aggregateParticipantConnectionStates,
   browserCallReducer,
   initialBrowserCallState,
 } from "@/lib/browser-call-state";
@@ -48,6 +53,7 @@ import type {
   PendingCallSignal,
 } from "@/lib/call-signaling";
 import type {
+  CallParticipantState,
   CallRecord,
   ParticipantConnectionState,
 } from "@/lib/call-types";
@@ -175,12 +181,42 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [message, setMessage] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [remoteMuted, setRemoteMuted] = useState(false);
+  const [showRecoveryRestored, setShowRecoveryRestored] = useState(false);
+  const [isBrowserOffline, setIsBrowserOffline] = useState(false);
+  const localConnectionStateRef = useRef<ParticipantConnectionState | "">("");
+  const remoteConnectionStateRef = useRef<ParticipantConnectionState | "">("");
+  const remoteConnectionVersionRef = useRef(0);
+  const participantStateReportRef = useRef<Promise<void>>(Promise.resolve());
+  const recoveryNoticeTimeoutRef = useRef<number | null>(null);
+  const previousConnectionStateRef = useRef<ParticipantConnectionState | "">("");
   const connectionState = browserCallState.connectionState;
-  const setConnectionState = useCallback(
-    (state: ParticipantConnectionState | "") =>
-      dispatchBrowserCall({ type: "connection", state }),
+  const updateDisplayedConnectionState = useCallback(
+    (local: ParticipantConnectionState | "", remote: ParticipantConnectionState | "") => {
+      const displayed = aggregateParticipantConnectionStates(local, remote);
+      if (
+        previousConnectionStateRef.current === "reconnecting" &&
+        displayed === "connected"
+      ) {
+        setShowRecoveryRestored(true);
+        if (recoveryNoticeTimeoutRef.current !== null) {
+          window.clearTimeout(recoveryNoticeTimeoutRef.current);
+        }
+        recoveryNoticeTimeoutRef.current = window.setTimeout(() => {
+          recoveryNoticeTimeoutRef.current = null;
+          setShowRecoveryRestored(false);
+        }, 3_000);
+      } else if (displayed === "reconnecting" || displayed === "failed" || !displayed) {
+        setShowRecoveryRestored(false);
+      }
+      previousConnectionStateRef.current = displayed;
+      dispatchBrowserCall({ type: "connection", state: displayed });
+    },
     []
   );
+  const setConnectionState = useCallback((state: ParticipantConnectionState | "") => {
+    localConnectionStateRef.current = state;
+    updateDisplayedConnectionState(state, remoteConnectionStateRef.current);
+  }, [updateDisplayedConnectionState]);
   const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
   const [isCallToneBlocked, setIsCallToneBlocked] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -251,17 +287,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
-  const connectionRetryRef = useRef<number | null>(null);
+  const turnCredentialLoaderRef = useRef<TurnCredentialLoader | null>(null);
+  const reconnectionControllerRef = useRef<CallReconnectionController | null>(null);
+  // This is a terminal connection diagnostic, not a recovery attempt. All ICE
+  // restarts and retry timing are owned by reconnectionControllerRef.
   const connectionTimeoutRef = useRef<number | null>(null);
   const callStatsIntervalRef = useRef<number | null>(null);
   const callStatsBusyRef = useRef(false);
+  const callMediaWatchdogRef = useRef<CallMediaWatchdog | null>(null);
   const identityRefreshRef = useRef<Promise<void> | null>(null);
   const identityRefreshQueuedRef = useRef(false);
   const activeCallsRequestRef = useRef<Promise<void> | null>(null);
   const callStatusPollBusyRef = useRef(false);
   const callHeartbeatRef = useRef<number | null>(null);
   const callHeartbeatBusyRef = useRef(false);
-  const reconnectAttemptsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
   const isTerminatingCallRef = useRef(false);
@@ -529,10 +568,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearTimeout(turnRefreshRef.current);
       turnRefreshRef.current = null;
     }
-    if (connectionRetryRef.current !== null) {
-      window.clearTimeout(connectionRetryRef.current);
-      connectionRetryRef.current = null;
-    }
+    reconnectionControllerRef.current?.dispose();
+    reconnectionControllerRef.current = null;
     if (connectionTimeoutRef.current !== null) {
       window.clearTimeout(connectionTimeoutRef.current);
       connectionTimeoutRef.current = null;
@@ -541,7 +578,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(callStatsIntervalRef.current);
       callStatsIntervalRef.current = null;
     }
+    callMediaWatchdogRef.current?.reset();
+    callMediaWatchdogRef.current = null;
     callStatsBusyRef.current = false;
+    if (recoveryNoticeTimeoutRef.current !== null) {
+      window.clearTimeout(recoveryNoticeTimeoutRef.current);
+      recoveryNoticeTimeoutRef.current = null;
+    }
+    previousConnectionStateRef.current = "";
+    setShowRecoveryRestored(false);
+    setIsBrowserOffline(false);
+    localConnectionStateRef.current = "";
+    remoteConnectionStateRef.current = "";
+    remoteConnectionVersionRef.current = 0;
     callStatusPollBusyRef.current = false;
     if (callHeartbeatRef.current !== null) {
       window.clearInterval(callHeartbeatRef.current);
@@ -563,7 +612,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       window.clearInterval(signalRetryIntervalRef.current);
       signalRetryIntervalRef.current = null;
     }
-    reconnectAttemptsRef.current = 0;
     localCandidateTypesRef.current.clear();
     remoteCandidateTypesRef.current.clear();
     if (microphoneMeterFrameRef.current !== null) {
@@ -993,12 +1041,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     signalRetryIntervalRef.current = window.setInterval(resendPendingSignals, 500);
   }, [resendPendingSignals]);
 
+  const getFreshTurnCredentials = useCallback((callId: string) => {
+    if (!turnCredentialLoaderRef.current) {
+      turnCredentialLoaderRef.current = new TurnCredentialLoader((requestedCallId) =>
+        apiRequest(`/api/calls/${requestedCallId}/turn-credentials`, { method: "POST" })
+      );
+    }
+    return turnCredentialLoaderRef.current.loadFresh(callId);
+  }, []);
+
   const refreshTurnConfiguration = useCallback(async (activeCall: CallRecord) => {
-    const data = await apiRequest<{
-      iceServers: RTCIceServer[];
-      expiresAt: string;
-    }>(`/api/calls/${activeCall.id}/turn-credentials`, { method: "POST" });
-    peerConnectionRef.current?.setConfiguration({ iceServers: data.iceServers });
+    const targetConnection = peerConnectionRef.current;
+    if (!targetConnection) throw new Error("CALL_CONNECTION_NOT_READY");
+    const data = await getFreshTurnCredentials(activeCall.id);
+    if (
+      callRef.current?.id !== activeCall.id ||
+      callRef.current.status !== "accepted" ||
+      peerConnectionRef.current !== targetConnection ||
+      isTerminatingCallRef.current
+    ) {
+      throw new Error("STALE_TURN_CREDENTIAL_RESPONSE");
+    }
+    targetConnection.setConfiguration({ iceServers: data.iceServers });
 
     if (turnRefreshRef.current !== null) window.clearTimeout(turnRefreshRef.current);
     const refreshIn = Math.max(
@@ -1016,19 +1080,51 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
     }, refreshIn);
     return data.iceServers;
-  }, [t]);
+  }, [getFreshTurnCredentials, t]);
 
   const reportParticipantState = useCallback(
     (state: ParticipantConnectionState, reason: string) => {
       const activeCall = callRef.current;
       if (!activeCall) return;
-      void apiRequest(`/api/calls/${activeCall.id}/participant-state`, {
-        method: "PATCH",
-        body: JSON.stringify({ connectionState: state, reason }),
-        keepalive: true,
-      }).catch(() => undefined);
+      participantStateReportRef.current = participantStateReportRef.current
+        .catch(() => undefined)
+        .then(async () => {
+          const result = await apiRequest<{ participantState: CallParticipantState }>(
+            `/api/calls/${activeCall.id}/participant-state`,
+            {
+              method: "PATCH",
+              body: JSON.stringify({ connectionState: state, reason }),
+              keepalive: true,
+            }
+          );
+          if (
+            callRef.current?.id === activeCall.id &&
+            (state === "connected" || state === "reconnecting" || state === "failed")
+          ) {
+            await sendSignal({
+              kind: "connection-state",
+              state,
+              reason,
+              stateVersion: result.participantState.version,
+            });
+          }
+        })
+        .catch(() => undefined);
     },
-    []
+    [sendSignal]
+  );
+
+  const applyRemoteConnectionState = useCallback(
+    (participantState: Pick<CallParticipantState, "connectionState" | "version">) => {
+      if (participantState.version <= remoteConnectionVersionRef.current) return;
+      remoteConnectionVersionRef.current = participantState.version;
+      remoteConnectionStateRef.current = participantState.connectionState;
+      updateDisplayedConnectionState(
+        localConnectionStateRef.current,
+        remoteConnectionStateRef.current
+      );
+    },
+    [updateDisplayedConnectionState]
   );
 
   const reportCallFailure = useCallback((reason: string) => {
@@ -1060,10 +1156,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setConnectionState("connecting");
       reportParticipantState("connecting", "peer_connection_started");
       const stream = await getMicrophone();
-      const credentials = await apiRequest<{
-        iceServers: RTCIceServer[];
-        expiresAt: string;
-      }>(`/api/calls/${activeCall.id}/turn-credentials`, { method: "POST" });
+      const credentials = await getFreshTurnCredentials(activeCall.id);
+      if (
+        callRef.current?.id !== activeCall.id ||
+        callRef.current.status !== "accepted" ||
+        isTerminatingCallRef.current
+      ) {
+        stream.getTracks().forEach((track) => track.stop());
+        throw new Error("STALE_TURN_CREDENTIAL_RESPONSE");
+      }
       const connection = new RTCPeerConnection({ iceServers: credentials.iceServers });
       peerConnectionRef.current = connection;
       reportRealtimeDiagnostics({
@@ -1071,7 +1172,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         signalingState: connection.signalingState,
         iceState: connection.iceConnectionState,
         connectionState: connection.connectionState,
-        reconnectAttempts: reconnectAttemptsRef.current,
+        reconnectAttempts: reconnectionControllerRef.current?.attemptCount ?? 0,
         error: "",
       });
       stream.getAudioTracks().forEach((track) => connection.addTrack(track, stream));
@@ -1126,6 +1227,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           });
         }
       };
+      reconnectionControllerRef.current?.dispose();
+      const reconnectionController = new CallReconnectionController({
+        canRecover: () => {
+          const latestCall = callRef.current;
+          return Boolean(
+            latestCall &&
+            !isTerminatingCallRef.current &&
+            phaseRef.current !== "ended" &&
+            userRef.current?.id === latestCall.callerUserId
+          );
+        },
+        isConnected: () =>
+          peerConnectionRef.current?.connectionState === "connected",
+        restartConnection: async () => {
+          const latestCall = callRef.current;
+          const latestConnection = peerConnectionRef.current;
+          if (!latestCall || !latestConnection) throw new Error("CALL_NOT_ACTIVE");
+          await refreshTurnConfiguration(latestCall);
+          latestConnection.restartIce();
+          await createAndSendOffer(true);
+        },
+        onAttempt: (_reason, attempt) => {
+          reportParticipantState("reconnecting", "ice_restart_started");
+          reportRealtimeDiagnostics({ reconnectAttempts: attempt });
+        },
+        onStateChange: (state, _previousState, reason) => {
+          reportRealtimeDiagnostics({
+            callStage: `recovery ${state}`,
+            error: state === "failed" ? reason : "",
+          });
+        },
+        onExhausted: () => {
+          reportParticipantState("failed", "ice_restart_exhausted");
+          reportCallFailure("ice_restart_exhausted");
+          setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
+        },
+      });
+      reconnectionControllerRef.current = reconnectionController;
+      if (!navigator.onLine) reconnectionController.handleOffline();
+      const handleConnectedTransport = () => {
+        if (!reconnectionController.handleTransportState("connected")) return;
+        reportParticipantState("connected", "ice_connected");
+        if (connectionTimeoutRef.current !== null) {
+          window.clearTimeout(connectionTimeoutRef.current);
+          connectionTimeoutRef.current = null;
+        }
+        setPhase("connected");
+        setMessage("");
+      };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
         setConnectionState(toParticipantConnectionState(connection.connectionState));
@@ -1133,67 +1283,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           connectionState: connection.connectionState,
           signalingState: connection.signalingState,
           iceState: connection.iceConnectionState,
-          reconnectAttempts: reconnectAttemptsRef.current,
+          reconnectAttempts: reconnectionControllerRef.current?.attemptCount ?? 0,
         });
         if (connection.connectionState === "connected") {
-          reportParticipantState("connected", "ice_connected");
-          if (connectionRetryRef.current !== null) {
-            window.clearTimeout(connectionRetryRef.current);
-            connectionRetryRef.current = null;
-          }
-          if (connectionTimeoutRef.current !== null) {
-            window.clearTimeout(connectionTimeoutRef.current);
-            connectionTimeoutRef.current = null;
-          }
-          setPhase("connected");
-          setMessage("");
+          handleConnectedTransport();
         } else if (connection.connectionState === "disconnected") {
           reportParticipantState("reconnecting", "ice_disconnected");
-          const latestCall = callRef.current;
-          if (
-            latestCall &&
-            connectionRetryRef.current === null &&
-            userRef.current?.id === latestCall.callerUserId
-          ) {
-            connectionRetryRef.current = window.setTimeout(() => {
-              connectionRetryRef.current = null;
-              if (
-                connection.connectionState === "connected" ||
-                connection.connectionState === "closed"
-              ) return;
-              reconnectAttemptsRef.current += 1;
-              void refreshTurnConfiguration(latestCall)
-                .then(async () => {
-                  await createAndSendOffer(true);
-                })
-                .catch(() => {
-                  reportParticipantState("failed", "ice_restart_failed");
-                  reportCallFailure("ice_restart_failed");
-                });
-            }, 4_000);
-          }
+          reconnectionController.handleTransportState("disconnected");
         } else if (connection.connectionState === "failed") {
-          reportParticipantState("reconnecting", "ice_restart_started");
-          const activeUser = userRef.current;
-          const latestCall = callRef.current;
-          if (
-            activeUser?.id === latestCall?.callerUserId &&
-            reconnectAttemptsRef.current < 2
-          ) {
-            reconnectAttemptsRef.current += 1;
-            reportRealtimeDiagnostics({ reconnectAttempts: reconnectAttemptsRef.current });
-            void (async () => {
-              await createAndSendOffer(true);
-            })().catch(() => {
-              reportParticipantState("failed", "ice_restart_failed");
-              reportCallFailure("ice_restart_failed");
-              setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
-            });
-          } else {
-            reportParticipantState("failed", "ice_restart_exhausted");
-            reportCallFailure("ice_restart_exhausted");
-            setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
-          }
+          reconnectionController.handleTransportState("failed");
         }
       };
 
@@ -1204,6 +1302,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           iceState: connection.iceConnectionState,
           connectionState: connection.connectionState,
         });
+        // Some mobile browsers update ICE state before connectionState, or do
+        // not reliably emit the latter after waking from suspension.
+        if (
+          connection.iceConnectionState === "connected" ||
+          connection.iceConnectionState === "completed"
+        ) {
+          handleConnectedTransport();
+        } else if (connection.iceConnectionState === "disconnected") {
+          reportParticipantState("reconnecting", "ice_disconnected");
+          reconnectionController.handleTransportState("disconnected");
+        } else if (connection.iceConnectionState === "failed") {
+          reconnectionController.handleTransportState("failed");
+        }
       };
 
       connection.onsignalingstatechange = () => {
@@ -1213,16 +1324,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (callStatsIntervalRef.current !== null) {
         window.clearInterval(callStatsIntervalRef.current);
       }
+      callMediaWatchdogRef.current = new CallMediaWatchdog({
+        stalledAfterMs: 10_000,
+        onStalled: () => {
+          if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
+          setConnectionState("reconnecting");
+          reportParticipantState("reconnecting", "media_transport_stalled");
+          reportRealtimeDiagnostics({
+            callStage: "recovery interrupted",
+            error: "media_transport_stalled",
+          });
+          reconnectionController.handleMediaStalled();
+        },
+        onRecovered: () => {
+          if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
+          if (!reconnectionController.markConnected()) return;
+          setConnectionState("connected");
+          reportParticipantState("connected", "media_transport_recovered");
+        },
+      });
       const collectCallStats = async () => {
         const reports = await connection.getStats();
         let packetsSent = 0;
         let packetsReceived = 0;
         let route = "unknown";
         reports.forEach((report) => {
-          if (report.type === "outbound-rtp" && report.kind === "audio") {
+          const mediaKind = report.kind ?? report.mediaType;
+          if (report.type === "outbound-rtp" && mediaKind === "audio") {
             packetsSent += Number(report.packetsSent) || 0;
           }
-          if (report.type === "inbound-rtp" && report.kind === "audio") {
+          if (report.type === "inbound-rtp" && mediaKind === "audio") {
             packetsReceived += Number(report.packetsReceived) || 0;
           }
           if (
@@ -1261,6 +1392,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           audioPacketsReceived: packetsReceived,
           route,
         });
+        callMediaWatchdogRef.current?.observe({
+          connected:
+            connection.connectionState === "connected" ||
+            connection.iceConnectionState === "connected" ||
+            connection.iceConnectionState === "completed",
+          packetsSent,
+          packetsReceived,
+        });
       };
       callStatsBusyRef.current = true;
       void collectCallStats()
@@ -1293,27 +1432,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         await createAndSendOffer();
       }
 
-      if (connectionRetryRef.current === null) {
-        connectionRetryRef.current = window.setTimeout(() => {
-          const latestConnection = peerConnectionRef.current;
-          const latestCall = callRef.current;
-          if (
-            !latestConnection ||
-            !latestCall ||
-            latestConnection.connectionState === "connected" ||
-            userRef.current?.id !== latestCall.callerUserId
-          ) {
-            return;
-          }
-          reconnectAttemptsRef.current += 1;
-          void refreshTurnConfiguration(latestCall)
-            .then(async () => {
-              latestConnection.restartIce();
-              await createAndSendOffer(true);
-            })
-            .catch(() => undefined);
-        }, 10_000);
-      }
+      reconnectionController.startInitialRecovery();
 
       if (connectionTimeoutRef.current === null) {
         connectionTimeoutRef.current = window.setTimeout(() => {
@@ -1361,8 +1480,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               return;
             }
 
-            const relayAvailable = localCandidateTypesRef.current.has("relay");
-            const remoteRelayReceived = remoteCandidateTypesRef.current.has("relay");
             isTerminatingCallRef.current = true;
             void sendSignal({ kind: "ended" }).catch(() => undefined);
             void apiRequest(`/api/calls/${latestCall.id}`, {
@@ -1375,20 +1492,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             }).catch(() => undefined);
             clearCallResources();
             setMessage(
-              !relayAvailable
-                ? t(
-                  "The call could not reach the network relay. Check the network and try again. (ICE-R0)",
-                  "PoÅ‚Ä…czenie nie mogÅ‚o dotrzeÄ‡ do przekaÅºnika sieciowego. SprawdÅº sieÄ‡ i sprÃ³buj ponownie. (ICE-R0)"
-                )
-                : !remoteRelayReceived
-                  ? t(
-                    "The network relay was available, but relay information was not received from the other device. Please try again. (ICE-R1)",
-                    "PrzekaÅºnik sieciowy byÅ‚ dostÄ™pny, ale nie otrzymano informacji o przekaÅºniku z drugiego urzÄ…dzenia. SprÃ³buj ponownie. (ICE-R1)"
-                  )
-                  : t(
-                    "Both devices reached the network relay, but the call could not connect. Please try again. (ICE-R2)",
-                    "Oba urzÄ…dzenia dotarÅ‚y do przekaÅºnika sieciowego, ale nie udaÅ‚o siÄ™ poÅ‚Ä…czyÄ‡. SprÃ³buj ponownie. (ICE-R2)"
-                  )
+              t(
+                "We couldn't connect the call. Check your internet connection and try again.",
+                "Nie udało się połączyć rozmowy. Sprawdź połączenie z internetem i spróbuj ponownie."
+              )
             );
             setPhase("error");
           })();
@@ -1396,7 +1503,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, createAndSendOffer, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
@@ -1533,6 +1640,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
         return;
       }
+      if (signal.kind === "connection-state") {
+        applyRemoteConnectionState({
+          connectionState: signal.state,
+          version: signal.stateVersion,
+        });
+        return;
+      }
       if (signal.kind === "renegotiate") {
         if (activeUser.id === activeCall.callerUserId) {
           await createAndSendOffer();
@@ -1602,7 +1716,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
+    [applyRemoteConnectionState, createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
   );
   signalHandlerRef.current = (payload) => {
     void handleSignal(payload).catch(() => {
@@ -1614,21 +1728,41 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const activeCall = callRef.current;
     if (!activeCall || activeCall.status !== "accepted") return;
     const version = signalingVersionRef.current;
-    const recovered = await apiRequest<{ signals: CallSignalEnvelope[] }>(
-      `/api/calls/${activeCall.id}/signals?version=${version}`
-    );
+    const [recovered, stateSnapshot] = await Promise.all([
+      apiRequest<{ signals: CallSignalEnvelope[] }>(
+        `/api/calls/${activeCall.id}/signals?version=${version}`
+      ),
+      apiRequest<{ participantStates: CallParticipantState[] }>(
+        `/api/calls/${activeCall.id}/participant-state`
+      ).catch(() => ({ participantStates: [] })),
+    ]);
     if (callRef.current?.id !== activeCall.id) return;
     for (const envelope of recovered.signals) {
       signalHandlerRef.current(envelope);
     }
-  }, []);
+    const otherUserId =
+      activeCall.callerUserId === userRef.current?.id
+        ? activeCall.recipientUserId
+        : activeCall.callerUserId;
+    const remoteState = stateSnapshot.participantStates.find(
+      (candidate) => candidate.userId === otherUserId
+    );
+    if (remoteState) applyRemoteConnectionState(remoteState);
+  }, [applyRemoteConnectionState]);
   signalingRecoveryRef.current = () => {
     void recoverSignaling().catch(() => undefined);
   };
 
   useEffect(() => {
-    const recoverAfterWake = () => {
+    const recoverAfterWake = (reason: "network-restored" | "app-resumed") => {
       if (document.visibilityState === "hidden" || !navigator.onLine) return;
+      if (callRef.current?.status === "accepted") {
+        if (reason === "network-restored") {
+          reconnectionControllerRef.current?.handleOnline();
+        } else {
+          reconnectionControllerRef.current?.handleAppResumed();
+        }
+      }
       void getSupabaseBrowserClient().realtime.setAuth().catch(() => undefined);
       void recoverSignaling().catch(() => undefined);
       for (const pending of pendingSignalsRef.current.values()) {
@@ -1636,16 +1770,41 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       resendPendingSignals();
     };
-    const handleVisibility = () => recoverAfterWake();
-    window.addEventListener("online", recoverAfterWake);
-    window.addEventListener("pageshow", recoverAfterWake);
+    const handleOffline = () => {
+      if (callRef.current?.status !== "accepted") return;
+      setIsBrowserOffline(true);
+      reconnectionControllerRef.current?.handleOffline();
+      setConnectionState("reconnecting");
+      reportParticipantState("reconnecting", "browser_offline");
+      setMessage(
+        t(
+          "You're offline. The call will reconnect automatically.",
+          "Brak połączenia z internetem. Rozmowa połączy się ponownie automatycznie."
+        )
+      );
+    };
+    const handleOnline = () => {
+      setIsBrowserOffline(false);
+      setMessage("");
+      recoverAfterWake("network-restored");
+    };
+    const handleResume = () => recoverAfterWake("app-resumed");
+    const handleVisibility = () => {
+      if (document.visibilityState === "visible") handleResume();
+    };
+    window.addEventListener("offline", handleOffline);
+    window.addEventListener("online", handleOnline);
+    window.addEventListener("pageshow", handleResume);
+    window.addEventListener("focus", handleResume);
     document.addEventListener("visibilitychange", handleVisibility);
     return () => {
-      window.removeEventListener("online", recoverAfterWake);
-      window.removeEventListener("pageshow", recoverAfterWake);
+      window.removeEventListener("offline", handleOffline);
+      window.removeEventListener("online", handleOnline);
+      window.removeEventListener("pageshow", handleResume);
+      window.removeEventListener("focus", handleResume);
       document.removeEventListener("visibilitychange", handleVisibility);
     };
-  }, [recoverSignaling, resendPendingSignals]);
+  }, [recoverSignaling, reportParticipantState, resendPendingSignals, setConnectionState, t]);
 
   const loadCallContext = useCallback(async (activeCall: CallRecord) => {
     const context = await apiRequest<{
@@ -2069,18 +2228,26 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const endCall = useCallback(async () => {
     const activeCall = callRef.current;
     if (!activeCall) return resetToIdle();
-    if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
+    if (phaseRef.current === "ended") return;
+    const shouldNotifyRemote = !isTerminatingCallRef.current;
     isTerminatingCallRef.current = true;
     phaseRef.current = "ended";
     // Signal and persist in the background; local media and UI must close on
     // the click even when Realtime acknowledgement is delayed or unavailable.
-    void sendSignal({ kind: "ended" }).catch(() => undefined);
-    const action = activeCall.status === "accepted" ? "end" : "cancel";
-    void persistCallTermination(activeCall, action);
-    clearCallResources();
-    setConnectionState("");
-    setMessage(t("Call ended.", "Połączenie zakończone."));
-    setPhase("ended");
+    if (shouldNotifyRemote) {
+      void sendSignal({ kind: "ended" }).catch(() => undefined);
+      const action = activeCall.status === "accepted" ? "end" : "cancel";
+      void persistCallTermination(activeCall, action);
+    }
+    try {
+      clearCallResources();
+    } catch (error) {
+      console.warn("Scriboo call cleanup completed with an error", error);
+    } finally {
+      setConnectionState("");
+      setMessage(t("Call ended.", "Połączenie zakończone."));
+      setPhase("ended");
+    }
   }, [clearCallResources, persistCallTermination, resetToIdle, sendSignal, setConnectionState, t]);
 
   const toggleMute = useCallback(() => {
@@ -2651,22 +2818,48 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
-  const statusText =
-    phase === "incoming"
-      ? t("Incoming call", "Połączenie przychodzące")
-      : phase === "precall-incoming"
-        ? t("Check your devices before answering", "Sprawdź urządzenia przed odebraniem")
-        : phase === "precall-outgoing"
-          ? t("Check your devices before calling", "Sprawdź urządzenia przed połączeniem")
-      : phase === "outgoing"
-        ? t("Ringing…", "Dzwonienie…")
-        : phase === "connecting"
-          ? t("Connecting…", "Łączenie…")
-          : phase === "connected"
-            ? remoteMuted
-              ? t("Connected · participant muted", "Połączono · uczestnik wyciszony")
-              : t("Connected", "Połączono")
-            : message;
+  const statusKind = resolveCallStatusKind({
+    phase,
+    connectionState,
+    remoteMuted,
+    restored: showRecoveryRestored,
+    hasMessage: Boolean(message),
+    offline: isBrowserOffline,
+  });
+  const statusText = {
+    message,
+    incoming: t("Incoming call", "Połączenie przychodzące"),
+    "precall-incoming": t(
+      "Check your devices before answering",
+      "Sprawdź urządzenia przed odebraniem"
+    ),
+    "precall-outgoing": t(
+      "Check your devices before calling",
+      "Sprawdź urządzenia przed połączeniem"
+    ),
+    ringing: t("Ringing…", "Dzwonienie…"),
+    connecting: t("Connecting…", "Łączenie…"),
+    reconnecting: t(
+      "Reconnecting… Keep this window open.",
+      "Ponowne łączenie… Pozostaw to okno otwarte."
+    ),
+    offline: t(
+      "You're offline. The call will reconnect automatically.",
+      "Brak połączenia z internetem. Rozmowa połączy się ponownie automatycznie."
+    ),
+    restored: t("Connection restored", "Połączenie przywrócone"),
+    connected: t("Connected", "Połączono"),
+    "connected-muted": t(
+      "Connected · participant muted",
+      "Połączono · uczestnik wyciszony"
+    ),
+    failed: t(
+      "Connection lost. Please end the call and try again.",
+      "Połączenie zostało przerwane. Zakończ rozmowę i spróbuj ponownie."
+    ),
+    ending: t("Ending call…", "Kończenie rozmowy…"),
+    idle: "",
+  }[statusKind];
   const isPreCall = phase === "precall-outgoing" || phase === "precall-incoming";
   const permissionText = (state: MediaPermissionState) =>
     state === "granted"
@@ -2900,8 +3093,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           </div>
           {!isCallPanelMinimized && (
             <>
-          <div aria-live="polite" style={{ color: phase === "error" ? "#b91c1c" : "#475569", fontSize: "13px", fontWeight: 650 }}>
-            {statusText || connectionState}
+          <div aria-live="polite" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#a16207" : "#475569", fontSize: "13px", fontWeight: 650 }}>
+            {statusText}
           </div>
           {isPreCall && (
             <div style={{ display: "grid", gap: "12px" }}>
@@ -3363,7 +3556,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                       : t("Start video", "Włącz wideo")}
                 </button>
               )}
-              <button type="button" onClick={() => void endCall()} style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}>
+              <button
+                type="button"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void endCall();
+                }}
+                style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c", position: "relative", zIndex: 1, pointerEvents: "auto" }}
+              >
                 <PhoneOff size={17} /> {phase === "outgoing" ? t("Cancel", "Anuluj") : t("End", "Zakończ")}
               </button>
             </div>

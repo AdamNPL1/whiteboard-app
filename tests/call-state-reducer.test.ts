@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 
-import { browserCallReducer } from "@/lib/browser-call-state";
+import {
+  aggregateParticipantConnectionStates,
+  browserCallReducer,
+} from "@/lib/browser-call-state";
 import type { CallRecord } from "@/lib/call-types";
 
 const record = (id: string, version: number, status: CallRecord["status"] = "ringing"): CallRecord => ({
@@ -20,6 +23,16 @@ const record = (id: string, version: number, status: CallRecord["status"] = "rin
 });
 
 describe("browser call reducer", () => {
+  it("aggregates both participants into one visible connection state", () => {
+    expect(aggregateParticipantConnectionStates("connected", "reconnecting")).toBe(
+      "reconnecting"
+    );
+    expect(aggregateParticipantConnectionStates("reconnecting", "connected")).toBe(
+      "reconnecting"
+    );
+    expect(aggregateParticipantConnectionStates("connected", "connected")).toBe("connected");
+    expect(aggregateParticipantConnectionStates("connected", "failed")).toBe("failed");
+  });
   it("ignores an older response for the active call", () => {
     const selected = browserCallReducer(
       { call: null, connectionState: "", displayedCallId: null, lastServerVersion: 0 },
@@ -55,5 +68,37 @@ describe("browser call reducer", () => {
     });
     expect(result.call?.status).toBe("accepted");
     expect(result.connectionState).toBe("reconnecting");
+  });
+
+  it("ignores a stale connected event after local connection failure", () => {
+    const failed = {
+      call: record("call-a", 2, "accepted"),
+      connectionState: "failed" as const,
+      displayedCallId: "call-a",
+      lastServerVersion: 2,
+    };
+    const result = browserCallReducer(failed, {
+      type: "connection",
+      state: "connected",
+    });
+    expect(result).toBe(failed);
+  });
+
+  it("allows only the legal connected to reconnecting to connected path", () => {
+    const connected = {
+      call: record("call-a", 2, "accepted"),
+      connectionState: "connected" as const,
+      displayedCallId: "call-a",
+      lastServerVersion: 2,
+    };
+    const reconnecting = browserCallReducer(connected, {
+      type: "connection",
+      state: "reconnecting",
+    });
+    const restored = browserCallReducer(reconnecting, {
+      type: "connection",
+      state: "connected",
+    });
+    expect(restored.connectionState).toBe("connected");
   });
 });

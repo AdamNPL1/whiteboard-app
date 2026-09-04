@@ -42,6 +42,27 @@ describe("reliable call signaling protocol", () => {
     expect(shouldRetryCallSignal(pending, 2_000)).toBe(false);
   });
 
+  it("validates synchronized peer connection states", () => {
+    expect(isCallSignalEnvelope({
+      ...envelope(),
+      data: {
+        kind: "connection-state",
+        state: "reconnecting",
+        reason: "ice_disconnected",
+        stateVersion: 2,
+      },
+    })).toBe(true);
+    expect(isCallSignalEnvelope({
+      ...envelope(),
+      data: {
+        kind: "connection-state",
+        state: "connected",
+        reason: "invalid reason",
+        stateVersion: 3,
+      },
+    })).toBe(false);
+  });
+
   it("makes the polite peer roll back during simultaneous offers", () => {
     expect(decideOfferCollision({
       makingOffer: true,

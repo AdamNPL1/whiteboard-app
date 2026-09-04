@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { createPortal } from "react-dom";
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { ExternalLink, Headphones, MessageCircle, MessageCircleMore, Send, X } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 
@@ -16,19 +16,16 @@ type ChatMessage = { id: number; role: "assistant" | "user"; text: string };
 type Topic = "boards" | "sharing" | "account" | "billing";
 
 const gradient = "linear-gradient(115deg, #7541e8 0%, #5b82e7 55%, #68c58f 100%)";
+const subscribeToBrowserMount = () => () => undefined;
 
 export default function SupportChatbot({ open, onOpen, onClose }: SupportChatbotProps) {
   const { language, text: t } = useLanguage();
-  const [mounted, setMounted] = useState(false);
+  const mounted = useSyncExternalStore(subscribeToBrowserMount, () => true, () => false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [launcherHovered, setLauncherHovered] = useState(false);
   const messageId = useRef(1);
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    setMounted(true);
-  }, []);
 
   useEffect(() => {
     if (open) messagesEndRef.current?.scrollIntoView({ block: "nearest" });

@@ -9,6 +9,12 @@ export type CallSignalData =
   | { kind: "ended" }
   | { kind: "mute"; muted: boolean }
   | { kind: "video-state"; enabled: boolean }
+  | {
+      kind: "connection-state";
+      state: "connected" | "reconnecting" | "failed";
+      reason: string;
+      stateVersion: number;
+    }
   | { kind: "renegotiate" }
   | { kind: "offer"; description: RTCSessionDescriptionInit }
   | { kind: "answer"; description: RTCSessionDescriptionInit }
@@ -28,7 +34,7 @@ export type CallSignalEnvelope = {
 
 const signalKinds = new Set([
   "ack", "accepted", "declined", "ended", "mute", "video-state",
-  "renegotiate", "offer", "answer", "ice-candidate",
+  "connection-state", "renegotiate", "offer", "answer", "ice-candidate",
 ]);
 
 export const isCallSignalEnvelope = (value: unknown): value is CallSignalEnvelope => {
@@ -54,6 +60,11 @@ export const isCallSignalEnvelope = (value: unknown): value is CallSignalEnvelop
   }
   if (data.kind === "mute") return typeof data.muted === "boolean";
   if (data.kind === "video-state") return typeof data.enabled === "boolean";
+  if (data.kind === "connection-state") {
+    return ["connected", "reconnecting", "failed"].includes(String(data.state)) &&
+      typeof data.reason === "string" && /^[a-z0-9_]{1,100}$/.test(data.reason) &&
+      Number.isSafeInteger(data.stateVersion) && Number(data.stateVersion) >= 1;
+  }
   if (data.kind === "offer" || data.kind === "answer") {
     return Boolean(data.description && typeof data.description === "object");
   }

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { updateCallParticipantState } from "@/lib/call-store";
+import { getCallParticipantStates, updateCallParticipantState } from "@/lib/call-store";
 import type { ParticipantConnectionState } from "@/lib/call-types";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
@@ -12,6 +12,31 @@ const uuidPattern =
 const states = new Set<ParticipantConnectionState>([
   "accepting", "connecting", "connected", "reconnecting", "failed",
 ]);
+
+export async function GET(
+  request: NextRequest,
+  context: { params: Promise<{ callId: string }> }
+) {
+  const user = await getSupabaseUserFromRequest(request);
+  if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
+  const { callId } = await context.params;
+  if (!uuidPattern.test(callId)) {
+    return NextResponse.json({ error: "Call not found." }, { status: 404 });
+  }
+  try {
+    const participantStates = await getCallParticipantStates(callId, user.id);
+    return NextResponse.json(
+      { participantStates },
+      { headers: { "Cache-Control": "no-store, private", Pragma: "no-cache" } }
+    );
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "";
+    if (code === "CALL_NOT_FOUND") {
+      return NextResponse.json({ error: "Call not found." }, { status: 404 });
+    }
+    return NextResponse.json({ error: "Could not load connection state." }, { status: 500 });
+  }
+}
 
 export async function PATCH(
   request: NextRequest,

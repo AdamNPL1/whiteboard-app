@@ -346,3 +346,23 @@ export const updateCallParticipantState = async (
     version: row.version,
   };
 };
+
+export const getCallParticipantStates = async (
+  callId: string,
+  userId: string
+): Promise<CallParticipantState[]> => {
+  await getCallSessionForUser(callId, userId);
+  const { data, error } = await getSupabaseServiceRoleClient()
+    .from("call_participant_states")
+    .select("call_id,user_id,connection_state,state_changed_at,state_reason,version")
+    .eq("call_id", callId);
+  if (error) throw new Error("CALL_DATABASE_ERROR");
+  return ((data ?? []) as ParticipantStateRow[]).map((row) => ({
+    callId: row.call_id,
+    userId: row.user_id,
+    connectionState: row.connection_state,
+    stateChangedAt: row.state_changed_at,
+    stateReason: row.state_reason,
+    version: row.version,
+  }));
+};

@@ -8,6 +8,7 @@ const mocks = vi.hoisted(() => ({
   startCall: vi.fn(),
   transitionCall: vi.fn(),
   updateParticipantState: vi.fn(),
+  getParticipantStates: vi.fn(),
   saveSignal: vi.fn(),
   getSignals: vi.fn(),
   generateTurn: vi.fn(),
@@ -22,6 +23,7 @@ vi.mock("@/lib/call-store", () => ({
   startBoardCall: mocks.startCall,
   transitionBoardCall: mocks.transitionCall,
   updateCallParticipantState: mocks.updateParticipantState,
+  getCallParticipantStates: mocks.getParticipantStates,
 }));
 vi.mock("@/lib/cloudflare-turn", () => ({
   generateCloudflareTurnCredentials: mocks.generateTurn,
@@ -41,7 +43,10 @@ vi.mock("@/lib/monitoring", () => ({
 import { POST as startCall } from "@/app/api/calls/route";
 import { PATCH as transitionCall } from "@/app/api/calls/[callId]/route";
 import { POST as getTurnCredentials } from "@/app/api/calls/[callId]/turn-credentials/route";
-import { PATCH as updateParticipantState } from "@/app/api/calls/[callId]/participant-state/route";
+import {
+  GET as getParticipantStates,
+  PATCH as updateParticipantState,
+} from "@/app/api/calls/[callId]/participant-state/route";
 import {
   GET as recoverSignals,
   POST as persistSignal,
@@ -91,6 +96,7 @@ describe("call API authorization", () => {
       stateChangedAt: new Date().toISOString(),
       version: 2,
     });
+    mocks.getParticipantStates.mockResolvedValue([]);
     mocks.saveSignal.mockResolvedValue(undefined);
     mocks.getSignals.mockResolvedValue([]);
   });
@@ -180,6 +186,28 @@ describe("call API authorization", () => {
     expect(mocks.updateParticipantState).toHaveBeenCalledWith(
       callId, caller.id, "connected", "ice_connected", 1
     );
+  });
+
+  it("loads participant connection states only through authenticated access", async () => {
+    mocks.getParticipantStates.mockResolvedValue([
+      {
+        callId,
+        userId: recipientId,
+        connectionState: "reconnecting",
+        stateReason: "ice_disconnected",
+        stateChangedAt: new Date().toISOString(),
+        version: 3,
+      },
+    ]);
+    const response = await getParticipantStates(
+      request(`/api/calls/${callId}/participant-state`, "GET"),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.getParticipantStates).toHaveBeenCalledWith(callId, caller.id);
+    expect(await response.json()).toMatchObject({
+      participantStates: [{ connectionState: "reconnecting", version: 3 }],
+    });
   });
 
   it("persists an authorized offer for reconnect recovery", async () => {
