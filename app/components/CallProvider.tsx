@@ -51,6 +51,11 @@ import type {
   CallRecord,
   ParticipantConnectionState,
 } from "@/lib/call-types";
+import {
+  PRE_CALL_SETTINGS_KEY,
+  parsePreCallSettings,
+  supportsSpeakerSelection,
+} from "@/lib/pre-call-settings";
 
 type BoardContext = { id: string; name: string };
 type CallParticipant = {
@@ -62,6 +67,8 @@ type CallPhase =
   | "idle"
   | "choosing"
   | "incoming"
+  | "precall-outgoing"
+  | "precall-incoming"
   | "outgoing"
   | "connecting"
   | "connected"
@@ -69,6 +76,8 @@ type CallPhase =
   | "error";
 type CurrentUser = { id: string; name: string; email: string };
 type CameraDevice = { deviceId: string; label: string };
+type MediaDeviceOption = { deviceId: string; label: string };
+type MediaPermissionState = "prompt" | "granted" | "denied" | "unavailable";
 
 type CallContextValue = {
   setBoardContext: (board: BoardContext | null) => void;
@@ -148,6 +157,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [board, setBoard] = useState<BoardContext | null>(null);
   const [participants, setParticipants] = useState<CallParticipant[]>([]);
+  const [pendingParticipant, setPendingParticipant] = useState<CallParticipant | null>(null);
   const [phase, setPhase] = useState<CallPhase>("idle");
   const [browserCallState, dispatchBrowserCall] = useReducer(
     browserCallReducer,
@@ -168,10 +178,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
   const [isCallToneBlocked, setIsCallToneBlocked] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
+  const [joinWithCamera, setJoinWithCamera] = useState(false);
   const [isCameraStarting, setIsCameraStarting] = useState(false);
   const [cameraMessage, setCameraMessage] = useState("");
   const [cameraDevices, setCameraDevices] = useState<CameraDevice[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
+  const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceOption[]>([]);
+  const [speakerDevices, setSpeakerDevices] = useState<MediaDeviceOption[]>([]);
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
+  const [selectedSpeakerId, setSelectedSpeakerId] = useState("");
+  const [microphonePermission, setMicrophonePermission] =
+    useState<MediaPermissionState>("prompt");
+  const [cameraPermission, setCameraPermission] =
+    useState<MediaPermissionState>("prompt");
+  const [microphoneLevel, setMicrophoneLevel] = useState(0);
+  const [isMicrophoneReady, setIsMicrophoneReady] = useState(false);
+  const [isPreparingMedia, setIsPreparingMedia] = useState(false);
+  const [isTestingSpeaker, setIsTestingSpeaker] = useState(false);
+  const [isSpeakerSelectionSupported, setIsSpeakerSelectionSupported] = useState(false);
+  const [preCallMessage, setPreCallMessage] = useState("");
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
   const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
   const [callPanelPosition, setCallPanelPosition] = useState<{
@@ -233,6 +258,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const microphoneMeterFrameRef = useRef<number | null>(null);
+  const microphoneMeterContextRef = useRef<AudioContext | null>(null);
+  const preCallSettingsLoadedRef = useRef(false);
 
   useEffect(() => {
     userRef.current = user;
@@ -245,6 +273,85 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     phaseRef.current = phase;
     reportRealtimeDiagnostics({ callStage: phase });
   }, [phase]);
+
+  const startMicrophoneMeter = useCallback((stream: MediaStream) => {
+    if (microphoneMeterFrameRef.current !== null) {
+      window.cancelAnimationFrame(microphoneMeterFrameRef.current);
+    }
+    const previousContext = microphoneMeterContextRef.current;
+    if (previousContext && previousContext.state !== "closed") {
+      void previousContext.close().catch(() => undefined);
+    }
+    const context = new AudioContext();
+    const analyser = context.createAnalyser();
+    analyser.fftSize = 256;
+    context.createMediaStreamSource(stream).connect(analyser);
+    microphoneMeterContextRef.current = context;
+    const samples = new Uint8Array(analyser.fftSize);
+    const measure = () => {
+      analyser.getByteTimeDomainData(samples);
+      let sum = 0;
+      for (const sample of samples) sum += Math.abs(sample - 128);
+      setMicrophoneLevel(Math.min(100, Math.round((sum / samples.length) * 4)));
+      microphoneMeterFrameRef.current = window.requestAnimationFrame(measure);
+    };
+    measure();
+  }, []);
+
+  useEffect(() => {
+    if (["precall-outgoing", "precall-incoming"].includes(phase)) return;
+    if (microphoneMeterFrameRef.current !== null) {
+      window.cancelAnimationFrame(microphoneMeterFrameRef.current);
+      microphoneMeterFrameRef.current = null;
+    }
+    const context = microphoneMeterContextRef.current;
+    microphoneMeterContextRef.current = null;
+    if (context && context.state !== "closed") {
+      void context.close().catch(() => undefined);
+    }
+  }, [phase]);
+
+  useEffect(() => {
+    const settings = parsePreCallSettings(
+      window.localStorage.getItem(PRE_CALL_SETTINGS_KEY)
+    );
+    setSelectedMicrophoneId(settings.microphoneId);
+    setSelectedCameraId(settings.cameraId);
+    setSelectedSpeakerId(settings.speakerId);
+    setIsMuted(settings.joinMuted);
+    setJoinWithCamera(settings.joinWithCamera);
+    setIsSpeakerSelectionSupported(
+      Boolean(remoteAudioRef.current && supportsSpeakerSelection(remoteAudioRef.current))
+    );
+    preCallSettingsLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!preCallSettingsLoadedRef.current) return;
+    window.localStorage.setItem(
+      PRE_CALL_SETTINGS_KEY,
+      JSON.stringify({
+        microphoneId: selectedMicrophoneId,
+        cameraId: selectedCameraId,
+        speakerId: selectedSpeakerId,
+        joinMuted: isMuted,
+        joinWithCamera,
+      })
+    );
+  }, [isMuted, joinWithCamera, selectedCameraId, selectedMicrophoneId, selectedSpeakerId]);
+
+  useEffect(() => {
+    const audio = remoteAudioRef.current;
+    if (!audio || !selectedSpeakerId || !supportsSpeakerSelection(audio)) return;
+    void audio.setSinkId(selectedSpeakerId).catch(() => {
+      setPreCallMessage(
+        t(
+          "The selected speaker is unavailable. Choose another output.",
+          "Wybrany głośnik jest niedostępny. Wybierz inne wyjście."
+        )
+      );
+    });
+  }, [selectedSpeakerId, t]);
 
   const stopCallPoll = useCallback(() => {
     if (callPollRef.current !== null) {
@@ -369,7 +476,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const playOutgoingRing = () =>
       void playOutgoingCallTone().catch(() => undefined);
 
-    if (phase === "incoming") {
+    if (phase === "incoming" || phase === "precall-incoming") {
       playIncomingRing();
       callSoundIntervalRef.current = window.setInterval(playIncomingRing, 2_700);
     } else if (phase === "outgoing") {
@@ -430,8 +537,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     reconnectAttemptsRef.current = 0;
     localCandidateTypesRef.current.clear();
     remoteCandidateTypesRef.current.clear();
+    if (microphoneMeterFrameRef.current !== null) {
+      window.cancelAnimationFrame(microphoneMeterFrameRef.current);
+      microphoneMeterFrameRef.current = null;
+    }
+    const meterContext = microphoneMeterContextRef.current;
+    microphoneMeterContextRef.current = null;
+    if (meterContext && meterContext.state !== "closed") {
+      void meterContext.close().catch(() => undefined);
+    }
+    setMicrophoneLevel(0);
+    const cameraTrack = localCameraTrackRef.current;
+    const streamTracks = localStreamRef.current?.getTracks() ?? [];
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
+    if (cameraTrack && !streamTracks.includes(cameraTrack)) cameraTrack.stop();
     localStreamRef.current = null;
+    setIsMicrophoneReady(false);
     localCameraTrackRef.current = null;
     localCameraIntentRef.current = false;
     localVideoSenderRef.current = null;
@@ -500,8 +621,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setPeerName("");
     setCallBoardName("");
     setParticipants([]);
+    setPendingParticipant(null);
     setMessage("");
-    setIsMuted(false);
+    setPreCallMessage("");
+    setIsPreparingMedia(false);
     setRemoteMuted(false);
     setConnectionState("");
     setIsCallPanelMinimized(false);
@@ -591,7 +714,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (
       !call ||
       call.status !== "ringing" ||
-      !["incoming", "outgoing", "connecting"].includes(phase)
+      !["incoming", "precall-incoming", "outgoing", "connecting"].includes(phase)
     ) {
       return;
     }
@@ -618,7 +741,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearTimeout(timeout);
   }, [call, clearCallResources, phase, t]);
 
-  const getMicrophone = useCallback(async () => {
+  const getMicrophone = useCallback(async (
+    microphoneId = selectedMicrophoneId,
+    muted = isMuted
+  ) => {
     if (localStreamRef.current) return localStreamRef.current;
     if (!navigator.mediaDevices?.getUserMedia) {
       throw new Error(
@@ -631,6 +757,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     try {
       const speechConstraints: MediaTrackConstraints = {
+        ...(microphoneId ? { deviceId: { exact: microphoneId } } : {}),
         echoCancellation: true,
         noiseSuppression: true,
         autoGainControl: true,
@@ -642,15 +769,26 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         video: false,
       });
       stream.getAudioTracks().forEach((track) => {
+        track.enabled = !muted;
         try {
           track.contentHint = "speech";
         } catch {
           // Older browsers can expose contentHint as read-only. Audio still works.
         }
       });
+      const activeMicrophoneId = stream.getAudioTracks()[0]?.getSettings().deviceId;
+      if (activeMicrophoneId) setSelectedMicrophoneId(activeMicrophoneId);
+      setMicrophonePermission("granted");
+      setIsMicrophoneReady(true);
       localStreamRef.current = stream;
       return stream;
-    } catch {
+    } catch (error) {
+      setMicrophonePermission(
+        error instanceof DOMException &&
+          ["NotAllowedError", "SecurityError"].includes(error.name)
+          ? "denied"
+          : "unavailable"
+      );
       throw new Error(
         t(
           "Microphone permission was denied or no microphone is available.",
@@ -658,7 +796,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         )
       );
     }
-  }, [t]);
+  }, [isMuted, selectedMicrophoneId, t]);
 
   const sendSignal = useCallback(async (
     data: CallSignalData,
@@ -898,10 +1036,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         reconnectAttempts: reconnectAttemptsRef.current,
         error: "",
       });
-      stream.getTracks().forEach((track) => connection.addTrack(track, stream));
-      const videoTransceiver = connection.addTransceiver("video", {
-        direction: getLocalVideoDirection(false),
-      });
+      stream.getAudioTracks().forEach((track) => connection.addTrack(track, stream));
+      const previewCameraTrack = localCameraTrackRef.current;
+      const videoTransceiver = previewCameraTrack
+        ? connection.addTransceiver(previewCameraTrack, {
+            direction: getLocalVideoDirection(true),
+            streams: [new MediaStream([previewCameraTrack])],
+          })
+        : connection.addTransceiver("video", {
+            direction: getLocalVideoDirection(false),
+          });
       localVideoTransceiverRef.current = videoTransceiver;
       localVideoSenderRef.current = videoTransceiver.sender;
 
@@ -1715,6 +1859,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     [finishRemoteCall, preparePeerConnection, stopCallPoll, t]
   );
 
+  const prepareOutgoingCall = useCallback((participant: CallParticipant) => {
+    setPendingParticipant(participant);
+    setParticipants([]);
+    setPeerName(participant.name);
+    setCallBoardName(board?.name ?? "");
+    setPreCallMessage("");
+    setPhase("precall-outgoing");
+  }, [board]);
+
   const startCall = useCallback(
     async (participant: CallParticipant) => {
       if (!board || !user) return;
@@ -1790,7 +1943,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         );
       }
       if (data.participants.length === 1) {
-        await startCall(data.participants[0]);
+        prepareOutgoingCall(data.participants[0]);
         return;
       }
       setParticipants(data.participants);
@@ -1798,7 +1951,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setMessage(error instanceof Error ? error.message : "Could not prepare the call.");
       setPhase("error");
     }
-  }, [board, startCall, t, user]);
+  }, [board, prepareOutgoingCall, t, user]);
 
   const acceptCall = useCallback(async () => {
     const activeCall = callRef.current;
@@ -1900,6 +2053,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     setIsCameraOn(false);
+    setJoinWithCamera(false);
     setIsCameraStarting(false);
     setCameraMessage("");
     if (phaseRef.current === "connected") {
@@ -1908,7 +2062,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [requestRenegotiation, sendSignal]);
 
-  const refreshCameraDevices = useCallback(async () => {
+  const refreshMediaDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
     const devices = await navigator.mediaDevices.enumerateDevices();
     const cameras = devices
@@ -1918,24 +2072,136 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         label: device.label || `${t("Camera", "Kamera")} ${index + 1}`,
       }));
     setCameraDevices(cameras);
+    const microphones = devices
+      .filter((device) => device.kind === "audioinput")
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `${t("Microphone", "Mikrofon")} ${index + 1}`,
+      }));
+    const speakers = devices
+      .filter((device) => device.kind === "audiooutput")
+      .map((device, index) => ({
+        deviceId: device.deviceId,
+        label: device.label || `${t("Speaker", "Głośnik")} ${index + 1}`,
+      }));
     setSelectedCameraId((current) =>
       current && cameras.some((camera) => camera.deviceId === current)
         ? current
         : cameras[0]?.deviceId ?? ""
     );
+    setMicrophoneDevices(microphones);
+    setSpeakerDevices(speakers);
+    setSelectedMicrophoneId((current) =>
+      current && microphones.some((device) => device.deviceId === current)
+        ? current
+        : microphones[0]?.deviceId ?? ""
+    );
+    setSelectedSpeakerId((current) =>
+      current && speakers.some((device) => device.deviceId === current)
+        ? current
+        : speakers[0]?.deviceId ?? ""
+    );
   }, [t]);
 
   useEffect(() => {
-    if (phase !== "connected" || !navigator.mediaDevices) return;
-    void refreshCameraDevices().catch(() => undefined);
+    if (
+      !["precall-outgoing", "precall-incoming", "connected"].includes(phase) ||
+      !navigator.mediaDevices
+    ) return;
+    void refreshMediaDevices().catch(() => undefined);
     const handleDeviceChange = () => {
-      void refreshCameraDevices().catch(() => undefined);
+      void refreshMediaDevices().catch(() => undefined);
     };
     navigator.mediaDevices.addEventListener?.("devicechange", handleDeviceChange);
     return () => {
       navigator.mediaDevices.removeEventListener?.("devicechange", handleDeviceChange);
     };
-  }, [phase, refreshCameraDevices]);
+  }, [phase, refreshMediaDevices]);
+
+  useEffect(() => {
+    if (!["precall-outgoing", "precall-incoming"].includes(phase)) return;
+    if (!navigator.mediaDevices?.getUserMedia) {
+      setMicrophonePermission("unavailable");
+      setCameraPermission("unavailable");
+      return;
+    }
+    const readPermission = async (
+      name: "microphone" | "camera",
+      update: (state: MediaPermissionState) => void
+    ) => {
+      if (!navigator.permissions?.query) return;
+      try {
+        const result = await navigator.permissions.query({ name } as PermissionDescriptor);
+        update(result.state);
+        result.onchange = () => update(result.state);
+      } catch {
+        // Safari does not expose camera/microphone through Permissions API.
+      }
+    };
+    void readPermission("microphone", setMicrophonePermission);
+    void readPermission("camera", setCameraPermission);
+  }, [phase]);
+
+  const enableMicrophone = useCallback(async (microphoneId = selectedMicrophoneId) => {
+    if (isPreparingMedia) return;
+    setIsPreparingMedia(true);
+    setPreCallMessage("");
+    try {
+      localStreamRef.current?.getAudioTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+      setIsMicrophoneReady(false);
+      const stream = await getMicrophone(microphoneId, isMuted);
+      startMicrophoneMeter(stream);
+      await refreshMediaDevices();
+    } catch (error) {
+      setPreCallMessage(
+        error instanceof Error
+          ? error.message
+          : t("Microphone unavailable.", "Mikrofon niedostępny.")
+      );
+    } finally {
+      setIsPreparingMedia(false);
+    }
+  }, [getMicrophone, isMuted, isPreparingMedia, refreshMediaDevices, selectedMicrophoneId, startMicrophoneMeter, t]);
+
+  const testSpeaker = useCallback(async () => {
+    if (isTestingSpeaker) return;
+    setIsTestingSpeaker(true);
+    setPreCallMessage("");
+    const context = new AudioContext();
+    const destination = context.createMediaStreamDestination();
+    const oscillator = context.createOscillator();
+    const gain = context.createGain();
+    const audio = new Audio();
+    try {
+      oscillator.frequency.value = 523.25;
+      gain.gain.value = 0.12;
+      oscillator.connect(gain).connect(destination);
+      audio.srcObject = destination.stream;
+      if (selectedSpeakerId && supportsSpeakerSelection(audio)) {
+        await audio.setSinkId(selectedSpeakerId);
+      }
+      await audio.play();
+      oscillator.start();
+      oscillator.stop(context.currentTime + 0.45);
+      await new Promise<void>((resolve) => {
+        oscillator.onended = () => resolve();
+      });
+    } catch {
+      setPreCallMessage(
+        t(
+          "The test sound could not play. Check browser sound permission and the selected speaker.",
+          "Nie udało się odtworzyć dźwięku testowego. Sprawdź uprawnienia dźwięku i wybrany głośnik."
+        )
+      );
+    } finally {
+      audio.pause();
+      audio.srcObject = null;
+      destination.stream.getTracks().forEach((track) => track.stop());
+      if (context.state !== "closed") await context.close().catch(() => undefined);
+      setIsTestingSpeaker(false);
+    }
+  }, [isTestingSpeaker, selectedSpeakerId, t]);
 
   const startCamera = useCallback(async (cameraId = selectedCameraId) => {
     if (isCameraStarting || localCameraTrackRef.current) return;
@@ -2012,7 +2278,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (!cameraTrack) throw new Error("CAMERA_TRACK_MISSING");
       const activeCameraId = cameraTrack.getSettings().deviceId;
       if (activeCameraId) setSelectedCameraId(activeCameraId);
-      void refreshCameraDevices().catch(() => undefined);
+      void refreshMediaDevices().catch(() => undefined);
       try {
         cameraTrack.contentHint = "motion";
       } catch {
@@ -2027,26 +2293,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       };
       localCameraTrackRef.current = cameraTrack;
-      localStreamRef.current?.addTrack(cameraTrack);
       const connection = peerConnectionRef.current;
-      if (!connection) throw new Error("PEER_CONNECTION_MISSING");
-      let videoTransceiver = localVideoTransceiverRef.current;
-      if (!videoTransceiver || videoTransceiver.direction === "stopped") {
-        videoTransceiver = connection.addTransceiver(cameraTrack, {
-          direction: getLocalVideoDirection(true),
-          streams: [localStreamRef.current ?? cameraStream],
-        });
-        localVideoTransceiverRef.current = videoTransceiver;
-        localVideoSenderRef.current = videoTransceiver.sender;
-      } else {
-        videoTransceiver.direction = getLocalVideoDirection(true);
-        await videoTransceiver.sender.replaceTrack(cameraTrack);
-        localVideoSenderRef.current = videoTransceiver.sender;
+      if (connection) {
+        let videoTransceiver = localVideoTransceiverRef.current;
+        if (!videoTransceiver || videoTransceiver.direction === "stopped") {
+          videoTransceiver = connection.addTransceiver(cameraTrack, {
+            direction: getLocalVideoDirection(true),
+            streams: [cameraStream],
+          });
+          localVideoTransceiverRef.current = videoTransceiver;
+          localVideoSenderRef.current = videoTransceiver.sender;
+        } else {
+          videoTransceiver.direction = getLocalVideoDirection(true);
+          await videoTransceiver.sender.replaceTrack(cameraTrack);
+          localVideoSenderRef.current = videoTransceiver.sender;
+        }
       }
+      setCameraPermission("granted");
       setIsCameraOn(true);
+      setJoinWithCamera(true);
       try {
-        await sendSignal({ kind: "video-state", enabled: true });
-        await requestRenegotiation();
+        if (connection) {
+          await sendSignal({ kind: "video-state", enabled: true });
+          await requestRenegotiation();
+        }
       } catch {
         // The camera opened successfully. A transient signaling failure must
         // not be presented as a missing camera or tear down the local preview.
@@ -2077,6 +2347,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       setIsCameraOn(false);
       if (error instanceof DOMException && error.name === "NotAllowedError") {
+        setCameraPermission("denied");
         setCameraMessage(
           t(
             "Camera access is blocked. Click the lock icon beside the address, allow Camera, then reload Scriboo.",
@@ -2085,6 +2356,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         );
         return;
       }
+      setCameraPermission("unavailable");
       if (error instanceof DOMException && error.name === "NotReadableError") {
         setCameraMessage(
           t(
@@ -2115,7 +2387,54 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsCameraStarting(false);
     }
-  }, [isCameraStarting, refreshCameraDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
+  }, [isCameraStarting, refreshMediaDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
+
+  const prepareSelectedMedia = useCallback(async () => {
+    if (joinWithCamera && !localCameraTrackRef.current) {
+      await startCamera(selectedCameraId);
+    }
+    const stream = await getMicrophone(selectedMicrophoneId, isMuted);
+    stream.getAudioTracks().forEach((track) => {
+      track.enabled = !isMuted;
+    });
+  }, [getMicrophone, isMuted, joinWithCamera, selectedCameraId, selectedMicrophoneId, startCamera]);
+
+  const joinOutgoingCall = useCallback(async () => {
+    if (!pendingParticipant || isPreparingMedia) return;
+    setIsPreparingMedia(true);
+    setPreCallMessage("");
+    try {
+      await prepareSelectedMedia();
+      await startCall(pendingParticipant);
+    } catch (error) {
+      setPreCallMessage(
+        error instanceof Error ? error.message : t("Could not prepare the call.", "Nie udało się przygotować połączenia.")
+      );
+    } finally {
+      setIsPreparingMedia(false);
+    }
+  }, [isPreparingMedia, pendingParticipant, prepareSelectedMedia, startCall, t]);
+
+  const joinIncomingCall = useCallback(async () => {
+    if (isPreparingMedia) return;
+    setIsPreparingMedia(true);
+    setPreCallMessage("");
+    try {
+      await prepareSelectedMedia();
+      await acceptCall();
+    } catch (error) {
+      setPreCallMessage(
+        error instanceof Error ? error.message : t("Could not prepare the call.", "Nie udało się przygotować połączenia.")
+      );
+    } finally {
+      setIsPreparingMedia(false);
+    }
+  }, [acceptCall, isPreparingMedia, prepareSelectedMedia, t]);
+
+  const openIncomingPreCall = useCallback(() => {
+    setPreCallMessage("");
+    setPhase("precall-incoming");
+  }, []);
 
   useEffect(() => {
     if (!isCameraOn || !localCameraTrackRef.current || !localVideoRef.current) return;
@@ -2151,6 +2470,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const statusText =
     phase === "incoming"
       ? t("Incoming call", "Połączenie przychodzące")
+      : phase === "precall-incoming"
+        ? t("Check your devices before answering", "Sprawdź urządzenia przed odebraniem")
+        : phase === "precall-outgoing"
+          ? t("Check your devices before calling", "Sprawdź urządzenia przed połączeniem")
       : phase === "outgoing"
         ? t("Ringing…", "Dzwonienie…")
         : phase === "connecting"
@@ -2160,6 +2483,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               ? t("Connected · participant muted", "Połączono · uczestnik wyciszony")
               : t("Connected", "Połączono")
             : message;
+  const isPreCall = phase === "precall-outgoing" || phase === "precall-incoming";
+  const permissionText = (state: MediaPermissionState) =>
+    state === "granted"
+      ? t("allowed", "dozwolone")
+      : state === "denied"
+        ? t("blocked", "zablokowane")
+        : state === "unavailable"
+          ? t("unavailable", "niedostępne")
+          : t("not requested", "niepoproszone");
 
   const beginCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
     if (
@@ -2290,7 +2622,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             <span style={{ color: "#64748b", fontSize: "13px" }}>{board?.name}</span>
             <div style={{ display: "grid", gap: "8px", width: "100%" }}>
               {participants.map((participant) => (
-                <button key={participant.userId} type="button" onClick={() => void startCall(participant)} style={participantButtonStyle}>
+                <button key={participant.userId} type="button" onClick={() => prepareOutgoingCall(participant)} style={participantButtonStyle}>
                   <Phone size={15} />
                   <span>{participant.name}</span>
                 </button>
@@ -2315,7 +2647,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             left: callPanelPosition ? `${callPanelPosition.left}px` : "auto",
             top: callPanelPosition ? `${callPanelPosition.top}px` : "74px",
             zIndex: 210,
-            width: "min(350px, calc(100vw - 36px))",
+            width: isPreCall
+              ? "min(440px, calc(100vw - 36px))"
+              : "min(350px, calc(100vw - 36px))",
             maxHeight: "calc(100dvh - 92px)",
             overflowY: isCallPanelMinimized ? "hidden" : "auto",
             padding: isCallPanelMinimized ? "10px 12px" : "18px",
@@ -2373,6 +2707,139 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           <div aria-live="polite" style={{ color: phase === "error" ? "#b91c1c" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {statusText || connectionState}
           </div>
+          {isPreCall && (
+            <div style={{ display: "grid", gap: "12px" }}>
+              <div style={preCallFieldStyle}>
+                <label htmlFor="precall-microphone" style={preCallLabelStyle}>
+                  {t("Microphone", "Mikrofon")}
+                </label>
+                <select
+                  id="precall-microphone"
+                  value={selectedMicrophoneId}
+                  onChange={(event) => {
+                    const deviceId = event.target.value;
+                    setSelectedMicrophoneId(deviceId);
+                    if (isMicrophoneReady) void enableMicrophone(deviceId);
+                  }}
+                  style={preCallSelectStyle}
+                >
+                  {microphoneDevices.length === 0 && (
+                    <option value="">{t("Default microphone", "Domyślny mikrofon")}</option>
+                  )}
+                  {microphoneDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => void enableMicrophone()}
+                  disabled={isPreparingMedia}
+                  style={{ ...preCallSmallButtonStyle, color: isMicrophoneReady ? "#166534" : "#334155" }}
+                >
+                  <Mic size={15} />
+                  {isMicrophoneReady
+                    ? t("Microphone ready", "Mikrofon gotowy")
+                    : t("Enable microphone", "Włącz mikrofon")}
+                </button>
+                <div
+                  role="meter"
+                  aria-label={t("Microphone activity", "Aktywność mikrofonu")}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={microphoneLevel}
+                  style={{ height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}
+                >
+                  <div style={{ width: `${microphoneLevel}%`, height: "100%", background: microphoneLevel > 3 ? "#22c55e" : "#94a3b8", transition: "width 80ms linear" }} />
+                </div>
+              </div>
+
+              <div style={preCallFieldStyle}>
+                <label htmlFor="precall-camera" style={preCallLabelStyle}>
+                  {t("Camera", "Kamera")}
+                </label>
+                <select
+                  id="precall-camera"
+                  value={selectedCameraId}
+                  disabled={isCameraOn || isCameraStarting}
+                  onChange={(event) => setSelectedCameraId(event.target.value)}
+                  style={preCallSelectStyle}
+                >
+                  {cameraDevices.length === 0 && (
+                    <option value="">{t("Default camera", "Domyślna kamera")}</option>
+                  )}
+                  {cameraDevices.map((device) => (
+                    <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  onClick={() => isCameraOn ? void stopCamera() : void startCamera(selectedCameraId)}
+                  disabled={isCameraStarting}
+                  aria-pressed={isCameraOn}
+                  style={{ ...preCallSmallButtonStyle, color: isCameraOn ? "#6d28d9" : "#334155" }}
+                >
+                  {isCameraOn ? <VideoOff size={15} /> : <Video size={15} />}
+                  {isCameraStarting
+                    ? t("Starting…", "Uruchamianie…")
+                    : isCameraOn
+                      ? t("Join without camera", "Dołącz bez kamery")
+                      : t("Preview camera", "Podgląd kamery")}
+                </button>
+              </div>
+
+              <div style={preCallFieldStyle}>
+                <span style={preCallLabelStyle}>{t("Speaker", "Głośnik")}</span>
+                {isSpeakerSelectionSupported && speakerDevices.length > 0 ? (
+                  <select
+                    aria-label={t("Speaker", "Głośnik")}
+                    value={selectedSpeakerId}
+                    onChange={(event) => setSelectedSpeakerId(event.target.value)}
+                    style={preCallSelectStyle}
+                  >
+                    {speakerDevices.map((device) => (
+                      <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span style={{ color: "#64748b", fontSize: 12 }}>
+                    {t("Using the browser's default speaker", "Używany jest domyślny głośnik przeglądarki")}
+                  </span>
+                )}
+                <button type="button" onClick={() => void testSpeaker()} disabled={isTestingSpeaker} style={preCallSmallButtonStyle}>
+                  {isTestingSpeaker ? t("Playing…", "Odtwarzanie…") : t("Test speaker", "Testuj głośnik")}
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={toggleMute}
+                aria-pressed={isMuted}
+                style={{ ...preCallSmallButtonStyle, justifyContent: "center", background: isMuted ? "#ede9fe" : "#ecfdf5" }}
+              >
+                {isMuted ? <MicOff size={15} /> : <Mic size={15} />}
+                {isMuted
+                  ? t("Join muted", "Dołącz z wyciszeniem")
+                  : t("Join unmuted", "Dołącz bez wyciszenia")}
+              </button>
+
+              <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+                {t("Microphone permission", "Uprawnienie mikrofonu")}: {permissionText(microphonePermission)} · {t("Camera permission", "Uprawnienie kamery")}: {permissionText(cameraPermission)}
+              </div>
+              {(microphonePermission === "denied" || cameraPermission === "denied") && (
+                <div role="alert" style={{ color: "#b45309", fontSize: 12, lineHeight: 1.45 }}>
+                  {t(
+                    "Access is blocked. Click the lock icon beside the address, allow the device, then reload the page.",
+                    "Dostęp jest zablokowany. Kliknij kłódkę obok adresu, zezwól na urządzenie i odśwież stronę."
+                  )}
+                </div>
+              )}
+              {(preCallMessage || cameraMessage) && (
+                <div role="alert" style={{ color: "#b45309", fontSize: 12, lineHeight: 1.45 }}>
+                  {preCallMessage || cameraMessage}
+                </div>
+              )}
+            </div>
+          )}
           {phase === "connected" && (
             <label
               style={{
@@ -2414,12 +2881,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               />
             </label>
           )}
-          {isCallToneBlocked && (phase === "incoming" || phase === "outgoing") && (
+          {isCallToneBlocked && (phase === "incoming" || phase === "precall-incoming" || phase === "outgoing") && (
             <button
               type="button"
               onClick={() => {
                 const playTone =
-                  phase === "incoming" ? playIncomingCallTone : playOutgoingCallTone;
+                  phase === "incoming" || phase === "precall-incoming"
+                    ? playIncomingCallTone
+                    : playOutgoingCallTone;
                 void playTone().catch(() => undefined);
               }}
               style={{
@@ -2490,7 +2959,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {phase === "connected" && isCameraOn && (
+          {(phase === "connected" || isPreCall) && isCameraOn && (
             <div
               style={{
                 position: "relative",
@@ -2577,13 +3046,37 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </label>
           )}
 
-          {phase === "incoming" ? (
+          {isPreCall ? (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
+              <button
+                type="button"
+                onClick={() => phase === "precall-incoming" ? void declineCall() : resetToIdle()}
+                disabled={isPreparingMedia}
+                style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}
+              >
+                <PhoneOff size={17} /> {phase === "precall-incoming" ? t("Decline", "Odrzuć") : t("Cancel", "Anuluj")}
+              </button>
+              <button
+                type="button"
+                onClick={() => phase === "precall-incoming" ? void joinIncomingCall() : void joinOutgoingCall()}
+                disabled={isPreparingMedia}
+                style={{ ...callActionStyle, background: "#dcfce7", color: "#166534", opacity: isPreparingMedia ? 0.65 : 1 }}
+              >
+                <Phone size={17} />
+                {isPreparingMedia
+                  ? t("Preparing…", "Przygotowywanie…")
+                  : phase === "precall-incoming"
+                    ? t("Join call", "Dołącz do rozmowy")
+                    : t("Start call", "Rozpocznij rozmowę")}
+              </button>
+            </div>
+          ) : phase === "incoming" ? (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
               <button type="button" onClick={() => void declineCall()} style={{ ...callActionStyle, background: "#fee2e2", color: "#b91c1c" }}>
                 <PhoneOff size={17} /> {t("Decline", "Odrzuć")}
               </button>
-              <button type="button" onClick={() => void acceptCall()} style={{ ...callActionStyle, background: "#dcfce7", color: "#166534" }}>
-                <Phone size={17} /> {t("Accept", "Odbierz")}
+              <button type="button" onClick={openIncomingPreCall} style={{ ...callActionStyle, background: "#dcfce7", color: "#166534" }}>
+                <Phone size={17} /> {t("Set up & answer", "Ustaw i odbierz")}
               </button>
             </div>
           ) : phase === "error" || phase === "ended" ? (
@@ -2686,6 +3179,43 @@ const participantButtonStyle: React.CSSProperties = {
   alignItems: "center",
   gap: "10px",
   fontSize: "14px",
+  fontWeight: 750,
+  cursor: "pointer",
+};
+const preCallFieldStyle: React.CSSProperties = {
+  display: "grid",
+  gap: "7px",
+  padding: "11px",
+  border: "1px solid #e2e8f0",
+  borderRadius: "12px",
+  background: "#f8fafc",
+};
+const preCallLabelStyle: React.CSSProperties = {
+  color: "#334155",
+  fontSize: "12px",
+  fontWeight: 800,
+};
+const preCallSelectStyle: React.CSSProperties = {
+  width: "100%",
+  minWidth: 0,
+  height: "36px",
+  padding: "0 9px",
+  border: "1px solid #cbd5e1",
+  borderRadius: "9px",
+  background: "#ffffff",
+  color: "#334155",
+  fontSize: "12px",
+};
+const preCallSmallButtonStyle: React.CSSProperties = {
+  minHeight: "36px",
+  padding: "0 10px",
+  border: "1px solid #cbd5e1",
+  borderRadius: "9px",
+  background: "#ffffff",
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "7px",
+  fontSize: "12px",
   fontWeight: 750,
   cursor: "pointer",
 };
