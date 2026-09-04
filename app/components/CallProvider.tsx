@@ -6,6 +6,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useReducer,
   useRef,
   useState,
 } from "react";
@@ -27,30 +28,20 @@ import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
 import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
 import { getLocalVideoDirection } from "@/lib/call-video";
+import {
+  browserCallReducer,
+  initialBrowserCallState,
+} from "@/lib/browser-call-state";
+import type {
+  CallRecord,
+  ParticipantConnectionState,
+} from "@/lib/call-types";
 
 type BoardContext = { id: string; name: string };
 type CallParticipant = {
   userId: string;
   name: string;
   role: "owner" | "collaborator";
-};
-type CallStatus =
-  | "ringing"
-  | "accepted"
-  | "declined"
-  | "cancelled"
-  | "missed"
-  | "ended";
-type CallRecord = {
-  id: string;
-  boardId: string;
-  callerUserId: string;
-  recipientUserId: string;
-  status: CallStatus;
-  createdAt: string;
-  updatedAt: string;
-  ringExpiresAt: string;
-  expiresAt: string;
 };
 type CallPhase =
   | "idle"
@@ -76,6 +67,7 @@ type SignalEnvelope = {
   senderUserId: string;
   messageId: string;
   sentAt: number;
+  generation: number;
   data: SignalData;
 };
 type CurrentUser = { id: string; name: string; email: string };
@@ -86,6 +78,15 @@ type CallContextValue = {
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
+
+const toParticipantConnectionState = (
+  state: RTCPeerConnectionState | RTCIceConnectionState
+): ParticipantConnectionState => {
+  if (state === "connected" || state === "completed") return "connected";
+  if (state === "disconnected") return "reconnecting";
+  if (state === "failed" || state === "closed") return "failed";
+  return "connecting";
+};
 
 const apiRequest = async <T,>(
   path: string,
@@ -114,6 +115,8 @@ const isSignalEnvelope = (value: unknown): value is SignalEnvelope => {
     typeof signal.senderUserId === "string" &&
     typeof signal.messageId === "string" &&
     typeof signal.sentAt === "number" &&
+    Number.isSafeInteger(signal.generation) &&
+    Number(signal.generation) >= 0 &&
     Boolean(signal.data && typeof signal.data === "object")
   );
 };
@@ -163,13 +166,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [board, setBoard] = useState<BoardContext | null>(null);
   const [participants, setParticipants] = useState<CallParticipant[]>([]);
   const [phase, setPhase] = useState<CallPhase>("idle");
-  const [call, setCall] = useState<CallRecord | null>(null);
+  const [browserCallState, dispatchBrowserCall] = useReducer(
+    browserCallReducer,
+    initialBrowserCallState
+  );
+  const call = browserCallState.call;
   const [peerName, setPeerName] = useState("");
   const [callBoardName, setCallBoardName] = useState("");
   const [message, setMessage] = useState("");
   const [isMuted, setIsMuted] = useState(false);
   const [remoteMuted, setRemoteMuted] = useState(false);
-  const [connectionState, setConnectionState] = useState("");
+  const connectionState = browserCallState.connectionState;
+  const setConnectionState = useCallback(
+    (state: ParticipantConnectionState | "") =>
+      dispatchBrowserCall({ type: "connection", state }),
+    []
+  );
   const [isRemoteAudioBlocked, setIsRemoteAudioBlocked] = useState(false);
   const [isCallToneBlocked, setIsCallToneBlocked] = useState(false);
   const [isCameraOn, setIsCameraOn] = useState(false);
@@ -201,6 +213,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<RTCIceCandidateInit[]>([]);
   const seenSignalsRef = useRef(new Set<string>());
+  const negotiationGenerationRef = useRef(0);
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
   const callPollRef = useRef<number | null>(null);
   const turnRefreshRef = useRef<number | null>(null);
@@ -401,6 +414,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     peerConnectionRef.current?.close();
     peerConnectionRef.current = null;
     queuedCandidatesRef.current = [];
+    seenSignalsRef.current.clear();
+    negotiationGenerationRef.current = 0;
     reconnectAttemptsRef.current = 0;
     localCandidateTypesRef.current.clear();
     remoteCandidateTypesRef.current.clear();
@@ -435,7 +450,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     callRef.current = null;
     isTerminatingCallRef.current = false;
     setPhase("idle");
-    setCall(null);
+    dispatchBrowserCall({ type: "clear" });
     setPeerName("");
     setCallBoardName("");
     setParticipants([]);
@@ -449,7 +464,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       console.warn("Scriboo call cleanup completed with an error", error);
     }
-  }, [clearCallResources]);
+  }, [clearCallResources, setConnectionState]);
 
   useEffect(() => {
     if (phase !== "ended") return;
@@ -542,6 +557,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       senderUserId: activeUser.id,
       messageId: crypto.randomUUID(),
       sentAt: Date.now(),
+      generation: negotiationGenerationRef.current,
       data,
     };
     reportRealtimeDiagnostics({ callStage: `sending ${data.kind}`, error: "" });
@@ -557,6 +573,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
       );
     }
+    negotiationGenerationRef.current += 1;
     const offer = await connection.createOffer();
     await connection.setLocalDescription(offer);
     await sendSignal({
@@ -645,6 +662,29 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return data.iceServers;
   }, [t]);
 
+  const reportParticipantState = useCallback(
+    (state: ParticipantConnectionState, reason: string) => {
+      const activeCall = callRef.current;
+      if (!activeCall) return;
+      void apiRequest(`/api/calls/${activeCall.id}/participant-state`, {
+        method: "PATCH",
+        body: JSON.stringify({ connectionState: state, reason }),
+        keepalive: true,
+      }).catch(() => undefined);
+    },
+    []
+  );
+
+  const reportCallFailure = useCallback((reason: string) => {
+    const activeCall = callRef.current;
+    if (!activeCall || !["accepted", "ending"].includes(activeCall.status)) return;
+    void apiRequest(`/api/calls/${activeCall.id}`, {
+      method: "PATCH",
+      body: JSON.stringify({ action: "report-failed", reason }),
+      keepalive: true,
+    }).catch(() => undefined);
+  }, []);
+
   const flushQueuedCandidates = useCallback(async () => {
     const connection = peerConnectionRef.current;
     if (!connection?.remoteDescription) return;
@@ -657,6 +697,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const preparePeerConnection = useCallback(
     async (activeCall: CallRecord, callerCreatesOffer: boolean) => {
       if (peerConnectionRef.current) return peerConnectionRef.current;
+      setConnectionState("connecting");
+      reportParticipantState("connecting", "peer_connection_started");
       const stream = await getMicrophone();
       const credentials = await apiRequest<{
         iceServers: RTCIceServer[];
@@ -720,7 +762,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
-        setConnectionState(connection.connectionState);
+        setConnectionState(toParticipantConnectionState(connection.connectionState));
         reportRealtimeDiagnostics({
           connectionState: connection.connectionState,
           signalingState: connection.signalingState,
@@ -728,6 +770,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           reconnectAttempts: reconnectAttemptsRef.current,
         });
         if (connection.connectionState === "connected") {
+          reportParticipantState("connected", "ice_connected");
           if (connectionRetryRef.current !== null) {
             window.clearTimeout(connectionRetryRef.current);
             connectionRetryRef.current = null;
@@ -738,7 +781,39 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }
           setPhase("connected");
           setMessage("");
+        } else if (connection.connectionState === "disconnected") {
+          reportParticipantState("reconnecting", "ice_disconnected");
+          const latestCall = callRef.current;
+          if (
+            latestCall &&
+            connectionRetryRef.current === null &&
+            userRef.current?.id === latestCall.callerUserId
+          ) {
+            connectionRetryRef.current = window.setTimeout(() => {
+              connectionRetryRef.current = null;
+              if (
+                connection.connectionState === "connected" ||
+                connection.connectionState === "closed"
+              ) return;
+              reconnectAttemptsRef.current += 1;
+              void refreshTurnConfiguration(latestCall)
+                .then(async () => {
+                  negotiationGenerationRef.current += 1;
+                  const offer = await connection.createOffer({ iceRestart: true });
+                  await connection.setLocalDescription(offer);
+                  await sendSignal({
+                    kind: "offer",
+                    description: await getGatheredLocalDescription(connection),
+                  });
+                })
+                .catch(() => {
+                  reportParticipantState("failed", "ice_restart_failed");
+                  reportCallFailure("ice_restart_failed");
+                });
+            }, 4_000);
+          }
         } else if (connection.connectionState === "failed") {
+          reportParticipantState("reconnecting", "ice_restart_started");
           const activeUser = userRef.current;
           const latestCall = callRef.current;
           if (
@@ -748,6 +823,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             reconnectAttemptsRef.current += 1;
             reportRealtimeDiagnostics({ reconnectAttempts: reconnectAttemptsRef.current });
             void (async () => {
+              negotiationGenerationRef.current += 1;
               const offer = await connection.createOffer({ iceRestart: true });
               await connection.setLocalDescription(offer);
               await sendSignal({
@@ -755,9 +831,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 description: await getGatheredLocalDescription(connection),
               });
             })().catch(() => {
+              reportParticipantState("failed", "ice_restart_failed");
+              reportCallFailure("ice_restart_failed");
               setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
             });
           } else {
+            reportParticipantState("failed", "ice_restart_exhausted");
+            reportCallFailure("ice_restart_exhausted");
             setMessage(t("Connection lost.", "Połączenie zostało przerwane."));
           }
         }
@@ -765,7 +845,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       connection.oniceconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
-        setConnectionState(connection.iceConnectionState);
+        setConnectionState(toParticipantConnectionState(connection.iceConnectionState));
         reportRealtimeDiagnostics({
           iceState: connection.iceConnectionState,
           connectionState: connection.connectionState,
@@ -838,6 +918,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }, refreshIn);
 
       if (callerCreatesOffer) {
+        negotiationGenerationRef.current += 1;
         const offer = await connection.createOffer();
         await connection.setLocalDescription(offer);
         await sendSignal({
@@ -862,6 +943,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           void refreshTurnConfiguration(latestCall)
             .then(async () => {
               latestConnection.restartIce();
+              negotiationGenerationRef.current += 1;
               const retryOffer = await latestConnection.createOffer({ iceRestart: true });
               await latestConnection.setLocalDescription(retryOffer);
               await sendSignal({
@@ -899,21 +981,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             ) {
               return;
             }
-            if (
-              refreshed &&
-              ["declined", "cancelled", "missed", "ended"].includes(
-                refreshed.call.status
-              )
-            ) {
+            if (refreshed?.call.status === "ended") {
               isTerminatingCallRef.current = true;
               phaseRef.current = "ended";
               clearCallResources();
               setConnectionState("");
               setMessage(
-                refreshed.call.status === "declined"
+                refreshed.call.outcome === "declined"
                   ? t("Call declined.", "Połączenie odrzucone.")
-                  : refreshed.call.status === "missed"
+                  : refreshed.call.outcome === "missed"
                     ? t("No answer.", "Brak odpowiedzi.")
+                    : refreshed.call.outcome === "unavailable"
+                      ? t("The other person is unavailable.", "Druga osoba jest niedostępna.")
+                      : refreshed.call.outcome === "failed"
+                        ? t("The connection could not be established.", "Nie udało się nawiązać połączenia.")
                     : t("Call ended.", "Połączenie zakończone.")
               );
               setPhase("ended");
@@ -926,7 +1007,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             void sendSignal({ kind: "ended" }).catch(() => undefined);
             void apiRequest(`/api/calls/${latestCall.id}`, {
               method: "PATCH",
-              body: JSON.stringify({ action: "end" }),
+              body: JSON.stringify({
+                action: "report-failed",
+                reason: "connection_timeout",
+              }),
               keepalive: true,
             }).catch(() => undefined);
             clearCallResources();
@@ -952,7 +1036,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, getMicrophone, refreshTurnConfiguration, sendSignal, t]
+    [clearCallResources, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
@@ -965,7 +1049,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setMessage(text);
       setPhase("ended");
     },
-    [clearCallResources]
+    [clearCallResources, setConnectionState]
   );
 
   const handleSignal = useCallback(
@@ -990,20 +1074,56 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (seenSignalsRef.current.size > 500) seenSignalsRef.current.clear();
 
       const signal = payload.data;
+      if (
+        ["answer", "ice-candidate"].includes(signal.kind) &&
+        payload.generation !== negotiationGenerationRef.current
+      ) {
+        return;
+      }
+      if (signal.kind === "offer") {
+        if (payload.generation < negotiationGenerationRef.current) return;
+        negotiationGenerationRef.current = payload.generation;
+      }
       reportRealtimeDiagnostics({ callStage: `received ${signal.kind}` });
       if (signal.kind === "accepted") {
-        if (activeUser.id === activeCall.callerUserId) {
+        const authoritative = await apiRequest<{ call: CallRecord }>(
+          `/api/calls/${activeCall.id}`
+        ).catch(() => null);
+        if (!authoritative || callRef.current?.id !== activeCall.id) return;
+        dispatchBrowserCall({ type: "server-record", call: authoritative.call });
+        callRef.current = authoritative.call;
+        if (
+          authoritative.call.status === "accepted" &&
+          activeUser.id === activeCall.callerUserId
+        ) {
           setPhase("connecting");
-          await preparePeerConnection(activeCall, true);
+          await preparePeerConnection(authoritative.call, true);
         }
         return;
       }
       if (signal.kind === "declined") {
-        finishRemoteCall(t("Call declined.", "Połączenie odrzucone."));
+        const authoritative = await apiRequest<{ call: CallRecord }>(
+          `/api/calls/${activeCall.id}`
+        ).catch(() => null);
+        if (
+          authoritative?.call.status === "ended" &&
+          authoritative.call.outcome === "declined" &&
+          callRef.current?.id === activeCall.id
+        ) {
+          finishRemoteCall(t("Call declined.", "Połączenie odrzucone."));
+        }
         return;
       }
       if (signal.kind === "ended") {
-        finishRemoteCall(t("Call ended.", "Połączenie zakończone."));
+        const authoritative = await apiRequest<{ call: CallRecord }>(
+          `/api/calls/${activeCall.id}`
+        ).catch(() => null);
+        if (
+          authoritative?.call.status === "ended" &&
+          callRef.current?.id === activeCall.id
+        ) {
+          finishRemoteCall(t("Call ended.", "Połączenie zakończone."));
+        }
         return;
       }
       if (signal.kind === "mute") {
@@ -1093,7 +1213,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     async (incomingCall: CallRecord) => {
       if (phaseRef.current !== "idle" && callRef.current?.id !== incomingCall.id) return;
       const context = await loadCallContext(incomingCall);
-      setCall(incomingCall);
+      dispatchBrowserCall({ type: "select", call: incomingCall });
+      callRef.current = incomingCall;
       setPeerName(context.peerName);
       setCallBoardName(context.boardName);
       setMessage("");
@@ -1111,7 +1232,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (current) {
         const refreshed = data.calls.find((candidate) => candidate.id === current.id);
         if (refreshed) {
-          setCall(refreshed);
+          dispatchBrowserCall({ type: "server-record", call: refreshed });
         } else if (["incoming", "outgoing"].includes(phaseRef.current)) {
           clearCallResources();
           setMessage(t("No answer.", "Brak odpowiedzi."));
@@ -1289,7 +1410,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             ) {
               return;
             }
-            setCall(refreshed);
+            dispatchBrowserCall({ type: "server-record", call: refreshed });
             if (
               refreshed.status === "ringing" &&
               new Date(refreshed.ringExpiresAt).getTime() <= Date.now()
@@ -1308,14 +1429,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             ) {
               setPhase("connecting");
               await preparePeerConnection(refreshed, true);
-            } else if (refreshed.status === "declined") {
-              finishRemoteCall(t("Call declined.", "Połączenie odrzucone."));
             } else if (
-              ["cancelled", "missed", "ended"].includes(refreshed.status)
+              refreshed.status === "ended" &&
+              refreshed.outcome === "declined"
             ) {
+              finishRemoteCall(t("Call declined.", "Połączenie odrzucone."));
+            } else if (refreshed.status === "ended") {
               finishRemoteCall(
-                refreshed.status === "missed"
+                refreshed.outcome === "missed"
                   ? t("No answer.", "Brak odpowiedzi.")
+                  : refreshed.outcome === "unavailable"
+                    ? t("The other person is unavailable.", "Druga osoba jest niedostępna.")
+                    : refreshed.outcome === "failed"
+                      ? t("The connection could not be established.", "Nie udało się nawiązać połączenia.")
                   : t("Call ended.", "Połączenie zakończone.")
               );
             }
@@ -1332,6 +1458,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const startCall = useCallback(
     async (participant: CallParticipant) => {
       if (!board || !user) return;
+      if (!navigator.onLine) {
+        setMessage(t("You are offline.", "Jesteś offline."));
+        setPhase("error");
+        return;
+      }
       phaseRef.current = "connecting";
       setParticipants([]);
       setMessage("");
@@ -1357,10 +1488,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           body: JSON.stringify({
             boardId: board.id,
             recipientUserId: participant.userId,
+            clientRequestId: crypto.randomUUID(),
           }),
         });
         createdCall = data.call;
-        setCall(data.call);
+        dispatchBrowserCall({ type: "select", call: data.call });
         callRef.current = data.call;
         setPhase("outgoing");
         const microphone = await microphoneResult;
@@ -1380,7 +1512,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setPhase("error");
       }
     },
-    [board, clearCallResources, connectCallChannel, getMicrophone, startStatusPoll, user]
+    [board, clearCallResources, connectCallChannel, getMicrophone, startStatusPoll, t, user]
   );
 
   const openCallChooser = useCallback(async () => {
@@ -1419,6 +1551,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     phaseRef.current = "connecting";
     setMessage("");
     setPhase("connecting");
+    setConnectionState("accepting");
+    reportParticipantState("accepting", "accept_clicked");
     try {
       await getMicrophone();
       await connectCallChannel(activeCall);
@@ -1426,17 +1560,34 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         `/api/calls/${activeCall.id}`,
         { method: "PATCH", body: JSON.stringify({ action: "accept" }) }
       );
-      setCall(data.call);
+      dispatchBrowserCall({ type: "server-record", call: data.call });
       callRef.current = data.call;
       await preparePeerConnection(data.call, false);
       await sendSignal({ kind: "accepted" });
       startStatusPoll(data.call);
     } catch (error) {
+      const latestCall = callRef.current;
+      if (latestCall?.id === activeCall.id) {
+        void apiRequest(`/api/calls/${activeCall.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({
+            action:
+              latestCall.status === "accepted"
+                ? "report-failed"
+                : "report-unavailable",
+            reason:
+              latestCall.status === "accepted"
+                ? "connection_setup_failed"
+                : "media_unavailable",
+          }),
+          keepalive: true,
+        }).catch(() => undefined);
+      }
       clearCallResources();
       setMessage(error instanceof Error ? error.message : "Could not accept the call.");
       setPhase("error");
     }
-  }, [clearCallResources, connectCallChannel, getMicrophone, preparePeerConnection, sendSignal, startStatusPoll]);
+  }, [clearCallResources, connectCallChannel, getMicrophone, preparePeerConnection, reportParticipantState, sendSignal, setConnectionState, startStatusPoll]);
 
   const declineCall = useCallback(async () => {
     const activeCall = callRef.current;
@@ -1459,16 +1610,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     // the click even when Realtime acknowledgement is delayed or unavailable.
     void sendSignal({ kind: "ended" }).catch(() => undefined);
     const action = activeCall.status === "accepted" ? "end" : "cancel";
-    void apiRequest(`/api/calls/${activeCall.id}`, {
-      method: "PATCH",
-      body: JSON.stringify({ action }),
-      keepalive: true,
-    }).catch(() => undefined);
+    void (async () => {
+      if (action === "end") {
+        await apiRequest(`/api/calls/${activeCall.id}`, {
+          method: "PATCH",
+          body: JSON.stringify({ action: "begin-ending", reason: "hangup_requested" }),
+          keepalive: true,
+        });
+      }
+      await apiRequest(`/api/calls/${activeCall.id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ action, reason: "local_hangup" }),
+        keepalive: true,
+      });
+    })().catch(() => undefined);
     clearCallResources();
     setConnectionState("");
     setMessage(t("Call ended.", "Połączenie zakończone."));
     setPhase("ended");
-  }, [clearCallResources, resetToIdle, sendSignal, t]);
+  }, [clearCallResources, resetToIdle, sendSignal, setConnectionState, t]);
 
   const toggleMute = useCallback(() => {
     const nextMuted = !isMuted;

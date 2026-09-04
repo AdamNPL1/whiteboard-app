@@ -29,11 +29,15 @@ export async function POST(request: NextRequest) {
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
   const body = (await request.json().catch(() => null)) as
-    | { boardId?: string; recipientUserId?: string }
+    | { boardId?: string; recipientUserId?: string; clientRequestId?: string }
     | null;
   const boardId = body?.boardId?.trim() ?? "";
   const recipientUserId = body?.recipientUserId?.trim() ?? "";
-  if (!boardId || boardId.length > 200 || !uuidPattern.test(recipientUserId)) {
+  const clientRequestId = body?.clientRequestId?.trim() ?? "";
+  if (
+    !boardId || boardId.length > 200 || !uuidPattern.test(recipientUserId) ||
+    !uuidPattern.test(clientRequestId)
+  ) {
     return NextResponse.json({ error: "Invalid call request." }, { status: 400 });
   }
 
@@ -54,7 +58,12 @@ export async function POST(request: NextRequest) {
   if (!hourlyLimit.allowed) return rateLimitResponse(hourlyLimit);
 
   try {
-    const call = await startBoardCall(boardId, user.id, recipientUserId);
+    const call = await startBoardCall(
+      boardId,
+      user.id,
+      recipientUserId,
+      clientRequestId
+    );
     return NextResponse.json(
       {
         call,

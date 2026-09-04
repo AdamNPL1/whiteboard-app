@@ -8,7 +8,10 @@ export const runtime = "nodejs";
 
 const uuidPattern =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const allowedActions = new Set(["accept", "decline", "cancel", "end"]);
+const allowedActions = new Set([
+  "accept", "decline", "cancel", "begin-ending", "end",
+  "report-unavailable", "report-failed",
+]);
 
 export async function GET(
   request: NextRequest,
@@ -40,9 +43,16 @@ export async function PATCH(
   if (!user) return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
 
   const { callId } = await context.params;
-  const body = (await request.json().catch(() => null)) as { action?: string } | null;
+  const body = (await request.json().catch(() => null)) as
+    | { action?: string; reason?: string }
+    | null;
   const action = body?.action ?? "";
-  if (!uuidPattern.test(callId) || !allowedActions.has(action)) {
+  const reason = body?.reason?.trim();
+  if (
+    !uuidPattern.test(callId) || !allowedActions.has(action) ||
+    (reason !== undefined &&
+      (reason.length === 0 || reason.length > 100 || !/^[a-z0-9_]+$/.test(reason)))
+  ) {
     return NextResponse.json({ error: "Invalid call action." }, { status: 400 });
   }
 
@@ -60,7 +70,15 @@ export async function PATCH(
         call: await transitionBoardCall(
           callId,
           user.id,
-          action as "accept" | "decline" | "cancel" | "end"
+          action as
+            | "accept"
+            | "decline"
+            | "cancel"
+            | "begin-ending"
+            | "end"
+            | "report-unavailable"
+            | "report-failed",
+          reason
         ),
       },
       { headers: { "Cache-Control": "no-store" } }
@@ -70,9 +88,10 @@ export async function PATCH(
     if (code === "CALL_NOT_FOUND") {
       return NextResponse.json({ error: "Call not found." }, { status: 404 });
     }
-    if (code.startsWith("CALL_CANNOT_")) {
+    if (code.startsWith("CALL_CANNOT_") || code === "CALL_TRANSITION_CONFLICT") {
+      const latest = await getCallSessionForUser(callId, user.id).catch(() => null);
       return NextResponse.json(
-        { error: "This call action is no longer allowed.", code },
+        { error: "This call action is no longer allowed.", code, call: latest },
         { status: 409 }
       );
     }

@@ -63,6 +63,25 @@ describe("Supabase write boundaries", () => {
     expect(sql).not.toContain('create policy "call_sessions_update');
   });
 
+  it("upgrades calls with idempotency, legal transitions, and an audit trail", () => {
+    const sql = readSql("call-state-machine.sql");
+
+    expect(sql).toContain("call_sessions_start_idempotency_idx");
+    expect(sql).toContain("pg_advisory_xact_lock");
+    expect(sql).toContain("for update");
+    expect(sql).toContain("call_transition_conflict");
+    expect(sql).toContain("call_state_events");
+    expect(sql).toContain("state_changed_at");
+    expect(sql).toContain("state_reason");
+    expect(sql).toContain("ring_timeout");
+    expect(sql).toContain(
+      "revoke all on table public.call_participant_states from anon, authenticated"
+    );
+    expect(sql).toContain(
+      "revoke all on table public.call_state_events from anon, authenticated"
+    );
+  });
+
   it("limits private board Realtime topics to authorized board participants", () => {
     const sql = readSql("board-realtime.sql");
 

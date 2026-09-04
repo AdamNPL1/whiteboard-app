@@ -1,30 +1,25 @@
 import "server-only";
 
 import { getSupabaseServiceRoleClient } from "@/lib/supabase-server";
+import type {
+  CallLifecycleStatus,
+  CallOutcome,
+  CallParticipantState,
+  CallRecord,
+  ParticipantConnectionState,
+} from "@/lib/call-types";
 
-export type CallStatus =
+type StoredCallStatus =
+  | "creating"
   | "ringing"
   | "accepted"
+  | "ending"
   | "declined"
   | "cancelled"
   | "missed"
   | "ended";
 
-export type CallSession = {
-  id: string;
-  boardId: string;
-  callerUserId: string;
-  recipientUserId: string;
-  status: CallStatus;
-  createdAt: string;
-  updatedAt: string;
-  ringExpiresAt: string;
-  expiresAt: string;
-  acceptedAt?: string;
-  declinedAt?: string;
-  endedAt?: string;
-  endedByUserId?: string;
-};
+export type CallSession = CallRecord;
 
 export type BoardCallParticipant = {
   userId: string;
@@ -37,7 +32,7 @@ type CallSessionRow = {
   board_id: string;
   caller_user_id: string;
   recipient_user_id: string;
-  status: CallStatus;
+  status: StoredCallStatus;
   created_at: string;
   updated_at: string;
   ring_expires_at: string;
@@ -46,6 +41,10 @@ type CallSessionRow = {
   declined_at: string | null;
   ended_at: string | null;
   ended_by_user_id: string | null;
+  outcome?: CallOutcome;
+  version?: number;
+  state_changed_at?: string;
+  state_reason?: string;
 };
 
 type BoardRow = {
@@ -61,14 +60,31 @@ type ShareRow = {
 };
 
 const callColumns =
-  "id,board_id,caller_user_id,recipient_user_id,status,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id";
+  "id,board_id,caller_user_id,recipient_user_id,status,outcome,version,state_changed_at,state_reason,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id";
+
+const normalizeStoredStatus = (
+  status: StoredCallStatus
+): { status: CallLifecycleStatus; outcome: CallOutcome } => {
+  if (status === "ringing" || status === "accepted") {
+    return { status, outcome: null };
+  }
+  if (status === "declined" || status === "missed") {
+    return { status: "ended", outcome: status };
+  }
+  return { status: "ended", outcome: null };
+};
 
 const mapCallSession = (row: CallSessionRow): CallSession => ({
   id: row.id,
   boardId: row.board_id,
   callerUserId: row.caller_user_id,
   recipientUserId: row.recipient_user_id,
-  status: row.status,
+  ...(row.outcome !== undefined
+    ? { status: row.status as CallLifecycleStatus, outcome: row.outcome }
+    : normalizeStoredStatus(row.status)),
+  version: row.version ?? 1,
+  stateChangedAt: row.state_changed_at ?? row.updated_at,
+  stateReason: row.state_reason ?? "legacy_import",
   createdAt: row.created_at,
   updatedAt: row.updated_at,
   ringExpiresAt: row.ring_expires_at,
@@ -88,6 +104,8 @@ const normalizeDatabaseCallError = (message: string) => {
   const knownCodes = [
     "CALL_SELF_NOT_ALLOWED",
     "CALL_INVALID_EXPIRATION",
+    "CALL_INVALID_REQUEST_ID",
+    "CALL_IDEMPOTENCY_CONFLICT",
     "CALL_BOARD_NOT_FOUND",
     "CALL_FORBIDDEN",
     "CALL_PARTICIPANT_BUSY",
@@ -97,6 +115,9 @@ const normalizeDatabaseCallError = (message: string) => {
     "CALL_CANNOT_CANCEL",
     "CALL_CANNOT_END",
     "CALL_INVALID_ACTION",
+    "CALL_TRANSITION_CONFLICT",
+    "CALL_INVALID_PARTICIPANT_STATE",
+    "CALL_VERSION_CONFLICT",
   ];
   return knownCodes.find((code) => message.includes(code)) ?? "CALL_DATABASE_ERROR";
 };
@@ -167,7 +188,8 @@ export const getBoardCallParticipants = async (
 export const startBoardCall = async (
   boardId: string,
   callerUserId: string,
-  recipientUserId: string
+  recipientUserId: string,
+  clientRequestId: string
 ) => {
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "start_board_call",
@@ -175,6 +197,7 @@ export const startBoardCall = async (
       p_board_id: boardId,
       p_caller_user_id: callerUserId,
       p_recipient_user_id: recipientUserId,
+      p_client_request_id: clientRequestId,
       p_ring_seconds: 45,
       p_session_seconds: 24 * 60 * 60,
     }
@@ -186,7 +209,15 @@ export const startBoardCall = async (
   return mapCallSession(row);
 };
 
+const expireCalls = async () => {
+  const { error } = await getSupabaseServiceRoleClient().rpc(
+    "cleanup_expired_call_sessions"
+  );
+  if (error) throw new Error(`CALL_CLEANUP_FAILED:${error.message}`);
+};
+
 export const getCallSessionForUser = async (callId: string, userId: string) => {
+  await expireCalls();
   const { data, error } = await getSupabaseServiceRoleClient()
     .from("call_sessions")
     .select(callColumns)
@@ -202,12 +233,13 @@ export const getCallSessionForUser = async (callId: string, userId: string) => {
 };
 
 export const getActiveCallsForUser = async (userId: string) => {
+  await expireCalls();
   const now = new Date().toISOString();
   const { data, error } = await getSupabaseServiceRoleClient()
     .from("call_sessions")
     .select(callColumns)
     .or(`caller_user_id.eq.${userId},recipient_user_id.eq.${userId}`)
-    .in("status", ["ringing", "accepted"])
+    .in("status", ["creating", "ringing", "accepted", "ending"])
     .gt("expires_at", now)
     .order("created_at", { ascending: false })
     .limit(10);
@@ -217,14 +249,23 @@ export const getActiveCallsForUser = async (userId: string) => {
     .map(mapCallSession)
     .filter(
       (call) =>
-        call.status === "accepted" || new Date(call.ringExpiresAt).getTime() > Date.now()
+        ["accepted", "ending"].includes(call.status) ||
+        new Date(call.ringExpiresAt).getTime() > Date.now()
     );
 };
 
 export const transitionBoardCall = async (
   callId: string,
   userId: string,
-  action: "accept" | "decline" | "cancel" | "end"
+  action:
+    | "accept"
+    | "decline"
+    | "cancel"
+    | "begin-ending"
+    | "end"
+    | "report-unavailable"
+    | "report-failed",
+  reason?: string
 ) => {
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "transition_board_call",
@@ -232,6 +273,7 @@ export const transitionBoardCall = async (
       p_call_id: callId,
       p_user_id: userId,
       p_action: action,
+      p_reason: reason ?? null,
     }
   );
 
@@ -239,4 +281,43 @@ export const transitionBoardCall = async (
   const row = unwrapRpcRow(data);
   if (!row) throw new Error("CALL_DATABASE_ERROR");
   return mapCallSession(row);
+};
+
+type ParticipantStateRow = {
+  call_id: string;
+  user_id: string;
+  connection_state: ParticipantConnectionState;
+  state_changed_at: string;
+  state_reason: string;
+  version: number;
+};
+
+export const updateCallParticipantState = async (
+  callId: string,
+  userId: string,
+  connectionState: ParticipantConnectionState,
+  reason: string,
+  expectedVersion?: number
+): Promise<CallParticipantState> => {
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "update_call_participant_state",
+    {
+      p_call_id: callId,
+      p_user_id: userId,
+      p_connection_state: connectionState,
+      p_reason: reason,
+      p_expected_version: expectedVersion ?? null,
+    }
+  );
+  if (error) throw new Error(normalizeDatabaseCallError(error.message));
+  const row = (Array.isArray(data) ? data[0] : data) as ParticipantStateRow | null;
+  if (!row) throw new Error("CALL_DATABASE_ERROR");
+  return {
+    callId: row.call_id,
+    userId: row.user_id,
+    connectionState: row.connection_state,
+    stateChangedAt: row.state_changed_at,
+    stateReason: row.state_reason,
+    version: row.version,
+  };
 };

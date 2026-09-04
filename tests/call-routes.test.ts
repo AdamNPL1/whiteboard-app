@@ -7,6 +7,7 @@ const mocks = vi.hoisted(() => ({
   getCall: vi.fn(),
   startCall: vi.fn(),
   transitionCall: vi.fn(),
+  updateParticipantState: vi.fn(),
   generateTurn: vi.fn(),
 }));
 
@@ -18,6 +19,7 @@ vi.mock("@/lib/call-store", () => ({
   getCallSessionForUser: mocks.getCall,
   startBoardCall: mocks.startCall,
   transitionBoardCall: mocks.transitionCall,
+  updateCallParticipantState: mocks.updateParticipantState,
 }));
 vi.mock("@/lib/cloudflare-turn", () => ({
   generateCloudflareTurnCredentials: mocks.generateTurn,
@@ -33,6 +35,7 @@ vi.mock("@/lib/monitoring", () => ({
 import { POST as startCall } from "@/app/api/calls/route";
 import { PATCH as transitionCall } from "@/app/api/calls/[callId]/route";
 import { POST as getTurnCredentials } from "@/app/api/calls/[callId]/turn-credentials/route";
+import { PATCH as updateParticipantState } from "@/app/api/calls/[callId]/participant-state/route";
 
 const caller = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -40,12 +43,17 @@ const caller = {
 };
 const recipientId = "22222222-2222-4222-8222-222222222222";
 const callId = "33333333-3333-4333-8333-333333333333";
+const clientRequestId = "44444444-4444-4444-8444-444444444444";
 const call = {
   id: callId,
   boardId: "board-1",
   callerUserId: caller.id,
   recipientUserId: recipientId,
   status: "ringing",
+  outcome: null,
+  version: 1,
+  stateChangedAt: new Date().toISOString(),
+  stateReason: "caller_started",
   createdAt: new Date().toISOString(),
   updatedAt: new Date().toISOString(),
   ringExpiresAt: new Date(Date.now() + 60_000).toISOString(),
@@ -65,6 +73,14 @@ describe("call API authorization", () => {
     mocks.getUser.mockResolvedValue(caller);
     mocks.startCall.mockResolvedValue(call);
     mocks.transitionCall.mockResolvedValue(call);
+    mocks.updateParticipantState.mockResolvedValue({
+      callId,
+      userId: caller.id,
+      connectionState: "connected",
+      stateReason: "ice_connected",
+      stateChangedAt: new Date().toISOString(),
+      version: 2,
+    });
   });
 
   it("requires authentication before starting a call", async () => {
@@ -73,6 +89,7 @@ describe("call API authorization", () => {
       request("/api/calls", "POST", {
         boardId: "board-1",
         recipientUserId: recipientId,
+        clientRequestId,
       })
     );
 
@@ -85,11 +102,14 @@ describe("call API authorization", () => {
       request("/api/calls", "POST", {
         boardId: "board-1",
         recipientUserId: recipientId,
+        clientRequestId,
       })
     );
 
     expect(response.status).toBe(201);
-    expect(mocks.startCall).toHaveBeenCalledWith("board-1", caller.id, recipientId);
+    expect(mocks.startCall).toHaveBeenCalledWith(
+      "board-1", caller.id, recipientId, clientRequestId
+    );
     expect(await response.json()).toMatchObject({
       signalingTopic: `call:${callId}`,
       recipientTopic: `user:${recipientId}:calls`,
@@ -102,6 +122,7 @@ describe("call API authorization", () => {
       request("/api/calls", "POST", {
         boardId: "board-1",
         recipientUserId: recipientId,
+        clientRequestId,
       })
     );
 
@@ -115,7 +136,38 @@ describe("call API authorization", () => {
     );
 
     expect(response.status).toBe(200);
-    expect(mocks.transitionCall).toHaveBeenCalledWith(callId, caller.id, "accept");
+    expect(mocks.transitionCall).toHaveBeenCalledWith(
+      callId, caller.id, "accept", undefined
+    );
+  });
+
+  it("returns the authoritative call with transition conflicts", async () => {
+    mocks.transitionCall.mockRejectedValue(new Error("CALL_TRANSITION_CONFLICT"));
+    mocks.getCall.mockResolvedValue({ ...call, status: "ended", outcome: "missed" });
+    const response = await transitionCall(
+      request(`/api/calls/${callId}`, "PATCH", { action: "accept" }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({
+      code: "CALL_TRANSITION_CONFLICT",
+      call: { id: callId, status: "ended", outcome: "missed" },
+    });
+  });
+
+  it("records a participant connection state through the trusted store", async () => {
+    const response = await updateParticipantState(
+      request(`/api/calls/${callId}/participant-state`, "PATCH", {
+        connectionState: "connected",
+        reason: "ice_connected",
+        expectedVersion: 1,
+      }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.updateParticipantState).toHaveBeenCalledWith(
+      callId, caller.id, "connected", "ice_connected", 1
+    );
   });
 
   it("issues TURN credentials only for an accepted active call", async () => {
