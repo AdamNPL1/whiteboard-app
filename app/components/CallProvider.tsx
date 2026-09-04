@@ -56,6 +56,12 @@ import {
   parsePreCallSettings,
   supportsSpeakerSelection,
 } from "@/lib/pre-call-settings";
+import {
+  audioPacketsAreStalled,
+  chooseAvailableDevice,
+  classifyAudioDeviceError,
+} from "@/lib/audio-device-management";
+import type { AudioDeviceState } from "@/lib/audio-device-management";
 
 type BoardContext = { id: string; name: string };
 type CallParticipant = {
@@ -197,6 +203,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isTestingSpeaker, setIsTestingSpeaker] = useState(false);
   const [isSpeakerSelectionSupported, setIsSpeakerSelectionSupported] = useState(false);
   const [preCallMessage, setPreCallMessage] = useState("");
+  const [microphoneDeviceState, setMicrophoneDeviceState] =
+    useState<AudioDeviceState>("ready");
+  const [speakerDeviceState, setSpeakerDeviceState] =
+    useState<AudioDeviceState>("ready");
+  const [audioDeviceMessage, setAudioDeviceMessage] = useState("");
+  const [isSwitchingMicrophone, setIsSwitchingMicrophone] = useState(false);
+  const [isTestingMicrophone, setIsTestingMicrophone] = useState(false);
+  const [outboundAudioActive, setOutboundAudioActive] = useState(false);
+  const [inboundAudioActive, setInboundAudioActive] = useState(false);
+  const [audioTransmissionWarning, setAudioTransmissionWarning] = useState(false);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
   const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
   const [callPanelPosition, setCallPanelPosition] = useState<{
@@ -261,6 +277,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const microphoneMeterFrameRef = useRef<number | null>(null);
   const microphoneMeterContextRef = useRef<AudioContext | null>(null);
   const preCallSettingsLoadedRef = useRef(false);
+  const previousAudioPacketsRef = useRef<{ sent: number | null; received: number | null }>({
+    sent: null,
+    received: null,
+  });
+  const outboundAudioStallsRef = useRef(0);
+  const isMutedRef = useRef(isMuted);
 
   useEffect(() => {
     userRef.current = user;
@@ -273,6 +295,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     phaseRef.current = phase;
     reportRealtimeDiagnostics({ callStage: phase });
   }, [phase]);
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
 
   const startMicrophoneMeter = useCallback((stream: MediaStream) => {
     if (microphoneMeterFrameRef.current !== null) {
@@ -299,7 +324,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
-    if (["precall-outgoing", "precall-incoming"].includes(phase)) return;
+    if (["precall-outgoing", "precall-incoming", "connected"].includes(phase)) return;
     if (microphoneMeterFrameRef.current !== null) {
       window.cancelAnimationFrame(microphoneMeterFrameRef.current);
       microphoneMeterFrameRef.current = null;
@@ -343,7 +368,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const audio = remoteAudioRef.current;
     if (!audio || !selectedSpeakerId || !supportsSpeakerSelection(audio)) return;
-    void audio.setSinkId(selectedSpeakerId).catch(() => {
+    void audio.setSinkId(selectedSpeakerId).then(() => {
+      setSpeakerDeviceState("ready");
+    }).catch((error) => {
+      setSpeakerDeviceState(classifyAudioDeviceError(error));
+      setAudioDeviceMessage("The selected speaker is unavailable. Choose another output.");
       setPreCallMessage(
         t(
           "The selected speaker is unavailable. Choose another output.",
@@ -547,6 +576,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       void meterContext.close().catch(() => undefined);
     }
     setMicrophoneLevel(0);
+    previousAudioPacketsRef.current = { sent: null, received: null };
+    outboundAudioStallsRef.current = 0;
+    setOutboundAudioActive(false);
+    setInboundAudioActive(false);
+    setAudioTransmissionWarning(false);
+    setAudioDeviceMessage("");
     const cameraTrack = localCameraTrackRef.current;
     const streamTracks = localStreamRef.current?.getTracks() ?? [];
     localStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -770,6 +805,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       });
       stream.getAudioTracks().forEach((track) => {
         track.enabled = !muted;
+        track.onended = () => {
+          setMicrophoneDeviceState("disconnected");
+          setIsMicrophoneReady(false);
+          setAudioDeviceMessage("The microphone disconnected. Connect it again or choose another microphone.");
+        };
         try {
           track.contentHint = "speech";
         } catch {
@@ -779,16 +819,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const activeMicrophoneId = stream.getAudioTracks()[0]?.getSettings().deviceId;
       if (activeMicrophoneId) setSelectedMicrophoneId(activeMicrophoneId);
       setMicrophonePermission("granted");
+      setMicrophoneDeviceState("ready");
       setIsMicrophoneReady(true);
       localStreamRef.current = stream;
       return stream;
     } catch (error) {
-      setMicrophonePermission(
-        error instanceof DOMException &&
-          ["NotAllowedError", "SecurityError"].includes(error.name)
-          ? "denied"
-          : "unavailable"
-      );
+      const deviceState = classifyAudioDeviceError(error);
+      setMicrophoneDeviceState(deviceState);
+      setMicrophonePermission(deviceState === "permission-denied" ? "denied" : "unavailable");
       throw new Error(
         t(
           "Microphone permission was denied or no microphone is available.",
@@ -1200,6 +1238,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 : `${local?.candidateType ?? "unknown"} → ${remote?.candidateType ?? "unknown"}`;
           }
         });
+        const previous = previousAudioPacketsRef.current;
+        const sentChanged = previous.sent !== null && packetsSent > previous.sent;
+        const receivedChanged = previous.received !== null && packetsReceived > previous.received;
+        setOutboundAudioActive(sentChanged && !isMutedRef.current);
+        setInboundAudioActive(receivedChanged);
+        outboundAudioStallsRef.current =
+          !isMutedRef.current && previous.sent !== null && packetsSent <= previous.sent
+            ? outboundAudioStallsRef.current + 1
+            : 0;
+        setAudioTransmissionWarning(
+          audioPacketsAreStalled({
+            previousPackets: previous.sent,
+            currentPackets: packetsSent,
+            consecutiveStalls: outboundAudioStallsRef.current,
+            muted: isMutedRef.current,
+          })
+        );
+        previousAudioPacketsRef.current = { sent: packetsSent, received: packetsReceived };
         reportRealtimeDiagnostics({
           audioPacketsSent: packetsSent,
           audioPacketsReceived: packetsReceived,
@@ -2036,6 +2092,111 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     void sendSignal({ kind: "mute", muted: nextMuted });
   }, [isMuted, sendSignal]);
 
+  const switchMicrophone = useCallback(async (microphoneId: string) => {
+    if (isSwitchingMicrophone || !navigator.mediaDevices?.getUserMedia) return;
+    setIsSwitchingMicrophone(true);
+    setAudioDeviceMessage("");
+    let replacementStream: MediaStream | null = null;
+    try {
+      replacementStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(microphoneId ? { deviceId: { exact: microphoneId } } : {}),
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          channelCount: { ideal: 1 },
+        },
+        video: false,
+      });
+      const replacementTrack = replacementStream.getAudioTracks()[0];
+      if (!replacementTrack) throw new DOMException("No microphone track", "NotFoundError");
+      replacementTrack.enabled = !isMutedRef.current;
+      try {
+        replacementTrack.contentHint = "speech";
+      } catch {
+        // contentHint is optional.
+      }
+      replacementTrack.onended = () => {
+        setMicrophoneDeviceState("disconnected");
+        setIsMicrophoneReady(false);
+        setAudioDeviceMessage("The microphone disconnected. Choose another microphone.");
+      };
+
+      const sender = peerConnectionRef.current
+        ?.getSenders()
+        .find((candidate) => candidate.track?.kind === "audio");
+      if (sender) await sender.replaceTrack(replacementTrack);
+
+      const currentStream = localStreamRef.current ?? new MediaStream();
+      const previousTracks = currentStream.getAudioTracks();
+      previousTracks.forEach((track) => {
+        track.onended = null;
+        currentStream.removeTrack(track);
+      });
+      currentStream.addTrack(replacementTrack);
+      localStreamRef.current = currentStream;
+      previousTracks.forEach((track) => track.stop());
+      replacementStream = null;
+      const activeDeviceId = replacementTrack.getSettings().deviceId || microphoneId;
+      setSelectedMicrophoneId(activeDeviceId);
+      setMicrophonePermission("granted");
+      setMicrophoneDeviceState("ready");
+      setIsMicrophoneReady(true);
+      startMicrophoneMeter(currentStream);
+      setAudioDeviceMessage(t("Microphone changed.", "Mikrofon zostaÅ‚ zmieniony."));
+    } catch (error) {
+      replacementStream?.getTracks().forEach((track) => track.stop());
+      const state = classifyAudioDeviceError(error);
+      setMicrophoneDeviceState(state);
+      setAudioDeviceMessage(
+        state === "permission-denied"
+          ? t("Microphone permission is denied.", "OdmÃ³wiono dostÄ™pu do mikrofonu.")
+          : state === "busy"
+            ? t("That microphone is busy in another app.", "Ten mikrofon jest uÅ¼ywany przez innÄ… aplikacjÄ™.")
+            : state === "disconnected"
+              ? t("That microphone is disconnected.", "Ten mikrofon jest odÅ‚Ä…czony.")
+              : t("The microphone is unavailable.", "Mikrofon jest niedostÄ™pny.")
+      );
+    } finally {
+      setIsSwitchingMicrophone(false);
+    }
+  }, [isSwitchingMicrophone, startMicrophoneMeter, t]);
+
+  const testMicrophone = useCallback(async () => {
+    if (isTestingMicrophone || !navigator.mediaDevices?.getUserMedia) return;
+    setIsTestingMicrophone(true);
+    setAudioDeviceMessage(t("Speak now. You should hear yourself for two seconds.", "MÃ³w teraz. Przez dwie sekundy powinieneÅ› sÅ‚yszeÄ‡ swÃ³j gÅ‚os."));
+    let testStream: MediaStream | null = null;
+    const audio = new Audio();
+    try {
+      testStream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          ...(selectedMicrophoneId ? { deviceId: { exact: selectedMicrophoneId } } : {}),
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+        video: false,
+      });
+      audio.srcObject = testStream;
+      audio.volume = 0.65;
+      if (selectedSpeakerId && supportsSpeakerSelection(audio)) {
+        await audio.setSinkId(selectedSpeakerId);
+      }
+      await audio.play();
+      await new Promise<void>((resolve) => window.setTimeout(resolve, 2_000));
+      setAudioDeviceMessage(t("Microphone and speaker test finished.", "Test mikrofonu i gÅ‚oÅ›nika zakoÅ„czony."));
+    } catch (error) {
+      setMicrophoneDeviceState(classifyAudioDeviceError(error));
+      setAudioDeviceMessage(t("The microphone test could not run.", "Nie udaÅ‚o siÄ™ uruchomiÄ‡ testu mikrofonu."));
+    } finally {
+      audio.pause();
+      audio.srcObject = null;
+      testStream?.getTracks().forEach((track) => track.stop());
+      setIsTestingMicrophone(false);
+    }
+  }, [isTestingMicrophone, selectedMicrophoneId, selectedSpeakerId, t]);
+
   const stopCamera = useCallback(async () => {
     const cameraTrack = localCameraTrackRef.current;
     const videoSender = localVideoSenderRef.current;
@@ -2091,17 +2252,40 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     );
     setMicrophoneDevices(microphones);
     setSpeakerDevices(speakers);
-    setSelectedMicrophoneId((current) =>
-      current && microphones.some((device) => device.deviceId === current)
-        ? current
-        : microphones[0]?.deviceId ?? ""
-    );
-    setSelectedSpeakerId((current) =>
-      current && speakers.some((device) => device.deviceId === current)
-        ? current
-        : speakers[0]?.deviceId ?? ""
-    );
-  }, [t]);
+    setSelectedMicrophoneId((current) => {
+      const choice = chooseAvailableDevice(current, microphones.map((device) => device.deviceId));
+      if (choice.changed) {
+        setMicrophoneDeviceState("disconnected");
+        setAudioDeviceMessage(
+          choice.deviceId
+            ? t("The selected microphone disconnected. Switching to an available microphone.", "Wybrany mikrofon zostaÅ‚ odÅ‚Ä…czony. PrzeÅ‚Ä…czanie na dostÄ™pny mikrofon.")
+            : t("No microphone is connected.", "Nie podÅ‚Ä…czono mikrofonu.")
+        );
+        if (choice.deviceId && phaseRef.current === "connected") {
+          window.setTimeout(() => void switchMicrophone(choice.deviceId), 0);
+        }
+      } else if (microphones.length === 0) {
+        setMicrophoneDeviceState("missing");
+      }
+      return choice.deviceId;
+    });
+    setSelectedSpeakerId((current) => {
+      const choice = chooseAvailableDevice(current, speakers.map((device) => device.deviceId));
+      if (choice.changed) {
+        setSpeakerDeviceState(choice.deviceId ? "ready" : "missing");
+        setAudioDeviceMessage(
+          choice.deviceId
+            ? t("The selected speaker disconnected. Using an available speaker.", "Wybrany gÅ‚oÅ›nik zostaÅ‚ odÅ‚Ä…czony. UÅ¼ywany jest dostÄ™pny gÅ‚oÅ›nik.")
+            : t("No speaker output is available.", "Brak dostÄ™pnego wyjÅ›cia gÅ‚oÅ›nikowego.")
+        );
+      } else if (speakers.length === 0 && isSpeakerSelectionSupported) {
+        setSpeakerDeviceState("missing");
+      } else {
+        setSpeakerDeviceState("ready");
+      }
+      return choice.deviceId;
+    });
+  }, [isSpeakerSelectionSupported, switchMicrophone, t]);
 
   useEffect(() => {
     if (
@@ -2493,6 +2677,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           ? t("unavailable", "niedostępne")
           : t("not requested", "niepoproszone");
 
+  const audioDeviceStateText = (state: AudioDeviceState) => {
+    const labels: Record<AudioDeviceState, string> = {
+      ready: t("ready", "gotowe"),
+      "permission-denied": t("permission denied", "odmowa dostepu"),
+      missing: t("missing", "brak"),
+      disconnected: t("disconnected", "odlaczone"),
+      busy: t("busy in another app", "uzywane przez inna aplikacje"),
+      unavailable: t("unavailable", "niedostepne"),
+    };
+    return labels[state];
+  };
+
   const beginCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
     if (
       (event.target as HTMLElement).closest(
@@ -2838,6 +3034,60 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   {preCallMessage || cameraMessage}
                 </div>
               )}
+            </div>
+          )}
+          {phase === "connected" && (
+            <div style={{ display: "grid", gap: 10, padding: 12, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
+              <strong style={{ fontSize: 13 }}>{t("Audio devices", "Urzadzenia audio")}</strong>
+              <label style={preCallLabelStyle}>
+                {t("Microphone", "Mikrofon")} · {audioDeviceStateText(microphoneDeviceState)}
+                <select
+                  value={selectedMicrophoneId}
+                  disabled={isSwitchingMicrophone || microphoneDevices.length === 0}
+                  onChange={(event) => void switchMicrophone(event.target.value)}
+                  style={preCallSelectStyle}
+                >
+                  {microphoneDevices.length === 0 && <option value="">{t("No microphone", "Brak mikrofonu")}</option>}
+                  {microphoneDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}
+                </select>
+              </label>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11 }}>{t("Input", "Wejscie")}</span>
+                  <div role="meter" aria-label={t("Microphone input level", "Poziom mikrofonu")} aria-valuemin={0} aria-valuemax={100} aria-valuenow={microphoneLevel} style={{ height: 7, marginTop: 4, borderRadius: 999, overflow: "hidden", background: "#e2e8f0" }}>
+                    <div style={{ width: `${microphoneLevel}%`, height: "100%", background: microphoneLevel > 3 ? "#22c55e" : "#94a3b8" }} />
+                  </div>
+                </div>
+                <div>
+                  <span style={{ color: "#64748b", fontSize: 11 }}>{t("Transmission", "Transmisja")}</span>
+                  <div style={{ marginTop: 4, color: outboundAudioActive ? "#166534" : "#64748b", fontSize: 11, fontWeight: 700 }}>
+                    {isMuted ? t("Muted", "Wyciszony") : outboundAudioActive ? t("Sending audio", "Wysylanie audio") : t("Waiting for audio", "Oczekiwanie na audio")}
+                  </div>
+                </div>
+              </div>
+              {isSpeakerSelectionSupported && (
+                <label style={preCallLabelStyle}>
+                  {t("Speaker", "Glosnik")} · {audioDeviceStateText(speakerDeviceState)}
+                  <select value={selectedSpeakerId} disabled={speakerDevices.length === 0} onChange={(event) => setSelectedSpeakerId(event.target.value)} style={preCallSelectStyle}>
+                    {speakerDevices.length === 0 && <option value="">{t("No speaker", "Brak glosnika")}</option>}
+                    {speakerDevices.map((device) => <option key={device.deviceId} value={device.deviceId}>{device.label}</option>)}
+                  </select>
+                </label>
+              )}
+              {!isSpeakerSelectionSupported && <span style={{ color: "#64748b", fontSize: 11 }}>{t("This browser controls the speaker through system settings.", "Ta przegladarka steruje glosnikiem przez ustawienia systemowe.")}</span>}
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <button type="button" onClick={() => void testSpeaker()} disabled={isTestingSpeaker} style={preCallSmallButtonStyle}>
+                  {isTestingSpeaker ? t("Playing...", "Odtwarzanie...") : t("Test speaker", "Testuj glosnik")}
+                </button>
+                <button type="button" onClick={() => void testMicrophone()} disabled={isTestingMicrophone} style={preCallSmallButtonStyle}>
+                  {isTestingMicrophone ? t("Testing...", "Testowanie...") : t("Mic & echo test", "Test mikrofonu")}
+                </button>
+              </div>
+              <div style={{ color: inboundAudioActive ? "#166534" : "#64748b", fontSize: 11, fontWeight: 650 }}>
+                {inboundAudioActive ? t("Receiving participant audio", "Odbieranie dzwieku uczestnika") : t("No incoming audio activity yet", "Brak aktywnosci dzwieku przychodzacego")}
+              </div>
+              {audioTransmissionWarning && !isMuted && <div role="alert" style={{ color: "#b45309", fontSize: 12 }}>{t("Your microphone is on, but audio packets are not being sent. Try changing the microphone.", "Mikrofon jest wlaczony, ale dzwiek nie jest wysylany. Sprobuj zmienic mikrofon.")}</div>}
+              {audioDeviceMessage && <div role="status" style={{ color: "#b45309", fontSize: 12 }}>{audioDeviceMessage}</div>}
             </div>
           )}
           {phase === "connected" && (
