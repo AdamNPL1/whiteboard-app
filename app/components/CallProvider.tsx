@@ -33,6 +33,11 @@ import { CallMediaWatchdog } from "@/lib/call-media-watchdog";
 import { TurnCredentialLoader } from "@/lib/turn-credential-loader";
 import { resolveCallStatusKind } from "@/lib/call-status";
 import {
+  normalizeParticipantVolume,
+  shouldOpenParticipantMenuFromKey,
+  toggleVideoFit,
+} from "@/lib/participant-media-controls";
+import {
   aggregateParticipantConnectionStates,
   browserCallReducer,
   initialBrowserCallState,
@@ -225,6 +230,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [cameraMessage, setCameraMessage] = useState("");
   const [cameraDevices, setCameraDevices] = useState<CameraDevice[]>([]);
   const [selectedCameraId, setSelectedCameraId] = useState("");
+  const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
+  const [isSelfViewVisible, setIsSelfViewVisible] = useState(true);
+  const [isSelfViewMenuOpen, setIsSelfViewMenuOpen] = useState(false);
+  const [isSelfViewMirrored, setIsSelfViewMirrored] = useState(true);
+  const [selfViewFit, setSelfViewFit] = useState<"cover" | "contain">("cover");
+  const [selfViewSize, setSelfViewSize] = useState<"small" | "medium" | "large">("medium");
+  const [selfViewPosition, setSelfViewPosition] = useState<{ left: number; top: number } | null>(null);
   const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceOption[]>([]);
   const [speakerDevices, setSpeakerDevices] = useState<MediaDeviceOption[]>([]);
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
@@ -250,6 +262,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [inboundAudioActive, setInboundAudioActive] = useState(false);
   const [audioTransmissionWarning, setAudioTransmissionWarning] = useState(false);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
+  const [isParticipantVideoMenuOpen, setIsParticipantVideoMenuOpen] = useState(false);
+  const [isParticipantMutedForMe, setIsParticipantMutedForMe] = useState(false);
+  const [participantVolume, setParticipantVolume] = useState(1);
+  const [isParticipantVideoPinned, setIsParticipantVideoPinned] = useState(false);
+  const [isParticipantVideoHidden, setIsParticipantVideoHidden] = useState(false);
+  const [participantVideoFit, setParticipantVideoFit] = useState<"cover" | "contain">("cover");
   const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
   const [callPanelPosition, setCallPanelPosition] = useState<{
     left: number;
@@ -264,12 +282,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callChannelRef = useRef<RealtimeChannel | null>(null);
   const userChannelRef = useRef<RealtimeChannel | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  const participantVolumeRef = useRef(1);
+  const participantMutedForMeRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const selfViewRef = useRef<HTMLDivElement | null>(null);
+  const selfViewDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const localCameraIntentRef = useRef(false);
   const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
+  const participantVideoRef = useRef<HTMLDivElement | null>(null);
+  const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<
     Array<{ generation: number; candidate: RTCIceCandidateInit }>
@@ -645,8 +673,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setIsCameraOn(false);
     setIsCameraStarting(false);
+    setIsSwitchingCamera(false);
+    setIsSelfViewVisible(true);
+    setIsSelfViewMenuOpen(false);
+    setSelfViewPosition(null);
     setCameraMessage("");
     setIsRemoteVideoOn(false);
+    setIsParticipantVideoMenuOpen(false);
+    setIsParticipantMutedForMe(false);
+    setParticipantVolume(1);
+    setIsParticipantVideoPinned(false);
+    setIsParticipantVideoHidden(false);
+    setParticipantVideoFit("cover");
+    participantVolumeRef.current = 1;
+    participantMutedForMeRef.current = false;
+    if (participantLongPressTimerRef.current !== null) {
+      window.clearTimeout(participantLongPressTimerRef.current);
+      participantLongPressTimerRef.current = null;
+    }
     if (remoteAudioRef.current) {
       remoteAudioRef.current.onloadedmetadata = null;
       remoteAudioRef.current.srcObject = null;
@@ -1198,6 +1242,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             if (remoteVideoStreamRef.current === videoStream) {
               remoteVideoStreamRef.current = null;
               setIsRemoteVideoOn(false);
+              setIsParticipantVideoMenuOpen(false);
             }
           };
           return;
@@ -1205,8 +1250,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const audio = remoteAudioRef.current;
         if (!audio) return;
         audio.srcObject = event.streams[0] ?? new MediaStream([event.track]);
-        audio.muted = false;
-        audio.volume = 1;
+        audio.muted = participantMutedForMeRef.current;
+        audio.volume = participantVolumeRef.current;
         const playRemoteAudio = () => {
           void audio
             .play()
@@ -1637,6 +1682,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           remoteVideoStreamRef.current = null;
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
+          setIsParticipantVideoMenuOpen(false);
         }
         return;
       }
@@ -2740,6 +2786,60 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [isCameraStarting, refreshMediaDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
 
+  const switchCamera = useCallback(async (cameraId: string) => {
+    if (!cameraId || isSwitchingCamera || !navigator.mediaDevices?.getUserMedia) return;
+    setSelectedCameraId(cameraId);
+    setCameraMessage("");
+    if (!localCameraTrackRef.current) {
+      await startCamera(cameraId);
+      return;
+    }
+    setIsSwitchingCamera(true);
+    let replacementStream: MediaStream | null = null;
+    try {
+      replacementStream = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: {
+          deviceId: { exact: cameraId },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+          frameRate: { ideal: 24, max: 30 },
+        },
+      });
+      const replacementTrack = replacementStream.getVideoTracks()[0];
+      if (!replacementTrack) throw new DOMException("No camera track", "NotFoundError");
+      const previousTrack = localCameraTrackRef.current;
+      replacementTrack.onended = () => {
+        if (localCameraTrackRef.current === replacementTrack) {
+          void stopCamera();
+          setCameraMessage(t("The camera was disconnected.", "Kamera została odłączona."));
+        }
+      };
+      await localVideoSenderRef.current?.replaceTrack(replacementTrack);
+      localCameraTrackRef.current = replacementTrack;
+      previousTrack.onended = null;
+      previousTrack.stop();
+      replacementStream = null;
+      const activeCameraId = replacementTrack.getSettings().deviceId || cameraId;
+      setSelectedCameraId(activeCameraId);
+      if (localVideoRef.current) {
+        localVideoRef.current.srcObject = new MediaStream([replacementTrack]);
+        await localVideoRef.current.play().catch(() => undefined);
+      }
+      await refreshMediaDevices().catch(() => undefined);
+    } catch {
+      replacementStream?.getTracks().forEach((track) => track.stop());
+      setCameraMessage(
+        t(
+          "The selected camera could not be opened. Your current camera is still active.",
+          "Nie udało się otworzyć wybranej kamery. Obecna kamera nadal działa."
+        )
+      );
+    } finally {
+      setIsSwitchingCamera(false);
+    }
+  }, [isSwitchingCamera, refreshMediaDevices, startCamera, stopCamera, t]);
+
   const prepareSelectedMedia = useCallback(async () => {
     if (joinWithCamera && !localCameraTrackRef.current) {
       await startCamera(selectedCameraId);
@@ -2791,14 +2891,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (!isCameraOn || !localCameraTrackRef.current || !localVideoRef.current) return;
     localVideoRef.current.srcObject = new MediaStream([localCameraTrackRef.current]);
     void localVideoRef.current.play().catch(() => undefined);
-  }, [isCameraOn]);
+  }, [isCameraOn, isSelfViewVisible, phase]);
 
   useEffect(() => {
     const video = remoteVideoRef.current;
     if (!isRemoteVideoOn || !remoteVideoStreamRef.current || !video) return;
     video.srcObject = remoteVideoStreamRef.current;
     void video.play().catch(() => undefined);
-  }, [isRemoteVideoOn]);
+  }, [isParticipantVideoHidden, isRemoteVideoOn]);
 
   useEffect(() => {
     return () => {
@@ -2880,6 +2980,155 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       unavailable: t("unavailable", "niedostepne"),
     };
     return labels[state];
+  };
+
+  const selfViewDimensions = {
+    small: { width: 180, height: 102 },
+    medium: { width: 240, height: 135 },
+    large: { width: 320, height: 180 },
+  }[selfViewSize];
+
+  const changeParticipantVolume = (volume: number) => {
+    const normalized = normalizeParticipantVolume(volume);
+    participantVolumeRef.current = normalized;
+    setParticipantVolume(normalized);
+    if (remoteAudioRef.current) remoteAudioRef.current.volume = normalized;
+  };
+
+  const toggleParticipantMuteForMe = () => {
+    const muted = !participantMutedForMeRef.current;
+    participantMutedForMeRef.current = muted;
+    setIsParticipantMutedForMe(muted);
+    if (remoteAudioRef.current) remoteAudioRef.current.muted = muted;
+  };
+
+  const openParticipantPictureInPicture = async () => {
+    const video = remoteVideoRef.current;
+    if (!video) return;
+    try {
+      if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) {
+        throw new Error("PICTURE_IN_PICTURE_UNAVAILABLE");
+      }
+      await video.requestPictureInPicture();
+      setIsParticipantVideoMenuOpen(false);
+    } catch {
+      setCameraMessage(
+        t(
+          "Picture-in-picture is not available in this browser.",
+          "Obraz w obrazie nie jest dostępny w tej przeglądarce."
+        )
+      );
+    }
+  };
+
+  const openParticipantFullscreen = async () => {
+    try {
+      if (!remoteVideoRef.current?.requestFullscreen) throw new Error("FULLSCREEN_UNAVAILABLE");
+      await remoteVideoRef.current.requestFullscreen();
+      setIsParticipantVideoMenuOpen(false);
+    } catch {
+      setCameraMessage(
+        t(
+          "Full screen is not available in this browser.",
+          "Tryb pełnoekranowy nie jest dostępny w tej przeglądarce."
+        )
+      );
+    }
+  };
+
+  const beginParticipantLongPress = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, input")) return;
+    if (participantLongPressTimerRef.current !== null) {
+      window.clearTimeout(participantLongPressTimerRef.current);
+    }
+    participantLongPressTimerRef.current = window.setTimeout(() => {
+      participantLongPressTimerRef.current = null;
+      setIsParticipantVideoMenuOpen(true);
+    }, 550);
+  };
+
+  const cancelParticipantLongPress = () => {
+    if (participantLongPressTimerRef.current !== null) {
+      window.clearTimeout(participantLongPressTimerRef.current);
+      participantLongPressTimerRef.current = null;
+    }
+  };
+
+  const openSelfViewPictureInPicture = async () => {
+    const video = localVideoRef.current;
+    if (!video) return;
+    try {
+      if (!document.pictureInPictureEnabled || !video.requestPictureInPicture) {
+        throw new Error("PICTURE_IN_PICTURE_UNAVAILABLE");
+      }
+      await video.requestPictureInPicture();
+      setIsSelfViewMenuOpen(false);
+    } catch {
+      setCameraMessage(
+        t(
+          "Picture-in-picture is not available in this browser.",
+          "Obraz w obrazie nie jest dostępny w tej przeglądarce."
+        )
+      );
+    }
+  };
+
+  const openSelfViewFullscreen = async () => {
+    try {
+      if (!localVideoRef.current?.requestFullscreen) throw new Error("FULLSCREEN_UNAVAILABLE");
+      await localVideoRef.current.requestFullscreen();
+      setIsSelfViewMenuOpen(false);
+    } catch {
+      setCameraMessage(
+        t(
+          "Full screen is not available in this browser.",
+          "Tryb pełnoekranowy nie jest dostępny w tej przeglądarce."
+        )
+      );
+    }
+  };
+
+  const beginSelfViewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, select, option")) return;
+    const preview = selfViewRef.current;
+    if (!preview) return;
+    const rect = preview.getBoundingClientRect();
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    selfViewDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setSelfViewPosition({ left: rect.left, top: rect.top });
+  };
+
+  const moveSelfView = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = selfViewDragRef.current;
+    const preview = selfViewRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !preview) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const margin = 8;
+    const rect = preview.getBoundingClientRect();
+    setSelfViewPosition({
+      left: Math.min(
+        Math.max(margin, event.clientX - drag.offsetX),
+        Math.max(margin, window.innerWidth - rect.width - margin)
+      ),
+      top: Math.min(
+        Math.max(margin, event.clientY - drag.offsetY),
+        Math.max(margin, window.innerHeight - rect.height - margin)
+      ),
+    });
+  };
+
+  const endSelfViewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    selfViewDragRef.current = null;
   };
 
   const beginCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
@@ -3038,7 +3287,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             zIndex: 210,
             width: isPreCall
               ? "min(440px, calc(100vw - 36px))"
-              : "min(350px, calc(100vw - 36px))",
+              : isParticipantVideoPinned
+                ? "min(560px, calc(100vw - 36px))"
+                : "min(350px, calc(100vw - 36px))",
             maxHeight: "calc(100dvh - 92px)",
             overflowY: isCallPanelMinimized ? "hidden" : "auto",
             padding: isCallPanelMinimized ? "10px 12px" : "18px",
@@ -3309,12 +3560,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 min="0"
                 max="1"
                 step="0.05"
-                defaultValue="1"
+                value={participantVolume}
                 aria-label={t("Call volume", "Głośność rozmowy")}
                 onChange={(event) => {
-                  if (remoteAudioRef.current) {
-                    remoteAudioRef.current.volume = Number(event.target.value);
-                  }
+                  changeParticipantVolume(Number(event.target.value));
                 }}
                 style={{
                   width: "100%",
@@ -3366,14 +3615,32 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && isRemoteVideoOn && (
+          {phase === "connected" && isRemoteVideoOn && !isParticipantVideoHidden && (
             <div
+              ref={participantVideoRef}
+              tabIndex={0}
+              aria-label={t("Participant video and options", "Wideo uczestnika i opcje")}
+              onContextMenu={(event) => {
+                event.preventDefault();
+                setIsParticipantVideoMenuOpen(true);
+              }}
+              onKeyDown={(event) => {
+                if (shouldOpenParticipantMenuFromKey(event.key, event.shiftKey)) {
+                  event.preventDefault();
+                  setIsParticipantVideoMenuOpen(true);
+                }
+              }}
+              onPointerDown={beginParticipantLongPress}
+              onPointerUp={cancelParticipantLongPress}
+              onPointerCancel={cancelParticipantLongPress}
+              onPointerMove={cancelParticipantLongPress}
               style={{
                 position: "relative",
-                overflow: "hidden",
+                overflow: "visible",
                 aspectRatio: "16 / 9",
                 borderRadius: "14px",
                 background: "#0f172a",
+                outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
               }}
             >
               <video
@@ -3382,7 +3649,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 muted
                 playsInline
                 aria-label={t("Participant video", "Wideo uczestnika")}
-                style={{ width: "100%", height: "100%", display: "block", objectFit: "cover" }}
+                style={{ width: "100%", height: "100%", display: "block", objectFit: participantVideoFit, borderRadius: "inherit" }}
               />
               <span
                 style={{
@@ -3395,14 +3662,91 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   color: "#ffffff",
                   fontSize: "10px",
                   fontWeight: 700,
+                  pointerEvents: "none",
                 }}
               >
                 {peerName || t("Participant", "Uczestnik")}
               </span>
+              <button
+                type="button"
+                aria-label={t("Participant options", "Opcje uczestnika")}
+                aria-expanded={isParticipantVideoMenuOpen}
+                onClick={() => setIsParticipantVideoMenuOpen((open) => !open)}
+                style={{
+                  position: "absolute",
+                  top: 8,
+                  right: 8,
+                  width: 32,
+                  height: 32,
+                  border: "1px solid rgba(255,255,255,0.35)",
+                  borderRadius: 9,
+                  background: "rgba(15,23,42,0.72)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: 20,
+                  lineHeight: 1,
+                }}
+              >
+                ⋮
+              </button>
+              {isParticipantVideoMenuOpen && (
+                <div
+                  role="menu"
+                  onPointerDown={(event) => event.stopPropagation()}
+                  style={{
+                    position: "absolute",
+                    top: 46,
+                    right: 8,
+                    zIndex: 3,
+                    width: 220,
+                    padding: 8,
+                    display: "grid",
+                    gap: 5,
+                    border: "1px solid #dbe3ef",
+                    borderRadius: 12,
+                    background: "rgba(255,255,255,0.98)",
+                    color: "#172036",
+                    boxShadow: "0 14px 35px rgba(15,23,42,0.26)",
+                  }}
+                >
+                  <label style={{ display: "grid", gap: 5, padding: "5px 8px", fontSize: 11, fontWeight: 700 }}>
+                    {t("Participant volume", "Głośność uczestnika")} · {Math.round(participantVolume * 100)}%
+                    <input type="range" min="0" max="1" step="0.05" value={participantVolume} onChange={(event) => changeParticipantVolume(Number(event.target.value))} style={{ width: "100%", accentColor: "#7c3aed" }} />
+                  </label>
+                  <button type="button" role="menuitem" onClick={toggleParticipantMuteForMe} style={selfViewMenuButtonStyle}>
+                    {isParticipantMutedForMe ? t("Unmute for me", "Włącz dźwięk dla mnie") : t("Mute for me", "Wycisz dla mnie")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => setIsParticipantVideoPinned((pinned) => !pinned)} style={selfViewMenuButtonStyle}>
+                    {isParticipantVideoPinned ? t("Unpin video", "Odepnij wideo") : t("Pin video", "Przypnij wideo")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => { setIsParticipantVideoHidden(true); setIsParticipantVideoMenuOpen(false); }} style={selfViewMenuButtonStyle}>
+                    {t("Hide video for me", "Ukryj wideo dla mnie")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => setParticipantVideoFit(toggleVideoFit)} style={selfViewMenuButtonStyle}>
+                    {participantVideoFit === "cover" ? t("Fit entire video", "Dopasuj cały obraz") : t("Fill frame", "Wypełnij kadr")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => void openParticipantPictureInPicture()} style={selfViewMenuButtonStyle}>
+                    {t("Picture in picture", "Obraz w obrazie")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => void openParticipantFullscreen()} style={selfViewMenuButtonStyle}>
+                    {t("Full screen", "Pełny ekran")}
+                  </button>
+                </div>
+              )}
             </div>
           )}
 
-          {(phase === "connected" || isPreCall) && isCameraOn && (
+          {phase === "connected" && isRemoteVideoOn && isParticipantVideoHidden && (
+            <button
+              type="button"
+              onClick={() => setIsParticipantVideoHidden(false)}
+              style={{ ...preCallSmallButtonStyle, justifyContent: "center" }}
+            >
+              {t("Show participant video", "Pokaż wideo uczestnika")}
+            </button>
+          )}
+
+          {isPreCall && isCameraOn && (
             <div
               style={{
                 position: "relative",
@@ -3422,8 +3766,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   width: "100%",
                   height: "100%",
                   display: "block",
-                  objectFit: "cover",
-                  transform: "scaleX(-1)",
+                  objectFit: selfViewFit,
+                  transform: isSelfViewMirrored ? "scaleX(-1)" : "none",
                 }}
               />
               <span
@@ -3450,6 +3794,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
+          {phase === "connected" && isCameraOn && !isSelfViewVisible && (
+            <button
+              type="button"
+              onClick={() => setIsSelfViewVisible(true)}
+              style={{ ...preCallSmallButtonStyle, justifyContent: "center" }}
+            >
+              {t("Show self-view", "Pokaż swój podgląd")}
+            </button>
+          )}
+
           {phase === "connected" && cameraDevices.length > 0 && (
             <label
               style={{
@@ -3463,9 +3817,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {t("Camera", "Kamera")}
               <select
                 value={selectedCameraId}
-                disabled={isCameraOn || isCameraStarting}
+                disabled={isCameraStarting || isSwitchingCamera}
                 onChange={(event) => {
-                  setSelectedCameraId(event.target.value);
+                  const cameraId = event.target.value;
+                  if (isCameraOn) void switchCamera(cameraId);
+                  else setSelectedCameraId(cameraId);
                   setCameraMessage("");
                 }}
                 style={{
@@ -3475,7 +3831,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   padding: "0 9px",
                   border: "1px solid #cbd5e1",
                   borderRadius: "9px",
-                  background: isCameraOn ? "#f1f5f9" : "#ffffff",
+                  background: isSwitchingCamera ? "#f1f5f9" : "#ffffff",
                   color: "#334155",
                   fontSize: "12px",
                 }}
@@ -3572,6 +3928,151 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </>
           )}
         </section>
+      )}
+
+      {phase === "connected" && isCameraOn && isSelfViewVisible && (
+        <div
+          ref={selfViewRef}
+          onPointerDown={beginSelfViewDrag}
+          onPointerMove={moveSelfView}
+          onPointerUp={endSelfViewDrag}
+          onPointerCancel={endSelfViewDrag}
+          onContextMenu={(event) => {
+            event.preventDefault();
+            setIsSelfViewMenuOpen(true);
+          }}
+          style={{
+            position: "fixed",
+            left: selfViewPosition ? `${selfViewPosition.left}px` : "auto",
+            right: selfViewPosition ? "auto" : "18px",
+            top: selfViewPosition ? `${selfViewPosition.top}px` : "auto",
+            bottom: selfViewPosition ? "auto" : "80px",
+            zIndex: 220,
+            width: `min(${selfViewDimensions.width}px, calc(100vw - 16px))`,
+            height: `${selfViewDimensions.height}px`,
+            minWidth: "160px",
+            minHeight: "90px",
+            maxWidth: "min(480px, calc(100vw - 16px))",
+            maxHeight: "min(270px, calc(100dvh - 16px))",
+            overflow: "visible",
+            borderRadius: "14px",
+            border: "1px solid rgba(255,255,255,0.7)",
+            background: "#0f172a",
+            boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
+            cursor: selfViewDragRef.current ? "grabbing" : "grab",
+            touchAction: "none",
+          }}
+        >
+          <video
+            ref={localVideoRef}
+            autoPlay
+            muted
+            playsInline
+            aria-label={t("Your camera preview", "Podgląd Twojej kamery")}
+            style={{
+              width: "100%",
+              height: "100%",
+              display: "block",
+              objectFit: selfViewFit,
+              transform: isSelfViewMirrored ? "scaleX(-1)" : "none",
+              borderRadius: "inherit",
+            }}
+          />
+          <span
+            style={{
+              position: "absolute",
+              left: "9px",
+              bottom: "8px",
+              padding: "4px 8px",
+              borderRadius: "999px",
+              background: "rgba(15,23,42,0.68)",
+              color: "#ffffff",
+              fontSize: "10px",
+              fontWeight: 700,
+              pointerEvents: "none",
+            }}
+          >
+            {t("You", "Ty")}
+          </span>
+          <button
+            type="button"
+            aria-label={t("Self-view options", "Opcje własnego podglądu")}
+            aria-expanded={isSelfViewMenuOpen}
+            onClick={() => setIsSelfViewMenuOpen((open) => !open)}
+            style={{
+              position: "absolute",
+              top: 8,
+              right: 8,
+              width: 32,
+              height: 32,
+              border: "1px solid rgba(255,255,255,0.35)",
+              borderRadius: 9,
+              background: "rgba(15,23,42,0.72)",
+              color: "#fff",
+              cursor: "pointer",
+              fontSize: 20,
+              lineHeight: 1,
+            }}
+          >
+            ⋮
+          </button>
+          {isSelfViewMenuOpen && (
+            <div
+              role="menu"
+              onPointerDown={(event) => event.stopPropagation()}
+              style={{
+                position: "absolute",
+                top: "auto",
+                bottom: 8,
+                right: 8,
+                width: "210px",
+                maxHeight: "calc(100% - 54px)",
+                overflowY: "auto",
+                padding: 8,
+                display: "grid",
+                gap: 5,
+                border: "1px solid #dbe3ef",
+                borderRadius: 12,
+                background: "rgba(255,255,255,0.98)",
+                color: "#172036",
+                boxShadow: "0 14px 35px rgba(15,23,42,0.26)",
+                cursor: "default",
+              }}
+            >
+              <button type="button" role="menuitem" onClick={() => { setIsSelfViewVisible(false); setIsSelfViewMenuOpen(false); }} style={selfViewMenuButtonStyle}>
+                {t("Hide self-view", "Ukryj swój podgląd")}
+              </button>
+              <button type="button" role="menuitem" onClick={() => setIsSelfViewMirrored((mirrored) => !mirrored)} style={selfViewMenuButtonStyle}>
+                {isSelfViewMirrored ? t("Unmirror preview", "Wyłącz odbicie") : t("Mirror preview", "Odbij podgląd")}
+              </button>
+              <button type="button" role="menuitem" onClick={() => setSelfViewFit((fit) => fit === "cover" ? "contain" : "cover")} style={selfViewMenuButtonStyle}>
+                {selfViewFit === "cover" ? t("Fit entire video", "Dopasuj cały obraz") : t("Fill preview", "Wypełnij podgląd")}
+              </button>
+              <label style={{ display: "grid", gap: 4, padding: "5px 8px", fontSize: 11, fontWeight: 700 }}>
+                {t("Preview size", "Rozmiar podglądu")}
+                <select value={selfViewSize} onChange={(event) => setSelfViewSize(event.target.value as "small" | "medium" | "large")} style={{ height: 30, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                  <option value="small">{t("Small", "Mały")}</option>
+                  <option value="medium">{t("Medium", "Średni")}</option>
+                  <option value="large">{t("Large", "Duży")}</option>
+                </select>
+              </label>
+              {cameraDevices.length > 1 && (
+                <label style={{ display: "grid", gap: 4, padding: "5px 8px", fontSize: 11, fontWeight: 700 }}>
+                  {t("Camera", "Kamera")}
+                  <select value={selectedCameraId} disabled={isSwitchingCamera} onChange={(event) => void switchCamera(event.target.value)} style={{ height: 30, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                    {cameraDevices.map((camera) => <option key={camera.deviceId} value={camera.deviceId}>{camera.label}</option>)}
+                  </select>
+                </label>
+              )}
+              <button type="button" role="menuitem" onClick={() => void openSelfViewPictureInPicture()} style={selfViewMenuButtonStyle}>
+                {t("Picture in picture", "Obraz w obrazie")}
+              </button>
+              <button type="button" role="menuitem" onClick={() => void openSelfViewFullscreen()} style={selfViewMenuButtonStyle}>
+                {t("Full screen", "Pełny ekran")}
+              </button>
+            </div>
+          )}
+        </div>
       )}
     </CallContext.Provider>
   );
@@ -3681,5 +4182,19 @@ const callActionStyle: React.CSSProperties = {
   gap: "7px",
   fontSize: "13px",
   fontWeight: 800,
+  cursor: "pointer",
+};
+const selfViewMenuButtonStyle: React.CSSProperties = {
+  width: "100%",
+  minHeight: 32,
+  padding: "6px 8px",
+  border: 0,
+  borderRadius: 8,
+  background: "transparent",
+  color: "#334155",
+  textAlign: "left",
+  font: "inherit",
+  fontSize: 11,
+  fontWeight: 700,
   cursor: "pointer",
 };
