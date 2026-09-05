@@ -4,6 +4,7 @@ import Link from "next/link";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Download, LogOut, ShieldCheck, Trash2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
+import CallNotificationSettings from "@/app/components/CallNotificationSettings";
 
 type AccountUser = { email: string; name: string };
 
@@ -95,6 +96,10 @@ export default function AccountSettingsPage() {
 
           <SettingsSection title={t("Sessions", "Sesje")} description={t("Global sign-out revokes refresh sessions on other devices; an already-issued access token can remain valid briefly until it expires.", "Globalne wylogowanie unieważnia sesje odświeżania na innych urządzeniach; wydany token dostępu może pozostać krótko ważny do czasu wygaśnięcia.")}>
             <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}><button onClick={() => void logout(false)} disabled={!!busy} style={secondaryButton}><LogOut size={16}/> {t("Sign out here", "Wyloguj tutaj")}</button><button onClick={() => void logout(true)} disabled={!!busy} style={secondaryButton}>{t("Sign out from all devices", "Wyloguj ze wszystkich urządzeń")}</button></div>
+          </SettingsSection>
+
+          <SettingsSection title={t("Call notifications", "Powiadomienia o połączeniach")} description={t("Receive incoming Scriboo calls while this tab is in the background or closed.", "Odbieraj powiadomienia o połączeniach Scriboo, gdy karta działa w tle lub jest zamknięta.")}>
+            <CallNotificationSettings />
           </SettingsSection>
 
           <SettingsSection title={t("Your data", "Twoje dane")} description={t("Download a machine-readable JSON export of your profile, boards, calendar and sharing records.", "Pobierz eksport JSON profilu, tablic, kalendarza i udostępnień.")}>

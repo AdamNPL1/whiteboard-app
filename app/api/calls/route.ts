@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getActiveCallsForUser, startBoardCall } from "@/lib/call-store";
+import { getActiveCallsForUser, getBoardCallParticipants, startBoardCall } from "@/lib/call-store";
+import { sendCallPush } from "@/lib/call-push-store";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 
@@ -64,6 +65,15 @@ export async function POST(request: NextRequest) {
       recipientUserId,
       clientRequestId
     );
+    void getBoardCallParticipants(boardId, recipientUserId)
+      .then((context) => sendCallPush(recipientUserId, {
+        type: "incoming-call",
+        callId: call.id,
+        boardId: call.boardId,
+        boardName: context.board.name,
+        callerName: context.participants.find((participant) => participant.userId === user.id)?.name ?? "Scriboo user",
+      }))
+      .catch((error) => console.warn("Could not send incoming call push", error));
     return NextResponse.json(
       {
         call,

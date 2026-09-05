@@ -30,7 +30,8 @@
     "react-konva": "^19.2.5",
     "react-rnd": "^10.5.3",
     "stripe": "^22.2.3",
-    "tldraw": "^4.5.7"
+    "tldraw": "^4.5.7",
+    "web-push": "^3.6.7"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -39,6 +40,7 @@
     "@types/nodemailer": "^8.0.1",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@types/web-push": "^3.6.4",
     "eslint": "^9",
     "eslint-config-next": "^16.2.12",
     "tailwindcss": "^4",

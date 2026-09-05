@@ -21,6 +21,7 @@ import {
   Phone,
   PhoneOff,
   Settings2,
+  BadgeCheck,
   Users,
   Video,
   VideoOff,
@@ -35,6 +36,17 @@ import { CallReconnectionController } from "@/lib/call-reconnection";
 import { CallMediaWatchdog } from "@/lib/call-media-watchdog";
 import { TurnCredentialLoader } from "@/lib/turn-credential-loader";
 import { resolveCallStatusKind } from "@/lib/call-status";
+import { presentCallMessage } from "@/lib/call-message-presentation";
+import { formatCallDuration, getParticipantInitials } from "@/lib/participant-presence";
+import {
+  CALL_DEVICE_SESSION_HEADER,
+  CALL_OWNERSHIP_CHANNEL,
+  getBrowserCallSessionId,
+} from "@/lib/call-device-session";
+import {
+  withCallQualityRating,
+  type CallQualitySnapshot,
+} from "@/lib/call-quality";
 import {
   normalizeParticipantVolume,
   shouldOpenParticipantMenuFromKey,
@@ -130,6 +142,7 @@ const apiRequest = async <T,>(
     ...options,
     headers: {
       ...(options?.body ? { "Content-Type": "application/json" } : {}),
+      [CALL_DEVICE_SESSION_HEADER]: getBrowserCallSessionId(),
       ...options?.headers,
     },
     cache: "no-store",
@@ -195,6 +208,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [peerName, setPeerName] = useState("");
   const [callBoardName, setCallBoardName] = useState("");
   const [message, setMessage] = useState("");
+  const [callDurationSeconds, setCallDurationSeconds] = useState(0);
+  const [callEndedBy, setCallEndedBy] = useState<"you" | "participant" | null>(null);
   const [isMuted, setIsMuted] = useState(false);
   const [remoteMuted, setRemoteMuted] = useState(false);
   const [showRecoveryRestored, setShowRecoveryRestored] = useState(false);
@@ -272,6 +287,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [outboundAudioActive, setOutboundAudioActive] = useState(false);
   const [inboundAudioActive, setInboundAudioActive] = useState(false);
   const [audioTransmissionWarning, setAudioTransmissionWarning] = useState(false);
+  const [callQuality, setCallQuality] = useState<CallQualitySnapshot | null>(null);
+  const [isCallQualityOpen, setIsCallQualityOpen] = useState(false);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
   const [isParticipantVideoMenuOpen, setIsParticipantVideoMenuOpen] = useState(false);
   const [isParticipantMutedForMe, setIsParticipantMutedForMe] = useState(false);
@@ -293,6 +310,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const userRef = useRef<CurrentUser | null>(null);
   const callRef = useRef<CallRecord | null>(null);
+  const browserCallSessionIdRef = useRef("");
   const phaseRef = useRef<CallPhase>("idle");
   const localStreamRef = useRef<MediaStream | null>(null);
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
@@ -366,6 +384,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     sent: null,
     received: null,
   });
+  const previousVideoPacketsReceivedRef = useRef<number | null>(null);
+  const lastMediaReceivedAtRef = useRef<number | null>(null);
   const outboundAudioStallsRef = useRef(0);
   const isMutedRef = useRef(isMuted);
 
@@ -383,6 +403,50 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  const getCallSessionId = useCallback(() => {
+    if (!browserCallSessionIdRef.current) {
+      browserCallSessionIdRef.current = getBrowserCallSessionId();
+    }
+    return browserCallSessionIdRef.current;
+  }, []);
+
+  const claimCallOwnership = useCallback(async (callId: string) => {
+    const sessionId = getCallSessionId();
+    const response = await fetch(`/api/calls/${callId}/ownership`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [CALL_DEVICE_SESSION_HEADER]: sessionId,
+      },
+      body: JSON.stringify({ action: "claim" }),
+      cache: "no-store",
+    });
+    if (!response.ok) return false;
+    const result = await response.json() as { owned?: boolean };
+    if (!result.owned) return false;
+    if (typeof BroadcastChannel !== "undefined") {
+      const channel = new BroadcastChannel(CALL_OWNERSHIP_CHANNEL);
+      channel.postMessage({ callId, sessionId, type: "claimed" });
+      channel.close();
+    }
+    return true;
+  }, [getCallSessionId]);
+
+  const refreshCallOwnership = useCallback(async (callId: string) => {
+    const response = await fetch(`/api/calls/${callId}/ownership`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        [CALL_DEVICE_SESSION_HEADER]: getCallSessionId(),
+      },
+      body: JSON.stringify({ action: "heartbeat" }),
+      cache: "no-store",
+    }).catch(() => null);
+    if (response?.ok) return "owned" as const;
+    if (response?.status === 409) return "not-owner" as const;
+    return "unknown" as const;
+  }, [getCallSessionId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -720,10 +784,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
     setMicrophoneLevel(0);
     previousAudioPacketsRef.current = { sent: null, received: null };
+    previousVideoPacketsReceivedRef.current = null;
+    lastMediaReceivedAtRef.current = null;
     outboundAudioStallsRef.current = 0;
     setOutboundAudioActive(false);
     setInboundAudioActive(false);
     setAudioTransmissionWarning(false);
+    setCallQuality(null);
+    setIsCallQualityOpen(false);
     setAudioDeviceMessage("");
     const cameraTrack = localCameraTrackRef.current;
     const streamTracks = localStreamRef.current?.getTracks() ?? [];
@@ -767,6 +835,43 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     callChannelRef.current = null;
     if (channel) void getSupabaseBrowserClient().removeChannel(channel);
   }, [stopCallPoll, stopCallSounds]);
+
+  useEffect(() => {
+    if (typeof BroadcastChannel === "undefined") return;
+    const channel = new BroadcastChannel(CALL_OWNERSHIP_CHANNEL);
+    channel.onmessage = (event: MessageEvent<unknown>) => {
+      const payload = event.data as { callId?: string; sessionId?: string; type?: string };
+      if (
+        payload.type !== "claimed" ||
+        !payload.callId ||
+        payload.sessionId === getCallSessionId() ||
+        callRef.current?.id !== payload.callId
+      ) return;
+      callRef.current = null;
+      dispatchBrowserCall({ type: "clear" });
+      clearCallResources();
+      setMessage(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+      setPhase("error");
+    };
+    return () => channel.close();
+  }, [clearCallResources, getCallSessionId, t]);
+
+  useEffect(() => {
+    const callId = call?.id;
+    if (!callId || !["outgoing", "connecting", "connected"].includes(phase)) return;
+    const sendOwnershipHeartbeat = async () => {
+      const ownership = await refreshCallOwnership(callId);
+      if (ownership !== "not-owner" || callRef.current?.id !== callId || !navigator.onLine) return;
+      callRef.current = null;
+      dispatchBrowserCall({ type: "clear" });
+      clearCallResources();
+      setMessage(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+      setPhase("error");
+    };
+    void sendOwnershipHeartbeat();
+    const interval = window.setInterval(() => void sendOwnershipHeartbeat(), 10_000);
+    return () => window.clearInterval(interval);
+  }, [call?.id, clearCallResources, phase, refreshCallOwnership, t]);
 
   const persistCallTermination = useCallback(
     async (activeCall: CallRecord, action: "cancel" | "end") => {
@@ -817,6 +922,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setParticipants([]);
     setPendingParticipant(null);
     setMessage("");
+    setCallDurationSeconds(0);
+    setCallEndedBy(null);
     setPreCallMessage("");
     setIsPreparingMedia(false);
     setRemoteMuted(false);
@@ -835,6 +942,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const timeout = window.setTimeout(resetToIdle, 4_000);
     return () => window.clearTimeout(timeout);
   }, [phase, resetToIdle]);
+
+  useEffect(() => {
+    if (phase !== "connected") return;
+    const startedAt = new Date(call?.acceptedAt ?? call?.stateChangedAt ?? Date.now()).getTime();
+    const updateDuration = () => {
+      setCallDurationSeconds(Math.max(0, Math.floor((Date.now() - startedAt) / 1_000)));
+    };
+    updateDuration();
+    const interval = window.setInterval(updateDuration, 1_000);
+    return () => window.clearInterval(interval);
+  }, [call?.acceptedAt, call?.stateChangedAt, phase]);
 
   const heartbeatCallId = call?.id;
   const heartbeatCallStatus = call?.status;
@@ -917,7 +1035,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (userRef.current?.id === call.callerUserId) {
         void apiRequest<{ call: CallRecord }>(`/api/calls/${call.id}`, {
           method: "PATCH",
-          body: JSON.stringify({ action: "cancel" }),
+          body: JSON.stringify({ action: "cancel", reason: "ring_timeout" }),
         }).catch(() => undefined);
       }
       clearCallResources();
@@ -1459,6 +1577,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const reports = await connection.getStats();
         let packetsSent = 0;
         let packetsReceived = 0;
+        let audioPacketsLost = 0;
+        let videoPacketsReceived = 0;
+        let videoPacketsLost = 0;
+        let roundTripTimeMs: number | null = null;
+        let jitterMs: number | null = null;
+        let availableBitrateKbps: number | null = null;
+        let frameRate: number | null = null;
+        let frameWidth: number | null = null;
+        let frameHeight: number | null = null;
+        let audioLevel: number | null = null;
+        let frozenVideoSeconds: number | null = null;
         let route = "unknown";
         reports.forEach((report) => {
           const mediaKind = report.kind ?? report.mediaType;
@@ -1467,6 +1596,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }
           if (report.type === "inbound-rtp" && mediaKind === "audio") {
             packetsReceived += Number(report.packetsReceived) || 0;
+            audioPacketsLost += Number(report.packetsLost) || 0;
+            if (Number.isFinite(Number(report.jitter))) {
+              jitterMs = Math.max(jitterMs ?? 0, Number(report.jitter) * 1_000);
+            }
+            if (Number.isFinite(Number(report.audioLevel))) audioLevel = Number(report.audioLevel);
+          }
+          if (report.type === "inbound-rtp" && mediaKind === "video") {
+            videoPacketsReceived += Number(report.packetsReceived) || 0;
+            videoPacketsLost += Number(report.packetsLost) || 0;
+            if (Number.isFinite(Number(report.framesPerSecond))) frameRate = Number(report.framesPerSecond);
+            if (Number.isFinite(Number(report.frameWidth))) frameWidth = Number(report.frameWidth);
+            if (Number.isFinite(Number(report.frameHeight))) frameHeight = Number(report.frameHeight);
+            if (Number.isFinite(Number(report.totalFreezesDuration))) frozenVideoSeconds = Number(report.totalFreezesDuration);
           }
           if (
             report.type === "candidate-pair" &&
@@ -1475,6 +1617,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           ) {
             const local = reports.get(report.localCandidateId);
             const remote = reports.get(report.remoteCandidateId);
+            if (Number.isFinite(Number(report.currentRoundTripTime))) {
+              roundTripTimeMs = Number(report.currentRoundTripTime) * 1_000;
+            }
+            const availableBitrate = Math.max(
+              Number(report.availableIncomingBitrate) || 0,
+              Number(report.availableOutgoingBitrate) || 0
+            );
+            if (availableBitrate > 0) availableBitrateKbps = availableBitrate / 1_000;
             route =
               local?.candidateType === "relay" || remote?.candidateType === "relay"
                 ? "TURN relay"
@@ -1484,6 +1634,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         const previous = previousAudioPacketsRef.current;
         const sentChanged = previous.sent !== null && packetsSent > previous.sent;
         const receivedChanged = previous.received !== null && packetsReceived > previous.received;
+        const videoReceivedChanged = previousVideoPacketsReceivedRef.current !== null &&
+          videoPacketsReceived > previousVideoPacketsReceivedRef.current;
+        const sampledAt = Date.now();
+        if (
+          (previous.received === null && packetsReceived > 0) ||
+          (previousVideoPacketsReceivedRef.current === null && videoPacketsReceived > 0) ||
+          receivedChanged ||
+          videoReceivedChanged
+        ) lastMediaReceivedAtRef.current = sampledAt;
         setOutboundAudioActive(sentChanged && !isMutedRef.current);
         setInboundAudioActive(receivedChanged);
         outboundAudioStallsRef.current =
@@ -1499,6 +1658,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           })
         );
         previousAudioPacketsRef.current = { sent: packetsSent, received: packetsReceived };
+        previousVideoPacketsReceivedRef.current = videoPacketsReceived;
+        const audioPacketTotal = packetsReceived + audioPacketsLost;
+        const videoPacketTotal = videoPacketsReceived + videoPacketsLost;
+        setCallQuality(withCallQualityRating({
+          roundTripTimeMs,
+          jitterMs,
+          audioPacketLossPercent: audioPacketTotal > 0 ? (audioPacketsLost / audioPacketTotal) * 100 : null,
+          videoPacketLossPercent: videoPacketTotal > 0 ? (videoPacketsLost / videoPacketTotal) * 100 : null,
+          availableBitrateKbps,
+          frameRate,
+          frameWidth,
+          frameHeight,
+          audioLevel,
+          frozenVideoSeconds,
+          route,
+          secondsSinceMediaReceived: lastMediaReceivedAtRef.current === null
+            ? null
+            : (sampledAt - lastMediaReceivedAtRef.current) / 1_000,
+        }));
         reportRealtimeDiagnostics({
           audioPacketsSent: packetsSent,
           audioPacketsReceived: packetsReceived,
@@ -1625,10 +1803,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       phaseRef.current = "ended";
       clearCallResources();
       setConnectionState("");
+      setCallEndedBy(
+        text === t("Call ended.", "Połączenie zakończone.") ||
+        text === t("Call declined.", "Połączenie odrzucone.")
+          ? "participant"
+          : null
+      );
       setMessage(text);
       setPhase("ended");
     },
-    [clearCallResources, setConnectionState]
+    [clearCallResources, setConnectionState, t]
   );
 
   const handleSignal = useCallback(
@@ -1959,6 +2143,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (current) {
         const refreshed = data.calls.find((candidate) => candidate.id === current.id);
         if (refreshed) {
+          if (phaseRef.current === "incoming" && refreshed.status === "accepted") {
+            const ownership = await refreshCallOwnership(refreshed.id);
+            if (ownership === "not-owner") {
+              callRef.current = null;
+              dispatchBrowserCall({ type: "clear" });
+              clearCallResources();
+              setMessage(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+              setPhase("error");
+              return;
+            }
+          }
           dispatchBrowserCall({ type: "server-record", call: refreshed });
         } else if (["incoming", "outgoing"].includes(phaseRef.current)) {
           clearCallResources();
@@ -1971,13 +2166,30 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         (candidate) =>
           candidate.recipientUserId === userRef.current?.id && candidate.status === "ringing"
       );
-      if (incoming) await showIncomingCall(incoming);
+      if (incoming) {
+        await showIncomingCall(incoming);
+        return;
+      }
+      const activeElsewhere = data.calls.find((candidate) =>
+        candidate.status === "accepted" &&
+        [candidate.callerUserId, candidate.recipientUserId].includes(userRef.current?.id ?? "")
+      );
+      if (activeElsewhere) {
+        const ownership = await refreshCallOwnership(activeElsewhere.id);
+        if (ownership === "not-owner") {
+          const context = await loadCallContext(activeElsewhere);
+          setPeerName(context.peerName);
+          setCallBoardName(context.boardName);
+          setMessage(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+          setPhase("error");
+        }
+      }
     })().finally(() => {
       activeCallsRequestRef.current = null;
     });
     activeCallsRequestRef.current = request;
     return request;
-  }, [clearCallResources, showIncomingCall, t]);
+  }, [clearCallResources, loadCallContext, refreshCallOwnership, showIncomingCall, t]);
 
   const refreshIdentity = useCallback(async () => {
     if (identityRefreshRef.current) {
@@ -2097,7 +2309,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const now = Date.now();
       // Realtime should deliver incoming calls instantly. Retain a slow safety
       // poll for missed events, and poll quickly only while the channel is down.
-      if (notificationReady && now - lastFallbackPollAt < 30_000) return;
+      if (notificationReady && phaseRef.current !== "incoming" && now - lastFallbackPollAt < 30_000) return;
       lastFallbackPollAt = now;
       void loadActiveCalls().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Unknown API error";
@@ -2233,6 +2445,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }),
         });
         createdCall = data.call;
+        if (!await claimCallOwnership(data.call.id)) {
+          throw new Error(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+        }
         dispatchBrowserCall({ type: "select", call: data.call });
         callRef.current = data.call;
         setPhase("outgoing");
@@ -2249,7 +2464,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setPhase("error");
       }
     },
-    [board, clearCallResources, connectCallChannel, getMicrophone, persistCallTermination, startStatusPoll, t, user]
+    [board, claimCallOwnership, clearCallResources, connectCallChannel, getMicrophone, persistCallTermination, startStatusPoll, t, user]
   );
 
   const openCallChooser = useCallback(async () => {
@@ -2291,6 +2506,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setConnectionState("accepting");
     reportParticipantState("accepting", "accept_clicked");
     try {
+      if (!await claimCallOwnership(activeCall.id)) {
+        callRef.current = null;
+        dispatchBrowserCall({ type: "clear" });
+        clearCallResources();
+        setMessage(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
+        setPhase("error");
+        return;
+      }
       await getMicrophone();
       await connectCallChannel(activeCall);
       const data = await apiRequest<{ call: CallRecord }>(
@@ -2325,7 +2548,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setMessage(error instanceof Error ? error.message : "Could not accept the call.");
       setPhase("error");
     }
-  }, [clearCallResources, connectCallChannel, getMicrophone, preparePeerConnection, reportParticipantState, sendSignal, setConnectionState, startStatusPoll]);
+  }, [claimCallOwnership, clearCallResources, connectCallChannel, getMicrophone, preparePeerConnection, reportParticipantState, sendSignal, setConnectionState, startStatusPoll, t]);
 
   const declineCall = useCallback(async () => {
     const activeCall = callRef.current;
@@ -2358,7 +2581,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       console.warn("Scriboo call cleanup completed with an error", error);
     } finally {
       setConnectionState("");
-      setMessage(t("Call ended.", "Połączenie zakończone."));
+      setCallEndedBy("you");
+      setMessage(t("You ended the call.", "Zakończyłeś rozmowę."));
       setPhase("ended");
     }
   }, [clearCallResources, persistCallTermination, resetToIdle, sendSignal, setConnectionState, t]);
@@ -2423,19 +2647,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setMicrophoneDeviceState("ready");
       setIsMicrophoneReady(true);
       startMicrophoneMeter(currentStream);
-      setAudioDeviceMessage(t("Microphone changed.", "Mikrofon zostaÅ‚ zmieniony."));
+      setAudioDeviceMessage(t("Microphone changed.", "Mikrofon został zmieniony."));
     } catch (error) {
       replacementStream?.getTracks().forEach((track) => track.stop());
       const state = classifyAudioDeviceError(error);
       setMicrophoneDeviceState(state);
       setAudioDeviceMessage(
         state === "permission-denied"
-          ? t("Microphone permission is denied.", "OdmÃ³wiono dostÄ™pu do mikrofonu.")
+          ? t("Microphone permission is denied.", "Odmówiono dostępu do mikrofonu.")
           : state === "busy"
-            ? t("That microphone is busy in another app.", "Ten mikrofon jest uÅ¼ywany przez innÄ… aplikacjÄ™.")
+            ? t("That microphone is busy in another app.", "Ten mikrofon jest używany przez inną aplikację.")
             : state === "disconnected"
-              ? t("That microphone is disconnected.", "Ten mikrofon jest odÅ‚Ä…czony.")
-              : t("The microphone is unavailable.", "Mikrofon jest niedostÄ™pny.")
+              ? t("That microphone is disconnected.", "Ten mikrofon jest odłączony.")
+              : t("The microphone is unavailable.", "Mikrofon jest niedostępny.")
       );
     } finally {
       setIsSwitchingMicrophone(false);
@@ -2445,7 +2669,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const testMicrophone = useCallback(async () => {
     if (isTestingMicrophone || !navigator.mediaDevices?.getUserMedia) return;
     setIsTestingMicrophone(true);
-    setAudioDeviceMessage(t("Speak now. You should hear yourself for two seconds.", "MÃ³w teraz. Przez dwie sekundy powinieneÅ› sÅ‚yszeÄ‡ swÃ³j gÅ‚os."));
+    setAudioDeviceMessage(t("Speak now. You should hear yourself for two seconds.", "Mów teraz. Przez dwie sekundy powinieneś słyszeć swój głos."));
     let testStream: MediaStream | null = null;
     const audio = new Audio();
     try {
@@ -2465,10 +2689,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       await audio.play();
       await new Promise<void>((resolve) => window.setTimeout(resolve, 2_000));
-      setAudioDeviceMessage(t("Microphone and speaker test finished.", "Test mikrofonu i gÅ‚oÅ›nika zakoÅ„czony."));
+      setAudioDeviceMessage(t("Microphone and speaker test finished.", "Test mikrofonu i głośnika zakończony."));
     } catch (error) {
       setMicrophoneDeviceState(classifyAudioDeviceError(error));
-      setAudioDeviceMessage(t("The microphone test could not run.", "Nie udaÅ‚o siÄ™ uruchomiÄ‡ testu mikrofonu."));
+      setAudioDeviceMessage(t("The microphone test could not run.", "Nie udało się uruchomić testu mikrofonu."));
     } finally {
       audio.pause();
       audio.srcObject = null;
@@ -2538,8 +2762,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setMicrophoneDeviceState("disconnected");
         setAudioDeviceMessage(
           choice.deviceId
-            ? t("The selected microphone disconnected. Switching to an available microphone.", "Wybrany mikrofon zostaÅ‚ odÅ‚Ä…czony. PrzeÅ‚Ä…czanie na dostÄ™pny mikrofon.")
-            : t("No microphone is connected.", "Nie podÅ‚Ä…czono mikrofonu.")
+            ? t("The selected microphone disconnected. Switching to an available microphone.", "Wybrany mikrofon został odłączony. Przełączanie na dostępny mikrofon.")
+            : t("No microphone is connected.", "Nie podłączono mikrofonu.")
         );
         if (choice.deviceId && phaseRef.current === "connected") {
           window.setTimeout(() => void switchMicrophone(choice.deviceId), 0);
@@ -2555,8 +2779,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setSpeakerDeviceState(choice.deviceId ? "ready" : "missing");
         setAudioDeviceMessage(
           choice.deviceId
-            ? t("The selected speaker disconnected. Using an available speaker.", "Wybrany gÅ‚oÅ›nik zostaÅ‚ odÅ‚Ä…czony. UÅ¼ywany jest dostÄ™pny gÅ‚oÅ›nik.")
-            : t("No speaker output is available.", "Brak dostÄ™pnego wyjÅ›cia gÅ‚oÅ›nikowego.")
+            ? t("The selected speaker disconnected. Using an available speaker.", "Wybrany głośnik został odłączony. Używany jest dostępny głośnik.")
+            : t("No speaker output is available.", "Brak dostępnego wyjścia głośnikowego.")
         );
       } else if (speakers.length === 0 && isSpeakerSelectionSupported) {
         setSpeakerDeviceState("missing");
@@ -2985,6 +3209,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     []
   );
 
+  const presentedCallMessage = presentCallMessage(message);
+  const friendlyCallMessage = {
+    busy: t("The participant is currently in another call.", "Uczestnik prowadzi obecnie inną rozmowę."),
+    "rate-limited": t("Too many call attempts. Wait a moment, then try again.", "Zbyt wiele prób połączenia. Odczekaj chwilę i spróbuj ponownie."),
+    "microphone-permission": t("Microphone access is blocked. Allow it in your browser settings.", "Dostęp do mikrofonu jest zablokowany. Zezwól na niego w ustawieniach przeglądarki."),
+    "microphone-unavailable": t("The microphone is unavailable. Check the device and try again.", "Mikrofon jest niedostępny. Sprawdź urządzenie i spróbuj ponownie."),
+    "participant-unavailable": t("The participant is unavailable right now.", "Uczestnik jest teraz niedostępny."),
+    "connection-failed": t("The call couldn't connect. Check your connection and try again.", "Nie udało się połączyć rozmowy. Sprawdź internet i spróbuj ponownie."),
+    offline: t("You're offline. Reconnect to the internet and try again.", "Brak połączenia z internetem. Połącz się ponownie i spróbuj jeszcze raz."),
+    original: presentedCallMessage.cleaned,
+  }[presentedCallMessage.kind];
+
   const statusKind = resolveCallStatusKind({
     phase,
     connectionState,
@@ -2994,7 +3230,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     offline: isBrowserOffline,
   });
   const statusText = {
-    message,
+    message: friendlyCallMessage,
     incoming: t("Incoming call", "Połączenie przychodzące"),
     "precall-incoming": t(
       "Check your devices before answering",
@@ -3004,7 +3240,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       "Check your devices before calling",
       "Sprawdź urządzenia przed połączeniem"
     ),
-    ringing: t("Ringing…", "Dzwonienie…"),
+    ringing: t("Calling…", "Dzwonienie…"),
     connecting: t("Connecting…", "Łączenie…"),
     reconnecting: t(
       "Reconnecting… Keep this window open.",
@@ -3027,6 +3263,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     ending: t("Ending call…", "Kończenie rozmowy…"),
     idle: "",
   }[statusKind];
+  const visibleStatusText = statusKind === "connected" &&
+    (callQuality?.rating === "poor" || callQuality?.rating === "no-media")
+      ? callQuality.rating === "no-media"
+        ? t("No media received", "Brak odbieranych danych")
+        : t("Poor connection", "Słabe połączenie")
+      : statusText;
+  const visibleQualityRating = connectionState === "reconnecting"
+    ? "reconnecting"
+    : callQuality?.rating ?? "good";
+  const qualityPresentation = {
+    good: { label: t("Good", "Dobra"), color: "#15803d", background: "#dcfce7" },
+    fair: { label: t("Fair", "Średnia"), color: "#a16207", background: "#fef9c3" },
+    poor: { label: t("Poor", "Słaba"), color: "#b91c1c", background: "#fee2e2" },
+    "no-media": { label: t("No media", "Brak danych"), color: "#b91c1c", background: "#fee2e2" },
+    reconnecting: { label: t("Reconnecting", "Ponowne łączenie"), color: "#a16207", background: "#fef3c7" },
+  }[visibleQualityRating];
+  const isRemoteSpeaking = phase === "connected" && !remoteMuted &&
+    Boolean(callQuality?.audioLevel && callQuality.audioLevel > 0.03);
   const isPreCall = phase === "precall-outgoing" || phase === "precall-incoming";
   const permissionText = (state: MediaPermissionState) =>
     state === "granted"
@@ -3396,12 +3650,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               userSelect: "none",
             }}
           >
-            <span style={{ width: "42px", height: "42px", borderRadius: "999px", background: "linear-gradient(135deg,#7c3aed,#60a5fa)", color: "white", display: "grid", placeItems: "center", flex: "0 0 auto" }}>
-              <Phone size={18} />
+            <span aria-hidden="true" style={{ width: "42px", height: "42px", borderRadius: "999px", background: "linear-gradient(135deg,#7c3aed,#60a5fa)", color: "white", display: "grid", placeItems: "center", flex: "0 0 auto", fontSize: 14, fontWeight: 850 }}>
+              {getParticipantInitials(peerName)}
             </span>
             <div style={{ minWidth: 0, display: "grid", gap: "3px", flex: 1 }}>
-              <strong style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{peerName || t("Audio call", "Połączenie audio")}</strong>
-              <span style={{ color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{callBoardName}</span>
+              <strong title={t("Verified Scriboo participant", "Zweryfikowany uczestnik Scriboo")} style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", display: "flex", alignItems: "center", gap: 5 }}>
+                <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{peerName || t("Audio call", "Połączenie audio")}</span>
+                {peerName && <BadgeCheck size={15} color="#2563eb" aria-label={t("Verified participant", "Zweryfikowany uczestnik")} />}
+              </strong>
+              <span style={{ color: "#64748b", fontSize: "12px", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                {callBoardName}{(phase === "connected" || phase === "ended") ? ` · ${formatCallDuration(callDurationSeconds)}` : ""}
+              </span>
             </div>
             <button
               type="button"
@@ -3428,21 +3687,91 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           {!isCallPanelMinimized && (
             <>
           <div aria-live="polite" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#a16207" : "#475569", fontSize: "13px", fontWeight: 650 }}>
-            {statusText}
+            {visibleStatusText}
           </div>
+          {phase === "connected" && (
+            <div aria-label={t("Participant presence", "Obecność uczestnika")} style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              <span style={presenceChipStyle}>{remoteMuted ? t("Muted", "Wyciszony") : isRemoteSpeaking ? t("Speaking", "Mówi") : t("Microphone on", "Mikrofon włączony")}</span>
+              <span style={presenceChipStyle}>{isRemoteVideoOn ? t("Camera on", "Kamera włączona") : t("Camera off", "Kamera wyłączona")}</span>
+              <span style={{ ...presenceChipStyle, color: connectionState === "reconnecting" ? "#a16207" : "#166534" }}>
+                {connectionState === "reconnecting" ? t("Reconnecting", "Ponowne łączenie") : t("Connected", "Połączono")}
+              </span>
+            </div>
+          )}
+          {phase === "ended" && callEndedBy && (
+            <div style={{ color: "#64748b", fontSize: 12 }}>
+              {callEndedBy === "you" ? t("Ended by you", "Zakończone przez Ciebie") : t("Ended by participant", "Zakończone przez uczestnika")}
+            </div>
+          )}
+          {phase === "connected" && callQuality && (
+            <div style={{ display: "grid", gap: 7 }}>
+              <button
+                type="button"
+                aria-expanded={isCallQualityOpen}
+                aria-label={t("Show call quality details", "Pokaż szczegóły jakości rozmowy")}
+                title={t("Call quality", "Jakość rozmowy")}
+                onClick={() => setIsCallQualityOpen((open) => !open)}
+                style={{
+                  minHeight: 36,
+                  padding: "0 11px",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 10,
+                  border: "1px solid #e2e8f0",
+                  borderRadius: 10,
+                  background: "#f8fafc",
+                  color: "#334155",
+                  cursor: "pointer",
+                  font: "inherit",
+                  fontSize: 12,
+                  fontWeight: 750,
+                }}
+              >
+                <span>{t("Call quality", "Jakość rozmowy")}</span>
+                <span style={{ padding: "3px 8px", borderRadius: 999, color: qualityPresentation.color, background: qualityPresentation.background }}>
+                  {qualityPresentation.label}
+                </span>
+              </button>
+              {isCallQualityOpen && (
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "7px 12px", padding: 11, border: "1px solid #e2e8f0", borderRadius: 10, background: "#f8fafc", color: "#475569", fontSize: 11 }}>
+                  <span>{t("Round-trip time", "Opóźnienie")}: <strong>{callQuality.roundTripTimeMs === null ? "—" : `${Math.round(callQuality.roundTripTimeMs)} ms`}</strong></span>
+                  <span>{t("Jitter", "Jitter")}: <strong>{callQuality.jitterMs === null ? "—" : `${Math.round(callQuality.jitterMs)} ms`}</strong></span>
+                  <span>{t("Audio loss", "Straty audio")}: <strong>{callQuality.audioPacketLossPercent === null ? "—" : `${callQuality.audioPacketLossPercent.toFixed(1)}%`}</strong></span>
+                  <span>{t("Video loss", "Straty wideo")}: <strong>{callQuality.videoPacketLossPercent === null ? "—" : `${callQuality.videoPacketLossPercent.toFixed(1)}%`}</strong></span>
+                  <span>{t("Available bitrate", "Dostępne pasmo")}: <strong>{callQuality.availableBitrateKbps === null ? "—" : `${Math.round(callQuality.availableBitrateKbps)} kb/s`}</strong></span>
+                  <span>{t("Video", "Wideo")}: <strong>{callQuality.frameWidth && callQuality.frameHeight ? `${callQuality.frameWidth}×${callQuality.frameHeight}` : "—"}{callQuality.frameRate === null ? "" : ` · ${Math.round(callQuality.frameRate)} fps`}</strong></span>
+                  <span>{t("Audio level", "Poziom audio")}: <strong>{callQuality.audioLevel === null ? "—" : `${Math.round(callQuality.audioLevel * 100)}%`}</strong></span>
+                  <span>{t("Frozen video", "Zatrzymane wideo")}: <strong>{callQuality.frozenVideoSeconds === null ? "—" : `${callQuality.frozenVideoSeconds.toFixed(1)} s`}</strong></span>
+                  <span>{t("Connection route", "Trasa połączenia")}: <strong>{callQuality.route}</strong></span>
+                  <span>{t("Last media", "Ostatnie dane")}: <strong>{callQuality.secondsSinceMediaReceived === null ? "—" : `${callQuality.secondsSinceMediaReceived.toFixed(1)} s`}</strong></span>
+                </div>
+              )}
+            </div>
+          )}
+          {presentedCallMessage.technicalDetails && (phase === "error" || phase === "ended") && (
+            <details style={{ color: "#64748b", fontSize: 11 }}>
+              <summary style={{ cursor: "pointer", fontWeight: 700 }}>
+                {t("Technical details", "Szczegóły techniczne")}
+              </summary>
+              <code style={{ display: "block", marginTop: 6, padding: 8, borderRadius: 8, background: "#f1f5f9", overflowWrap: "anywhere" }}>
+                {presentedCallMessage.technicalDetails}
+              </code>
+            </details>
+          )}
           {phase === "connected" && isCallMoreMenuOpen && (
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <label style={{ ...preCallLabelStyle, minWidth: 0 }}>
-                {t("Layout", "UkÅ‚ad")}
+                {t("Layout", "Układ")}
                 <select
-                  aria-label={t("Call layout", "UkÅ‚ad rozmowy")}
+                  aria-label={t("Call layout", "Układ rozmowy")}
                   value={callLayoutMode}
                   onChange={(event) => setCallLayoutMode(event.target.value as CallLayoutMode)}
                   style={preCallSelectStyle}
                 >
                   <option value="standard">{t("Standard", "Standardowy")}</option>
                   <option value="video">{t("Video focus", "Widok wideo")}</option>
-                  <option value="audio">{t("Audio only", "Tylko dÅºwiÄ™k")}</option>
+                  <option value="audio">{t("Audio only", "Tylko dźwięk")}</option>
                   <option value="whiteboard">{t("Whiteboard focus", "Widok tablicy")}</option>
                 </select>
               </label>
@@ -3458,8 +3787,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   }}
                   style={preCallSelectStyle}
                 >
-                  <option value="top-right">{t("Top right", "Prawy gÃ³rny")}</option>
-                  <option value="top-left">{t("Top left", "Lewy gÃ³rny")}</option>
+                  <option value="top-right">{t("Top right", "Prawy górny")}</option>
+                  <option value="top-left">{t("Top left", "Lewy górny")}</option>
                   <option value="bottom-right">{t("Bottom right", "Prawy dolny")}</option>
                   <option value="bottom-left">{t("Bottom left", "Lewy dolny")}</option>
                   <option value="free">{t("Free position", "Dowolna pozycja")}</option>
@@ -3467,7 +3796,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </label>
               {showCallVideo && isRemoteVideoOn && (
                 <label style={{ ...preCallLabelStyle, gridColumn: "1 / -1" }}>
-                  {t("Video size", "Rozmiar wideo")} Â· {participantVideoHeight}px
+                  {t("Video size", "Rozmiar wideo")} · {participantVideoHeight}px
                   <input
                     type="range"
                     min="140"
@@ -3680,7 +4009,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               }}
             >
               <span style={{ color: "#0f172a", fontSize: 13, fontWeight: 800 }}>
-                {peerName || t("Participant", "Uczestnik")} Â· {t("Connected", "PoÅ‚Ä…czono")}
+                {peerName || t("Participant", "Uczestnik")} · {t("Connected", "Połączono")}
               </span>
               <span
                 style={{
@@ -4020,7 +4349,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           ) : phase === "connected" ? (
             <div
               role="toolbar"
-              aria-label={t("Call controls", "Sterowanie rozmowÄ…")}
+              aria-label={t("Call controls", "Sterowanie rozmową")}
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(4, minmax(58px, 1fr))",
@@ -4030,19 +4359,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             >
               <button
                 type="button"
-                aria-label={isMuted ? t("Unmute microphone", "WÅ‚Ä…cz mikrofon") : t("Mute microphone", "Wycisz mikrofon")}
-                title={isMuted ? t("Unmute", "WÅ‚Ä…cz mikrofon") : t("Mute", "Wycisz")}
+                aria-label={isMuted ? t("Unmute microphone", "Włącz mikrofon") : t("Mute microphone", "Wycisz mikrofon")}
+                title={isMuted ? t("Unmute", "Włącz mikrofon") : t("Mute", "Wycisz")}
                 aria-pressed={isMuted}
                 onClick={toggleMute}
                 style={{ ...callToolbarButtonStyle, background: isMuted ? "#ede9fe" : "#f8fafc", color: isMuted ? "#6d28d9" : "#334155" }}
               >
                 {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
-                <span>{isMuted ? t("Unmute", "WÅ‚Ä…cz") : t("Mute", "Wycisz")}</span>
+                <span>{isMuted ? t("Unmute", "Włącz") : t("Mute", "Wycisz")}</span>
               </button>
               <button
                 type="button"
-                aria-label={isCameraOn ? t("Turn camera off", "WyÅ‚Ä…cz kamerÄ…") : t("Turn camera on", "WÅ‚Ä…cz kamerÄ…")}
-                title={isCameraOn ? t("Stop video", "WyÅ‚Ä…cz wideo") : t("Start video", "WÅ‚Ä…cz wideo")}
+                aria-label={isCameraOn ? t("Turn camera off", "Wyłącz kamerę") : t("Turn camera on", "Włącz kamerę")}
+                title={isCameraOn ? t("Stop video", "Wyłącz wideo") : t("Start video", "Włącz wideo")}
                 aria-pressed={isCameraOn}
                 disabled={isCameraStarting}
                 onClick={() => (isCameraOn ? void stopCamera() : void startCamera(selectedCameraId))}
@@ -4053,8 +4382,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
               <button
                 type="button"
-                aria-label={t("Audio and device settings", "Ustawienia dÅºwiÄ™ku i urzÄ…dzeÅ„")}
-                title={t("Audio and devices", "DÅºwiÄ™k i urzÄ…dzenia")}
+                aria-label={t("Audio and device settings", "Ustawienia dźwięku i urządzeń")}
+                title={t("Audio and devices", "Dźwięk i urządzenia")}
                 aria-expanded={isCallDeviceMenuOpen}
                 onClick={() => {
                   setIsCallDeviceMenuOpen((open) => !open);
@@ -4064,7 +4393,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 style={{ ...callToolbarButtonStyle, background: isCallDeviceMenuOpen ? "#ede9fe" : "#f8fafc", color: isCallDeviceMenuOpen ? "#6d28d9" : "#334155" }}
               >
                 <Settings2 size={18} />
-                <span>{t("Devices", "UrzÄ…dzenia")}</span>
+                <span>{t("Devices", "Urządzenia")}</span>
               </button>
               <button
                 type="button"
@@ -4083,8 +4412,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
               <button
                 type="button"
-                aria-label={t("More call options", "WiÄ™cej opcji rozmowy")}
-                title={t("More options", "WiÄ™cej opcji")}
+                aria-label={t("More call options", "Więcej opcji rozmowy")}
+                title={t("More options", "Więcej opcji")}
                 aria-expanded={isCallMoreMenuOpen}
                 onClick={() => {
                   setIsCallMoreMenuOpen((open) => !open);
@@ -4094,7 +4423,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 style={{ ...callToolbarButtonStyle, background: isCallMoreMenuOpen ? "#ede9fe" : "#f8fafc", color: isCallMoreMenuOpen ? "#6d28d9" : "#334155" }}
               >
                 <MoreHorizontal size={19} />
-                <span>{t("More", "WiÄ™cej")}</span>
+                <span>{t("More", "Więcej")}</span>
               </button>
               <button
                 type="button"
@@ -4108,8 +4437,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
               <button
                 type="button"
-                aria-label={t("End call", "ZakoÅ„cz rozmowÄ™")}
-                title={t("End call", "ZakoÅ„cz rozmowÄ™")}
+                aria-label={t("End call", "Zakończ rozmowę")}
+                title={t("End call", "Zakończ rozmowę")}
                 onPointerDown={(event) => event.stopPropagation()}
                 onClick={(event) => {
                   event.stopPropagation();
@@ -4118,7 +4447,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 style={{ ...callToolbarButtonStyle, gridColumn: "span 2", background: "#fee2e2", borderColor: "#fecaca", color: "#b91c1c" }}
               >
                 <PhoneOff size={19} />
-                <span>{t("End call", "ZakoÅ„cz")}</span>
+                <span>{t("End call", "Zakończ")}</span>
               </button>
             </div>
           ) : phase === "error" || phase === "ended" ? (
@@ -4446,6 +4775,15 @@ const callToolbarButtonStyle: React.CSSProperties = {
   lineHeight: 1.1,
   cursor: "pointer",
   touchAction: "manipulation",
+};
+const presenceChipStyle: React.CSSProperties = {
+  padding: "4px 8px",
+  border: "1px solid #e2e8f0",
+  borderRadius: 999,
+  background: "#f8fafc",
+  color: "#475569",
+  fontSize: 10,
+  fontWeight: 750,
 };
 const selfViewMenuButtonStyle: React.CSSProperties = {
   width: "100%",

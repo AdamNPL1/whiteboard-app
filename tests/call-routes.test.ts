@@ -4,9 +4,12 @@ import { NextRequest } from "next/server";
 const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   getActiveCalls: vi.fn(),
+  getBoardCallParticipants: vi.fn(),
   getCall: vi.fn(),
   startCall: vi.fn(),
   transitionCall: vi.fn(),
+  heartbeatDeviceSession: vi.fn(),
+  claimDeviceSession: vi.fn(),
   updateParticipantState: vi.fn(),
   getParticipantStates: vi.fn(),
   saveSignal: vi.fn(),
@@ -19,9 +22,12 @@ vi.mock("@/lib/supabase-auth", () => ({
 }));
 vi.mock("@/lib/call-store", () => ({
   getActiveCallsForUser: mocks.getActiveCalls,
+  getBoardCallParticipants: mocks.getBoardCallParticipants,
   getCallSessionForUser: mocks.getCall,
   startBoardCall: mocks.startCall,
   transitionBoardCall: mocks.transitionCall,
+  heartbeatCallDeviceSession: mocks.heartbeatDeviceSession,
+  claimCallDeviceSession: mocks.claimDeviceSession,
   updateCallParticipantState: mocks.updateParticipantState,
   getCallParticipantStates: mocks.getParticipantStates,
 }));
@@ -39,9 +45,13 @@ vi.mock("@/lib/rate-limit", () => ({
 vi.mock("@/lib/monitoring", () => ({
   reportOperationalError: vi.fn(),
 }));
+vi.mock("@/lib/call-push-store", () => ({
+  sendCallPush: vi.fn().mockResolvedValue(undefined),
+}));
 
 import { POST as startCall } from "@/app/api/calls/route";
 import { PATCH as transitionCall } from "@/app/api/calls/[callId]/route";
+import { POST as claimOwnership } from "@/app/api/calls/[callId]/ownership/route";
 import { POST as getTurnCredentials } from "@/app/api/calls/[callId]/turn-credentials/route";
 import {
   GET as getParticipantStates,
@@ -59,6 +69,7 @@ const caller = {
 const recipientId = "22222222-2222-4222-8222-222222222222";
 const callId = "33333333-3333-4333-8333-333333333333";
 const clientRequestId = "44444444-4444-4444-8444-444444444444";
+const browserSessionId = "66666666-6666-4666-8666-666666666666";
 const call = {
   id: callId,
   boardId: "board-1",
@@ -78,7 +89,10 @@ const call = {
 const request = (path: string, method: string, body?: unknown) =>
   new NextRequest(`https://scribooapp.com${path}`, {
     method,
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-scriboo-call-session": browserSessionId,
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 
@@ -87,7 +101,13 @@ describe("call API authorization", () => {
     vi.clearAllMocks();
     mocks.getUser.mockResolvedValue(caller);
     mocks.startCall.mockResolvedValue(call);
+    mocks.getBoardCallParticipants.mockResolvedValue({
+      board: { id: "board-1", name: "Board 1" },
+      participants: [{ userId: caller.id, name: "Caller", role: "owner" }],
+    });
     mocks.transitionCall.mockResolvedValue(call);
+    mocks.heartbeatDeviceSession.mockResolvedValue(true);
+    mocks.claimDeviceSession.mockResolvedValue(true);
     mocks.updateParticipantState.mockResolvedValue({
       callId,
       userId: caller.id,
@@ -157,6 +177,25 @@ describe("call API authorization", () => {
     expect(mocks.transitionCall).toHaveBeenCalledWith(
       callId, caller.id, "accept", undefined
     );
+  });
+
+  it("atomically claims a call for one browser session", async () => {
+    const response = await claimOwnership(
+      request(`/api/calls/${callId}/ownership`, "POST", { action: "claim" }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.claimDeviceSession).toHaveBeenCalledWith(callId, caller.id, browserSessionId);
+    expect(await response.json()).toEqual({ owned: true });
+  });
+
+  it("rejects a second session that does not own the call", async () => {
+    mocks.claimDeviceSession.mockResolvedValue(false);
+    const response = await claimOwnership(
+      request(`/api/calls/${callId}/ownership`, "POST", { action: "claim" }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(409);
   });
 
   it("returns the authoritative call with transition conflicts", async () => {

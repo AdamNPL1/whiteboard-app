@@ -308,6 +308,32 @@ export const heartbeatBoardCall = async (callId: string, userId: string) => {
   return mapCallSession(row);
 };
 
+export const claimCallDeviceSession = async (
+  callId: string,
+  userId: string,
+  sessionId: string
+) => {
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "claim_call_device_session",
+    { p_call_id: callId, p_user_id: userId, p_session_id: sessionId }
+  );
+  if (error) throw new Error(normalizeDatabaseCallError(error.message));
+  return data === true;
+};
+
+export const heartbeatCallDeviceSession = async (
+  callId: string,
+  userId: string,
+  sessionId: string
+) => {
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "heartbeat_call_device_session",
+    { p_call_id: callId, p_user_id: userId, p_session_id: sessionId }
+  );
+  if (error) throw new Error(normalizeDatabaseCallError(error.message));
+  return data === true;
+};
+
 type ParticipantStateRow = {
   call_id: string;
   user_id: string;

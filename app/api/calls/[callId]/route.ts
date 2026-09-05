@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getCallSessionForUser, transitionBoardCall } from "@/lib/call-store";
+import { getBoardCallParticipants, getCallSessionForUser, heartbeatCallDeviceSession, transitionBoardCall } from "@/lib/call-store";
+import { CALL_DEVICE_SESSION_HEADER, isValidCallSessionId } from "@/lib/call-device-session";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
+import { sendCallPush } from "@/lib/call-push-store";
 
 export const runtime = "nodejs";
 
@@ -64,23 +66,50 @@ export async function PATCH(
   });
   if (!limit.allowed) return rateLimitResponse(limit);
 
+  if (["accept", "cancel", "begin-ending", "end", "report-unavailable", "report-failed"].includes(action)) {
+    const sessionId = request.headers.get(CALL_DEVICE_SESSION_HEADER);
+    if (!isValidCallSessionId(sessionId) || !await heartbeatCallDeviceSession(callId, user.id, sessionId!).catch(() => false)) {
+      return NextResponse.json(
+        { error: "Call active on another device.", code: "CALL_SESSION_NOT_OWNER" },
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+  }
+
   try {
-    return NextResponse.json(
-      {
-        call: await transitionBoardCall(
+    const call = await transitionBoardCall(
+      callId,
+      user.id,
+      action as
+        | "accept"
+        | "decline"
+        | "cancel"
+        | "begin-ending"
+        | "end"
+        | "report-unavailable"
+        | "report-failed",
+      reason
+    );
+    if (action === "cancel" && reason === "ring_timeout") {
+      void getBoardCallParticipants(call.boardId, call.recipientUserId)
+        .then((context) => sendCallPush(call.recipientUserId, {
+          type: "missed-call",
           callId,
-          user.id,
-          action as
-            | "accept"
-            | "decline"
-            | "cancel"
-            | "begin-ending"
-            | "end"
-            | "report-unavailable"
-            | "report-failed",
-          reason
-        ),
-      },
+          boardId: call.boardId,
+          boardName: context.board.name,
+          callerName: context.participants.find((participant) => participant.userId === call.callerUserId)?.name ?? "Scriboo user",
+        }))
+        .catch((error) => console.warn("Could not send missed call push", error));
+    } else if (["accept", "decline", "cancel", "end", "report-unavailable", "report-failed"].includes(action)) {
+      void Promise.all([
+        sendCallPush(call.callerUserId, { type: "dismiss-call", callId }),
+        sendCallPush(call.recipientUserId, { type: "dismiss-call", callId }),
+      ]).catch((error) =>
+        console.warn("Could not dismiss call push", error)
+      );
+    }
+    return NextResponse.json(
+      { call },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
