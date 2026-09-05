@@ -17,8 +17,11 @@ import {
   Mic,
   MicOff,
   Minus,
+  MoreHorizontal,
   Phone,
   PhoneOff,
+  Settings2,
+  Users,
   Video,
   VideoOff,
   X,
@@ -37,6 +40,12 @@ import {
   shouldOpenParticipantMenuFromKey,
   toggleVideoFit,
 } from "@/lib/participant-media-controls";
+import {
+  clampCallPanelPosition,
+  readStoredCallLayout,
+  type CallLayoutMode,
+  type CallPanelDock,
+} from "@/lib/call-layout";
 import {
   aggregateParticipantConnectionStates,
   browserCallReducer,
@@ -72,6 +81,8 @@ import {
   chooseAvailableDevice,
   classifyAudioDeviceError,
 } from "@/lib/audio-device-management";
+
+const CALL_LAYOUT_STORAGE_KEY = "scriboo-call-layout-v1";
 import type { AudioDeviceState } from "@/lib/audio-device-management";
 
 type BoardContext = { id: string; name: string };
@@ -269,6 +280,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isParticipantVideoHidden, setIsParticipantVideoHidden] = useState(false);
   const [participantVideoFit, setParticipantVideoFit] = useState<"cover" | "contain">("cover");
   const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
+  const [isCallDeviceMenuOpen, setIsCallDeviceMenuOpen] = useState(false);
+  const [isCallParticipantsMenuOpen, setIsCallParticipantsMenuOpen] = useState(false);
+  const [isCallMoreMenuOpen, setIsCallMoreMenuOpen] = useState(false);
+  const [callLayoutMode, setCallLayoutMode] = useState<CallLayoutMode>("standard");
+  const [callPanelDock, setCallPanelDock] = useState<CallPanelDock>("top-right");
+  const [participantVideoHeight, setParticipantVideoHeight] = useState(210);
   const [callPanelPosition, setCallPanelPosition] = useState<{
     left: number;
     top: number;
@@ -341,6 +358,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const callLayoutLoadedRef = useRef(false);
   const microphoneMeterFrameRef = useRef<number | null>(null);
   const microphoneMeterContextRef = useRef<AudioContext | null>(null);
   const preCallSettingsLoadedRef = useRef(false);
@@ -365,6 +383,55 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     isMutedRef.current = isMuted;
   }, [isMuted]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const stored = readStoredCallLayout(
+      window.localStorage.getItem(CALL_LAYOUT_STORAGE_KEY)
+    );
+    queueMicrotask(() => {
+      if (cancelled) return;
+      if (stored) {
+        setCallLayoutMode(stored.mode);
+        setCallPanelDock(stored.dock);
+        setCallPanelPosition(stored.position);
+        setParticipantVideoHeight(stored.videoHeight);
+      }
+      callLayoutLoadedRef.current = true;
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!callLayoutLoadedRef.current) return;
+    window.localStorage.setItem(
+      CALL_LAYOUT_STORAGE_KEY,
+      JSON.stringify({
+        dock: callPanelDock,
+        mode: callLayoutMode,
+        position: callPanelPosition,
+        videoHeight: participantVideoHeight,
+      })
+    );
+  }, [callLayoutMode, callPanelDock, callPanelPosition, participantVideoHeight]);
+
+  useEffect(() => {
+    const keepPanelVisible = () => {
+      if (callPanelDock !== "free" || !callPanelPosition || !callPanelRef.current) return;
+      const rect = callPanelRef.current.getBoundingClientRect();
+      setCallPanelPosition((position) => position
+        ? clampCallPanelPosition(
+            position,
+            { width: rect.width, height: rect.height },
+            { width: window.innerWidth, height: window.innerHeight }
+          )
+        : null);
+    };
+    window.addEventListener("resize", keepPanelVisible);
+    return () => window.removeEventListener("resize", keepPanelVisible);
+  }, [callPanelDock, callPanelPosition]);
 
   const startMicrophoneMeter = useCallback((stream: MediaStream) => {
     if (microphoneMeterFrameRef.current !== null) {
@@ -2987,6 +3054,33 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     medium: { width: 240, height: 135 },
     large: { width: 320, height: 180 },
   }[selfViewSize];
+  const showCallVideo = callLayoutMode === "standard" || callLayoutMode === "video";
+  const callPanelWidth = isPreCall
+    ? 440
+    : callLayoutMode === "video" || isParticipantVideoPinned
+      ? 560
+      : callLayoutMode === "whiteboard"
+        ? 300
+        : 350;
+  const callPanelPlacementDock = callPanelDock === "free" && !callPanelPosition
+    ? "top-right"
+    : callPanelDock;
+  const callPanelDockStyle: React.CSSProperties = callPanelDock === "free" && callPanelPosition
+    ? { left: callPanelPosition.left, top: callPanelPosition.top }
+    : {
+        left: callPanelPlacementDock.endsWith("left")
+          ? "max(12px, env(safe-area-inset-left))"
+          : "auto",
+        right: callPanelPlacementDock.endsWith("right")
+          ? "max(12px, env(safe-area-inset-right))"
+          : "auto",
+        top: callPanelPlacementDock.startsWith("top")
+          ? "max(58px, calc(env(safe-area-inset-top) + 50px))"
+          : "auto",
+        bottom: callPanelPlacementDock.startsWith("bottom")
+          ? "max(12px, env(safe-area-inset-bottom))"
+          : "auto",
+      };
 
   const changeParticipantVolume = (volume: number) => {
     const normalized = normalizeParticipantVolume(volume);
@@ -3147,6 +3241,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       offsetX: event.clientX - rect.left,
       offsetY: event.clientY - rect.top,
     };
+    setCallPanelDock("free");
     setCallPanelPosition({ left: rect.left, top: rect.top });
   };
 
@@ -3155,18 +3250,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const panel = callPanelRef.current;
     if (!drag || drag.pointerId !== event.pointerId || !panel) return;
     event.preventDefault();
-    const margin = 8;
     const rect = panel.getBoundingClientRect();
-    setCallPanelPosition({
-      left: Math.min(
-        Math.max(margin, event.clientX - drag.offsetX),
-        Math.max(margin, window.innerWidth - rect.width - margin)
-      ),
-      top: Math.min(
-        Math.max(margin, event.clientY - drag.offsetY),
-        Math.max(margin, window.innerHeight - rect.height - margin)
-      ),
-    });
+    setCallPanelPosition(clampCallPanelPosition(
+      { left: event.clientX - drag.offsetX, top: event.clientY - drag.offsetY },
+      { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight }
+    ));
   };
 
   const endCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
@@ -3281,16 +3370,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           onPointerCancel={endCallPanelDrag}
           style={{
             position: "fixed",
-            right: callPanelPosition ? "auto" : "18px",
-            left: callPanelPosition ? `${callPanelPosition.left}px` : "auto",
-            top: callPanelPosition ? `${callPanelPosition.top}px` : "74px",
+            ...callPanelDockStyle,
             zIndex: 210,
-            width: isPreCall
-              ? "min(440px, calc(100vw - 36px))"
-              : isParticipantVideoPinned
-                ? "min(560px, calc(100vw - 36px))"
-                : "min(350px, calc(100vw - 36px))",
-            maxHeight: "calc(100dvh - 92px)",
+            width: `min(${callPanelWidth}px, calc(100vw - max(24px, env(safe-area-inset-left)) - max(24px, env(safe-area-inset-right))))`,
+            maxHeight: "calc(100dvh - max(76px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))",
             overflowY: isCallPanelMinimized ? "hidden" : "auto",
             padding: isCallPanelMinimized ? "10px 12px" : "18px",
             borderRadius: "20px",
@@ -3347,6 +3430,57 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           <div aria-live="polite" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#a16207" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {statusText}
           </div>
+          {phase === "connected" && isCallMoreMenuOpen && (
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <label style={{ ...preCallLabelStyle, minWidth: 0 }}>
+                {t("Layout", "UkÅ‚ad")}
+                <select
+                  aria-label={t("Call layout", "UkÅ‚ad rozmowy")}
+                  value={callLayoutMode}
+                  onChange={(event) => setCallLayoutMode(event.target.value as CallLayoutMode)}
+                  style={preCallSelectStyle}
+                >
+                  <option value="standard">{t("Standard", "Standardowy")}</option>
+                  <option value="video">{t("Video focus", "Widok wideo")}</option>
+                  <option value="audio">{t("Audio only", "Tylko dÅºwiÄ™k")}</option>
+                  <option value="whiteboard">{t("Whiteboard focus", "Widok tablicy")}</option>
+                </select>
+              </label>
+              <label style={{ ...preCallLabelStyle, minWidth: 0 }}>
+                {t("Panel position", "Pozycja panelu")}
+                <select
+                  aria-label={t("Dock call panel", "Przypnij panel rozmowy")}
+                  value={callPanelDock}
+                  onChange={(event) => {
+                    const dock = event.target.value as CallPanelDock;
+                    setCallPanelDock(dock);
+                    if (dock !== "free") setCallPanelPosition(null);
+                  }}
+                  style={preCallSelectStyle}
+                >
+                  <option value="top-right">{t("Top right", "Prawy gÃ³rny")}</option>
+                  <option value="top-left">{t("Top left", "Lewy gÃ³rny")}</option>
+                  <option value="bottom-right">{t("Bottom right", "Prawy dolny")}</option>
+                  <option value="bottom-left">{t("Bottom left", "Lewy dolny")}</option>
+                  <option value="free">{t("Free position", "Dowolna pozycja")}</option>
+                </select>
+              </label>
+              {showCallVideo && isRemoteVideoOn && (
+                <label style={{ ...preCallLabelStyle, gridColumn: "1 / -1" }}>
+                  {t("Video size", "Rozmiar wideo")} Â· {participantVideoHeight}px
+                  <input
+                    type="range"
+                    min="140"
+                    max="420"
+                    step="10"
+                    value={participantVideoHeight}
+                    onChange={(event) => setParticipantVideoHeight(Number(event.target.value))}
+                    style={{ width: "100%", accentColor: "#7c3aed" }}
+                  />
+                </label>
+              )}
+            </div>
+          )}
           {isPreCall && (
             <div style={{ display: "grid", gap: "12px" }}>
               <div style={preCallFieldStyle}>
@@ -3480,7 +3614,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               )}
             </div>
           )}
-          {phase === "connected" && (
+          {phase === "connected" && isCallDeviceMenuOpen && (
             <div style={{ display: "grid", gap: 10, padding: 12, border: "1px solid #e2e8f0", borderRadius: 12, background: "#f8fafc" }}>
               <strong style={{ fontSize: 13 }}>{t("Audio devices", "Urzadzenia audio")}</strong>
               <label style={preCallLabelStyle}>
@@ -3534,7 +3668,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {audioDeviceMessage && <div role="status" style={{ color: "#b45309", fontSize: 12 }}>{audioDeviceMessage}</div>}
             </div>
           )}
-          {phase === "connected" && (
+          {phase === "connected" && isCallParticipantsMenuOpen && (
             <label
               style={{
                 display: "grid",
@@ -3545,6 +3679,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 background: "#f8fafc",
               }}
             >
+              <span style={{ color: "#0f172a", fontSize: 13, fontWeight: 800 }}>
+                {peerName || t("Participant", "Uczestnik")} Â· {t("Connected", "PoÅ‚Ä…czono")}
+              </span>
               <span
                 style={{
                   color: "#475569",
@@ -3615,7 +3752,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && isRemoteVideoOn && !isParticipantVideoHidden && (
+          {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && (
             <div
               ref={participantVideoRef}
               tabIndex={0}
@@ -3637,7 +3774,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               style={{
                 position: "relative",
                 overflow: "visible",
-                aspectRatio: "16 / 9",
+                height: `${participantVideoHeight}px`,
+                minHeight: "140px",
+                maxHeight: "min(420px, calc(100dvh - 190px))",
                 borderRadius: "14px",
                 background: "#0f172a",
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
@@ -3736,7 +3875,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {phase === "connected" && isRemoteVideoOn && isParticipantVideoHidden && (
+          {phase === "connected" && showCallVideo && isRemoteVideoOn && isParticipantVideoHidden && (
             <button
               type="button"
               onClick={() => setIsParticipantVideoHidden(false)}
@@ -3794,7 +3933,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
 
-          {phase === "connected" && isCameraOn && !isSelfViewVisible && (
+          {phase === "connected" && showCallVideo && isCameraOn && !isSelfViewVisible && (
             <button
               type="button"
               onClick={() => setIsSelfViewVisible(true)}
@@ -3804,7 +3943,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && cameraDevices.length > 0 && (
+          {phase === "connected" && isCallDeviceMenuOpen && cameraDevices.length > 0 && (
             <label
               style={{
                 display: "grid",
@@ -3878,19 +4017,123 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 <Phone size={17} /> {t("Set up & answer", "Ustaw i odbierz")}
               </button>
             </div>
+          ) : phase === "connected" ? (
+            <div
+              role="toolbar"
+              aria-label={t("Call controls", "Sterowanie rozmowÄ…")}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(58px, 1fr))",
+                gap: 7,
+                paddingTop: 2,
+              }}
+            >
+              <button
+                type="button"
+                aria-label={isMuted ? t("Unmute microphone", "WÅ‚Ä…cz mikrofon") : t("Mute microphone", "Wycisz mikrofon")}
+                title={isMuted ? t("Unmute", "WÅ‚Ä…cz mikrofon") : t("Mute", "Wycisz")}
+                aria-pressed={isMuted}
+                onClick={toggleMute}
+                style={{ ...callToolbarButtonStyle, background: isMuted ? "#ede9fe" : "#f8fafc", color: isMuted ? "#6d28d9" : "#334155" }}
+              >
+                {isMuted ? <MicOff size={18} /> : <Mic size={18} />}
+                <span>{isMuted ? t("Unmute", "WÅ‚Ä…cz") : t("Mute", "Wycisz")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={isCameraOn ? t("Turn camera off", "WyÅ‚Ä…cz kamerÄ…") : t("Turn camera on", "WÅ‚Ä…cz kamerÄ…")}
+                title={isCameraOn ? t("Stop video", "WyÅ‚Ä…cz wideo") : t("Start video", "WÅ‚Ä…cz wideo")}
+                aria-pressed={isCameraOn}
+                disabled={isCameraStarting}
+                onClick={() => (isCameraOn ? void stopCamera() : void startCamera(selectedCameraId))}
+                style={{ ...callToolbarButtonStyle, background: isCameraOn ? "#ede9fe" : "#f8fafc", color: isCameraOn ? "#6d28d9" : "#334155", opacity: isCameraStarting ? 0.6 : 1 }}
+              >
+                {isCameraOn ? <VideoOff size={18} /> : <Video size={18} />}
+                <span>{isCameraStarting ? t("Starting", "Start") : t("Camera", "Kamera")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("Audio and device settings", "Ustawienia dÅºwiÄ™ku i urzÄ…dzeÅ„")}
+                title={t("Audio and devices", "DÅºwiÄ™k i urzÄ…dzenia")}
+                aria-expanded={isCallDeviceMenuOpen}
+                onClick={() => {
+                  setIsCallDeviceMenuOpen((open) => !open);
+                  setIsCallParticipantsMenuOpen(false);
+                  setIsCallMoreMenuOpen(false);
+                }}
+                style={{ ...callToolbarButtonStyle, background: isCallDeviceMenuOpen ? "#ede9fe" : "#f8fafc", color: isCallDeviceMenuOpen ? "#6d28d9" : "#334155" }}
+              >
+                <Settings2 size={18} />
+                <span>{t("Devices", "UrzÄ…dzenia")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("Participants", "Uczestnicy")}
+                title={t("Participants", "Uczestnicy")}
+                aria-expanded={isCallParticipantsMenuOpen}
+                onClick={() => {
+                  setIsCallParticipantsMenuOpen((open) => !open);
+                  setIsCallDeviceMenuOpen(false);
+                  setIsCallMoreMenuOpen(false);
+                }}
+                style={{ ...callToolbarButtonStyle, background: isCallParticipantsMenuOpen ? "#ede9fe" : "#f8fafc", color: isCallParticipantsMenuOpen ? "#6d28d9" : "#334155" }}
+              >
+                <Users size={18} />
+                <span>{t("People", "Osoby")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("More call options", "WiÄ™cej opcji rozmowy")}
+                title={t("More options", "WiÄ™cej opcji")}
+                aria-expanded={isCallMoreMenuOpen}
+                onClick={() => {
+                  setIsCallMoreMenuOpen((open) => !open);
+                  setIsCallDeviceMenuOpen(false);
+                  setIsCallParticipantsMenuOpen(false);
+                }}
+                style={{ ...callToolbarButtonStyle, background: isCallMoreMenuOpen ? "#ede9fe" : "#f8fafc", color: isCallMoreMenuOpen ? "#6d28d9" : "#334155" }}
+              >
+                <MoreHorizontal size={19} />
+                <span>{t("More", "WiÄ™cej")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("Minimize call panel", "Zminimalizuj panel rozmowy")}
+                title={t("Minimize", "Zminimalizuj")}
+                onClick={() => setIsCallPanelMinimized(true)}
+                style={callToolbarButtonStyle}
+              >
+                <Minus size={19} />
+                <span>{t("Minimize", "Minimalizuj")}</span>
+              </button>
+              <button
+                type="button"
+                aria-label={t("End call", "ZakoÅ„cz rozmowÄ™")}
+                title={t("End call", "ZakoÅ„cz rozmowÄ™")}
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  void endCall();
+                }}
+                style={{ ...callToolbarButtonStyle, gridColumn: "span 2", background: "#fee2e2", borderColor: "#fecaca", color: "#b91c1c" }}
+              >
+                <PhoneOff size={19} />
+                <span>{t("End call", "ZakoÅ„cz")}</span>
+              </button>
+            </div>
           ) : phase === "error" || phase === "ended" ? (
             <button type="button" onClick={resetToIdle} style={{ ...callActionStyle, background: "#f1f5f9", color: "#334155" }}>
               {t("Close", "Zamknij")}
             </button>
           ) : (
-            <div style={{ display: "grid", gridTemplateColumns: phase === "outgoing" ? "1fr" : phase === "connected" ? "1fr 1fr 1fr" : "1fr 1fr", gap: "9px" }}>
+            <div style={{ display: "grid", gridTemplateColumns: phase === "outgoing" ? "1fr" : "1fr 1fr", gap: "9px" }}>
               {phase !== "outgoing" && (
                 <button type="button" onClick={toggleMute} aria-pressed={isMuted} style={{ ...callActionStyle, background: isMuted ? "#ede9fe" : "#f1f5f9", color: isMuted ? "#6d28d9" : "#334155" }}>
                   {isMuted ? <MicOff size={17} /> : <Mic size={17} />}
                   {isMuted ? t("Unmute", "Włącz mikrofon") : t("Mute", "Wycisz")}
                 </button>
               )}
-              {phase === "connected" && (
+              {phaseRef.current === "connected" && (
                 <button
                   type="button"
                   onClick={() => (isCameraOn ? void stopCamera() : void startCamera(selectedCameraId))}
@@ -3930,7 +4173,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         </section>
       )}
 
-      {phase === "connected" && isCameraOn && isSelfViewVisible && (
+      {phase === "connected" && showCallVideo && isCameraOn && isSelfViewVisible && (
         <div
           ref={selfViewRef}
           onPointerDown={beginSelfViewDrag}
@@ -4183,6 +4426,26 @@ const callActionStyle: React.CSSProperties = {
   fontSize: "13px",
   fontWeight: 800,
   cursor: "pointer",
+};
+const callToolbarButtonStyle: React.CSSProperties = {
+  minWidth: 0,
+  minHeight: 52,
+  padding: "6px 5px",
+  border: "1px solid #dbe3ef",
+  borderRadius: 11,
+  background: "#f8fafc",
+  color: "#334155",
+  display: "inline-flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 4,
+  font: "inherit",
+  fontSize: 10,
+  fontWeight: 750,
+  lineHeight: 1.1,
+  cursor: "pointer",
+  touchAction: "manipulation",
 };
 const selfViewMenuButtonStyle: React.CSSProperties = {
   width: "100%",
