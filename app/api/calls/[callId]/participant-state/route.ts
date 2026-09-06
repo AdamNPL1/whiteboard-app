@@ -31,7 +31,7 @@ export async function GET(
     );
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
-    if (code === "CALL_NOT_FOUND") {
+    if (code === "CALL_NOT_FOUND" || code === "CALL_FORBIDDEN") {
       return NextResponse.json({ error: "Call not found." }, { status: 404 });
     }
     return NextResponse.json({ error: "Could not load connection state." }, { status: 500 });
@@ -69,7 +69,7 @@ export async function PATCH(
     );
   } catch (error) {
     const code = error instanceof Error ? error.message : "";
-    if (code === "CALL_NOT_FOUND") {
+    if (code === "CALL_NOT_FOUND" || code === "CALL_FORBIDDEN") {
       return NextResponse.json({ error: "Call not found." }, { status: 404 });
     }
     if (code === "CALL_VERSION_CONFLICT" || code === "CALL_TRANSITION_CONFLICT") {

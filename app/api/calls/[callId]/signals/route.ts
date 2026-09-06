@@ -18,7 +18,10 @@ const uuidPattern =
 
 const signalingError = (error: unknown) => {
   const code = error instanceof Error ? error.message.split(":", 1)[0] : "";
-  if (code === "CALL_NOT_FOUND") return { status: 404, message: "Call not found.", code };
+  if (code === "CALL_NOT_FOUND" || code === "CALL_FORBIDDEN") {
+    // Do not disclose whether a call exists to a user whose board access was revoked.
+    return { status: 404, message: "Call not found.", code: "CALL_NOT_FOUND" };
+  }
   if (code === "CALL_SIGNALING_VERSION_CONFLICT" || code === "CALL_SIGNALING_NOT_ACTIVE") {
     return { status: 409, message: "This signaling attempt is no longer active.", code };
   }

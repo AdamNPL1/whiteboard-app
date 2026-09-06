@@ -235,6 +235,19 @@ export const getCallSessionForUser = async (callId: string, userId: string) => {
   if (!row || (row.caller_user_id !== userId && row.recipient_user_id !== userId)) {
     throw new Error("CALL_NOT_FOUND");
   }
+  // Call membership alone is not permanent authorization. Board access can be
+  // revoked while a browser still holds a valid call ID, so every call API
+  // using this loader re-checks the current authoritative board membership.
+  const { board, shares } = await loadBoardAndShares(row.board_id).catch((error) => {
+    if (error instanceof Error && error.message === "CALL_BOARD_NOT_FOUND") {
+      throw new Error("CALL_FORBIDDEN");
+    }
+    throw error;
+  });
+  const canAccessBoard = board.user_id === userId || shares.some(
+    (share) => share.recipient_user_id === userId && share.status === "accepted"
+  );
+  if (!canAccessBoard) throw new Error("CALL_FORBIDDEN");
   return mapCallSession(row);
 };
 
@@ -252,7 +265,7 @@ export const getActiveCallsForUser = async (userId: string) => {
     .limit(10);
 
   if (error) throw new Error(`CALL_READ_FAILED:${error.message}`);
-  return ((data ?? []) as CallSessionRow[])
+  const liveCalls = ((data ?? []) as CallSessionRow[])
     .map(mapCallSession)
     .filter(
       (call) => {
@@ -266,6 +279,17 @@ export const getActiveCallsForUser = async (userId: string) => {
         );
       }
     );
+  const authorizedCalls = await Promise.all(liveCalls.map(async (call) => {
+    try {
+      const { board, shares } = await loadBoardAndShares(call.boardId);
+      return board.user_id === userId || shares.some(
+        (share) => share.recipient_user_id === userId && share.status === "accepted"
+      ) ? call : null;
+    } catch {
+      return null;
+    }
+  }));
+  return authorizedCalls.filter((call): call is CallSession => call !== null);
 };
 
 export const transitionBoardCall = async (
@@ -281,6 +305,7 @@ export const transitionBoardCall = async (
     | "report-failed",
   reason?: string
 ) => {
+  await getCallSessionForUser(callId, userId);
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "transition_board_call",
     {
@@ -298,6 +323,7 @@ export const transitionBoardCall = async (
 };
 
 export const heartbeatBoardCall = async (callId: string, userId: string) => {
+  await getCallSessionForUser(callId, userId);
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "heartbeat_board_call",
     { p_call_id: callId, p_user_id: userId }
@@ -313,6 +339,7 @@ export const claimCallDeviceSession = async (
   userId: string,
   sessionId: string
 ) => {
+  await getCallSessionForUser(callId, userId);
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "claim_call_device_session",
     { p_call_id: callId, p_user_id: userId, p_session_id: sessionId }
@@ -326,6 +353,7 @@ export const heartbeatCallDeviceSession = async (
   userId: string,
   sessionId: string
 ) => {
+  await getCallSessionForUser(callId, userId);
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "heartbeat_call_device_session",
     { p_call_id: callId, p_user_id: userId, p_session_id: sessionId }
@@ -350,6 +378,7 @@ export const updateCallParticipantState = async (
   reason: string,
   expectedVersion?: number
 ): Promise<CallParticipantState> => {
+  await getCallSessionForUser(callId, userId);
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "update_call_participant_state",
     {

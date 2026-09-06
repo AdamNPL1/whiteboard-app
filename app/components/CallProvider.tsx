@@ -93,6 +93,10 @@ import {
   chooseAvailableDevice,
   classifyAudioDeviceError,
 } from "@/lib/audio-device-management";
+import {
+  getCallKeyboardAction,
+  isEditableCallShortcutTarget,
+} from "@/lib/call-accessibility";
 
 const CALL_LAYOUT_STORAGE_KEY = "scriboo-call-layout-v1";
 import type { AudioDeviceState } from "@/lib/audio-device-management";
@@ -300,6 +304,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isCallDeviceMenuOpen, setIsCallDeviceMenuOpen] = useState(false);
   const [isCallParticipantsMenuOpen, setIsCallParticipantsMenuOpen] = useState(false);
   const [isCallMoreMenuOpen, setIsCallMoreMenuOpen] = useState(false);
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [callLayoutMode, setCallLayoutMode] = useState<CallLayoutMode>("standard");
   const [callPanelDock, setCallPanelDock] = useState<CallPanelDock>("top-right");
   const [participantVideoHeight, setParticipantVideoHeight] = useState(210);
@@ -371,6 +376,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callSoundIntervalRef = useRef<number | null>(null);
   const activeCallTonesRef = useRef(new Set<OscillatorNode>());
   const callPanelRef = useRef<HTMLElement | null>(null);
+  const previousFocusRef = useRef<HTMLElement | null>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement | null>(null);
+  const pushToTalkActiveRef = useRef(false);
   const callPanelDragRef = useRef<{
     pointerId: number;
     offsetX: number;
@@ -3179,6 +3187,80 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   useEffect(() => {
+    if (phase !== "incoming" && phase !== "precall-incoming") return;
+    previousFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    window.requestAnimationFrame(() => callPanelRef.current?.focus());
+  }, [phase]);
+
+  useEffect(() => {
+    if (phase !== "idle") return;
+    previousFocusRef.current?.focus();
+    previousFocusRef.current = null;
+  }, [phase]);
+
+  useEffect(() => {
+    const closeOpenCallSurface = () => {
+      if (isShortcutHelpOpen) setIsShortcutHelpOpen(false);
+      else if (isParticipantVideoMenuOpen) setIsParticipantVideoMenuOpen(false);
+      else if (isSelfViewMenuOpen) setIsSelfViewMenuOpen(false);
+      else if (isCallDeviceMenuOpen) setIsCallDeviceMenuOpen(false);
+      else if (isCallParticipantsMenuOpen) setIsCallParticipantsMenuOpen(false);
+      else if (isCallMoreMenuOpen) setIsCallMoreMenuOpen(false);
+      else return false;
+      window.requestAnimationFrame(() => menuTriggerRef.current?.focus());
+      return true;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape" && closeOpenCallSurface()) {
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
+      if (isEditableCallShortcutTarget(event.target)) return;
+      const action = getCallKeyboardAction(event, {
+        connected: phaseRef.current === "connected",
+        muted: isMutedRef.current,
+      });
+      if (!action) return;
+      event.preventDefault();
+      if (action === "toggle-microphone") toggleMute();
+      if (action === "toggle-camera") {
+        if (localCameraTrackRef.current) void stopCamera();
+        else void startCamera(selectedCameraId);
+      }
+      if (action === "show-shortcuts") setIsShortcutHelpOpen(true);
+      if (action === "push-to-talk-start") {
+        pushToTalkActiveRef.current = true;
+        localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = true; });
+      }
+    };
+    const onKeyUp = (event: KeyboardEvent) => {
+      if (isEditableCallShortcutTarget(event.target)) return;
+      const action = getCallKeyboardAction(event, {
+        connected: phaseRef.current === "connected",
+        muted: isMutedRef.current,
+        keyUp: true,
+      });
+      if (action !== "push-to-talk-stop" || !pushToTalkActiveRef.current) return;
+      event.preventDefault();
+      pushToTalkActiveRef.current = false;
+      localStreamRef.current?.getAudioTracks().forEach((track) => { track.enabled = false; });
+    };
+    window.addEventListener("keydown", onKeyDown, true);
+    window.addEventListener("keyup", onKeyUp, true);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown, true);
+      window.removeEventListener("keyup", onKeyUp, true);
+    };
+  }, [
+    isCallDeviceMenuOpen, isCallMoreMenuOpen, isCallParticipantsMenuOpen,
+    isParticipantVideoMenuOpen, isSelfViewMenuOpen, isShortcutHelpOpen,
+    selectedCameraId, startCamera, stopCamera, toggleMute,
+  ]);
+
+  useEffect(() => {
     if (!isCameraOn || !localCameraTrackRef.current || !localVideoRef.current) return;
     localVideoRef.current.srcObject = new MediaStream([localCameraTrackRef.current]);
     void localVideoRef.current.play().catch(() => undefined);
@@ -3617,6 +3699,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         <section
           ref={callPanelRef}
           className="scriboo-call-panel"
+          tabIndex={-1}
           aria-label={t("Audio call", "Połączenie audio")}
           onPointerDown={beginCallPanelDrag}
           onPointerMove={moveCallPanel}
@@ -3686,8 +3769,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           </div>
           {!isCallPanelMinimized && (
             <>
-          <div aria-live="polite" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#a16207" : "#475569", fontSize: "13px", fontWeight: 650 }}>
+          <div role="status" aria-live="polite" aria-atomic="true" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#854d0e" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {visibleStatusText}
+          </div>
+          <div className="scriboo-sr-only" aria-live="polite" aria-atomic="true">
+            {isMuted ? t("Your microphone is muted", "Twój mikrofon jest wyciszony") : ""}
           </div>
           {phase === "connected" && (
             <div aria-label={t("Participant presence", "Obecność uczestnika")} style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
@@ -4139,7 +4225,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 aria-label={t("Participant options", "Opcje uczestnika")}
                 aria-expanded={isParticipantVideoMenuOpen}
-                onClick={() => setIsParticipantVideoMenuOpen((open) => !open)}
+                onClick={(event) => {
+                  menuTriggerRef.current = event.currentTarget;
+                  setIsParticipantVideoMenuOpen((open) => !open);
+                }}
                 style={{
                   position: "absolute",
                   top: 8,
@@ -4385,7 +4474,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 aria-label={t("Audio and device settings", "Ustawienia dźwięku i urządzeń")}
                 title={t("Audio and devices", "Dźwięk i urządzenia")}
                 aria-expanded={isCallDeviceMenuOpen}
-                onClick={() => {
+                onClick={(event) => {
+                  menuTriggerRef.current = event.currentTarget;
                   setIsCallDeviceMenuOpen((open) => !open);
                   setIsCallParticipantsMenuOpen(false);
                   setIsCallMoreMenuOpen(false);
@@ -4400,7 +4490,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 aria-label={t("Participants", "Uczestnicy")}
                 title={t("Participants", "Uczestnicy")}
                 aria-expanded={isCallParticipantsMenuOpen}
-                onClick={() => {
+                onClick={(event) => {
+                  menuTriggerRef.current = event.currentTarget;
                   setIsCallParticipantsMenuOpen((open) => !open);
                   setIsCallDeviceMenuOpen(false);
                   setIsCallMoreMenuOpen(false);
@@ -4415,7 +4506,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 aria-label={t("More call options", "Więcej opcji rozmowy")}
                 title={t("More options", "Więcej opcji")}
                 aria-expanded={isCallMoreMenuOpen}
-                onClick={() => {
+                onClick={(event) => {
+                  menuTriggerRef.current = event.currentTarget;
                   setIsCallMoreMenuOpen((open) => !open);
                   setIsCallDeviceMenuOpen(false);
                   setIsCallParticipantsMenuOpen(false);
@@ -4570,7 +4662,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             type="button"
             aria-label={t("Self-view options", "Opcje własnego podglądu")}
             aria-expanded={isSelfViewMenuOpen}
-            onClick={() => setIsSelfViewMenuOpen((open) => !open)}
+            onClick={(event) => {
+              menuTriggerRef.current = event.currentTarget;
+              setIsSelfViewMenuOpen((open) => !open);
+            }}
             style={{
               position: "absolute",
               top: 8,
@@ -4644,6 +4739,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           )}
+        </div>
+      )}
+      {phase === "connected" && isShortcutHelpOpen && (
+        <div style={overlayStyle} role="presentation">
+          <div className="scriboo-call-dialog" role="dialog" aria-modal="true" aria-labelledby="call-shortcut-title" style={{ ...dialogStyle, width: "min(420px, calc(100vw - 32px))" }}>
+            <strong id="call-shortcut-title">{t("Call keyboard shortcuts", "Skróty klawiaturowe rozmowy")}</strong>
+            <span><kbd>Ctrl/Cmd + D</kbd> — {t("mute or unmute", "wycisz lub włącz mikrofon")}</span>
+            <span><kbd>Ctrl/Cmd + E</kbd> — {t("turn camera on or off", "włącz lub wyłącz kamerę")}</span>
+            <span><kbd>{t("Hold Space", "Przytrzymaj spację")}</kbd> — {t("temporarily unmute", "tymczasowo włącz mikrofon")}</span>
+            <span><kbd>Esc</kbd> — {t("close this window or an open menu", "zamknij to okno lub otwarte menu")}</span>
+            <button type="button" autoFocus onClick={() => setIsShortcutHelpOpen(false)} style={preCallSmallButtonStyle}>{t("Close shortcut help", "Zamknij pomoc skrótów")}</button>
+          </div>
         </div>
       )}
     </CallContext.Provider>
