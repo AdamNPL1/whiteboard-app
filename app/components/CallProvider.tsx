@@ -1609,6 +1609,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }).catch(() => {
             localMediaAnnouncedRef.current = false;
           });
+          // Some browsers finish the initial audio transport before applying
+          // a preview camera track to the negotiated video m-line. Force one
+          // post-connect negotiation when this participant joined with video.
+          if (localCameraTrackRef.current) {
+            void requestRenegotiation().catch(() => {
+              localMediaAnnouncedRef.current = false;
+            });
+          }
         }
       };
       connection.onconnectionstatechange = () => {
@@ -1764,6 +1772,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         );
         previousAudioPacketsRef.current = { sent: packetsSent, received: packetsReceived };
         previousVideoPacketsReceivedRef.current = videoPacketsReceived;
+        // The media transport is authoritative. A delayed camera-state
+        // broadcast must never hide video that is demonstrably arriving.
+        if (
+          videoPacketsReceived > 0 &&
+          remoteVideoStreamRef.current?.getVideoTracks().some(
+            (track) => track.readyState === "live"
+          )
+        ) {
+          remoteVideoIntentRef.current = true;
+          setIsRemoteVideoOn(true);
+        }
         const audioPacketTotal = packetsReceived + audioPacketsLost;
         const videoPacketTotal = videoPacketsReceived + videoPacketsLost;
         setCallQuality(withCallQualityRating({
@@ -1898,7 +1917,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, requestRenegotiation, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
