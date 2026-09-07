@@ -351,6 +351,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const signalRetryIntervalRef = useRef<number | null>(null);
   const signalingRecoveryRef = useRef<() => void>(() => undefined);
   const makingOfferRef = useRef(false);
+  const renegotiationPendingRef = useRef(false);
   const ignoreOfferRef = useRef(false);
   const settingRemoteAnswerRef = useRef(false);
   const signalHandlerRef = useRef<(payload: unknown) => void>(() => undefined);
@@ -432,7 +433,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({ action: "claim" }),
       cache: "no-store",
     });
-    if (!response.ok) return false;
+    if (response.status === 409) return false;
+    if (!response.ok) {
+      const result = await response.json().catch(() => ({})) as { error?: string };
+      throw new Error(result.error || "Could not verify call ownership.");
+    }
     const result = await response.json() as { owned?: boolean };
     if (!result.owned) return false;
     if (typeof BroadcastChannel !== "undefined") {
@@ -784,6 +789,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     signalSequenceRef.current = 0;
     pendingSignalsRef.current.clear();
     makingOfferRef.current = false;
+    renegotiationPendingRef.current = false;
     ignoreOfferRef.current = false;
     settingRemoteAnswerRef.current = false;
     if (signalRetryIntervalRef.current !== null) {
@@ -1173,7 +1179,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   const createAndSendOffer = useCallback(async (iceRestart = false) => {
     const connection = peerConnectionRef.current;
-    if (!connection || connection.signalingState !== "stable") return;
+    if (!connection) return;
+    if (connection.signalingState !== "stable" || makingOfferRef.current) {
+      renegotiationPendingRef.current = true;
+      return;
+    }
+    renegotiationPendingRef.current = false;
     const videoTransceiver = localVideoTransceiverRef.current;
     if (videoTransceiver && videoTransceiver.direction !== "stopped") {
       videoTransceiver.direction = getLocalVideoDirection(
@@ -1200,12 +1211,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const activeCall = callRef.current;
     const activeUser = userRef.current;
     if (!activeCall || !activeUser || phaseRef.current !== "connected") return;
-    if (activeUser.id === activeCall.callerUserId) {
-      await createAndSendOffer();
-    } else {
-      await sendSignal({ kind: "renegotiate" });
-    }
-  }, [createAndSendOffer, sendSignal]);
+    // Both participants can safely offer. If signaling is temporarily busy,
+    // createAndSendOffer records the request and the stable-state handler
+    // retries it instead of silently losing a camera change.
+    await createAndSendOffer();
+  }, [createAndSendOffer]);
 
   const resendPendingSignals = useCallback(() => {
     const channel = callChannelRef.current;
@@ -1525,6 +1535,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
         setPhase("connected");
         setMessage("");
+        if (renegotiationPendingRef.current) {
+          void createAndSendOffer().catch(() => undefined);
+        }
       };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
@@ -1569,6 +1582,20 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       connection.onsignalingstatechange = () => {
         reportRealtimeDiagnostics({ signalingState: connection.signalingState });
+        if (
+          connection.signalingState === "stable" &&
+          renegotiationPendingRef.current &&
+          phaseRef.current === "connected"
+        ) {
+          void createAndSendOffer().catch(() => undefined);
+        }
+      };
+      connection.onnegotiationneeded = () => {
+        if (phaseRef.current === "connected") {
+          void requestRenegotiation().catch(() => undefined);
+        } else {
+          renegotiationPendingRef.current = true;
+        }
       };
 
       if (callStatsIntervalRef.current !== null) {
@@ -1813,7 +1840,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, requestRenegotiation, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(

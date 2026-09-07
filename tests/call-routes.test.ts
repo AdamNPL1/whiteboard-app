@@ -233,6 +233,31 @@ describe("call API authorization", () => {
     expect(response.status).toBe(409);
   });
 
+  it("does not report another device when ownership storage is unavailable", async () => {
+    mocks.claimDeviceSession.mockRejectedValue(new Error("database unavailable"));
+    const response = await claimOwnership(
+      request(`/api/calls/${callId}/ownership`, "POST", { action: "claim" }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "CALL_OWNERSHIP_UNAVAILABLE",
+    });
+  });
+
+  it("does not report another device when an ownership heartbeat fails", async () => {
+    mocks.heartbeatDeviceSession.mockRejectedValue(new Error("database unavailable"));
+    const response = await transitionCall(
+      request(`/api/calls/${callId}`, "PATCH", { action: "accept" }),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      code: "CALL_OWNERSHIP_UNAVAILABLE",
+    });
+    expect(mocks.transitionCall).not.toHaveBeenCalled();
+  });
+
   it("returns the authoritative call with transition conflicts", async () => {
     mocks.transitionCall.mockRejectedValue(new Error("CALL_TRANSITION_CONFLICT"));
     mocks.getCall.mockResolvedValue({ ...call, status: "ended", outcome: "missed" });

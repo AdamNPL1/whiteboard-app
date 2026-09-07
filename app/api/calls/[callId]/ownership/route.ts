@@ -27,6 +27,12 @@ export async function POST(
       : await heartbeatCallDeviceSession(callId, user.id, sessionId!);
     return NextResponse.json({ owned }, { status: owned ? 200 : 409, headers: { "Cache-Control": "no-store" } });
   } catch {
-    return NextResponse.json({ error: "Could not verify call ownership." }, { status: 409 });
+    // A database/network failure is not evidence that another device owns the
+    // call. Returning 409 here caused transient backend errors to be shown as
+    // the misleading "Call active on another device" message.
+    return NextResponse.json(
+      { error: "Could not verify call ownership.", code: "CALL_OWNERSHIP_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
   }
 }

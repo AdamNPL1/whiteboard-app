@@ -68,7 +68,22 @@ export async function PATCH(
 
   if (["accept", "cancel", "begin-ending", "end", "report-unavailable", "report-failed"].includes(action)) {
     const sessionId = request.headers.get(CALL_DEVICE_SESSION_HEADER);
-    if (!isValidCallSessionId(sessionId) || !await heartbeatCallDeviceSession(callId, user.id, sessionId!).catch(() => false)) {
+    if (!isValidCallSessionId(sessionId)) {
+      return NextResponse.json(
+        { error: "Invalid call session.", code: "CALL_SESSION_INVALID" },
+        { status: 400, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    let ownsCall: boolean;
+    try {
+      ownsCall = await heartbeatCallDeviceSession(callId, user.id, sessionId!);
+    } catch {
+      return NextResponse.json(
+        { error: "Could not verify call ownership.", code: "CALL_OWNERSHIP_UNAVAILABLE" },
+        { status: 503, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    if (!ownsCall) {
       return NextResponse.json(
         { error: "Call active on another device.", code: "CALL_SESSION_NOT_OWNER" },
         { status: 409, headers: { "Cache-Control": "no-store" } }
