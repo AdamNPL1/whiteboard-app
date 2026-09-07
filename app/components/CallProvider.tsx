@@ -11,6 +11,7 @@ import {
   useState,
 } from "react";
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { createPortal } from "react-dom";
 import {
   LoaderCircle,
   Maximize2,
@@ -100,6 +101,7 @@ import {
 import { claimIncomingRing, releaseIncomingRing } from "@/lib/call-ring-coordinator";
 
 const CALL_LAYOUT_STORAGE_KEY = "scriboo-call-layout-v1";
+const VIDEO_TILE_LAYOUT_STORAGE_KEY = "scriboo-video-tile-layout-v1";
 import type { AudioDeviceState } from "@/lib/audio-device-management";
 
 type BoardContext = { id: string; name: string };
@@ -267,6 +269,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isSelfViewMirrored, setIsSelfViewMirrored] = useState(true);
   const [selfViewFit, setSelfViewFit] = useState<"cover" | "contain">("cover");
   const [selfViewSize, setSelfViewSize] = useState<"small" | "medium" | "large">("medium");
+  const [selfViewDimensions, setSelfViewDimensions] = useState({ width: 240, height: 135 });
   const [selfViewPosition, setSelfViewPosition] = useState<{ left: number; top: number } | null>(null);
   const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceOption[]>([]);
   const [speakerDevices, setSpeakerDevices] = useState<MediaDeviceOption[]>([]);
@@ -309,6 +312,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [callLayoutMode, setCallLayoutMode] = useState<CallLayoutMode>("standard");
   const [callPanelDock, setCallPanelDock] = useState<CallPanelDock>("top-right");
   const [participantVideoHeight, setParticipantVideoHeight] = useState(210);
+  const [participantVideoWidth, setParticipantVideoWidth] = useState(300);
+  const [participantVideoPosition, setParticipantVideoPosition] = useState<{ left: number; top: number } | null>(null);
   const [callPanelPosition, setCallPanelPosition] = useState<{
     left: number;
     top: number;
@@ -332,12 +337,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     offsetX: number;
     offsetY: number;
   } | null>(null);
+  const videoResizeRef = useRef<{
+    tile: "self" | "participant";
+    pointerId: number;
+    startX: number;
+    startY: number;
+    width: number;
+    height: number;
+  } | null>(null);
   const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const localCameraIntentRef = useRef(false);
   const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const participantVideoRef = useRef<HTMLDivElement | null>(null);
+  const participantVideoDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
   const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<
@@ -387,6 +405,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     offsetY: number;
   } | null>(null);
   const callLayoutLoadedRef = useRef(false);
+  const videoTileLayoutLoadedRef = useRef(false);
   const microphoneMeterFrameRef = useRef<number | null>(null);
   const microphoneMeterContextRef = useRef<AudioContext | null>(null);
   const preCallSettingsLoadedRef = useRef(false);
@@ -490,6 +509,46 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       })
     );
   }, [callLayoutMode, callPanelDock, callPanelPosition, participantVideoHeight]);
+
+  useEffect(() => {
+    try {
+      const stored = JSON.parse(window.localStorage.getItem(VIDEO_TILE_LAYOUT_STORAGE_KEY) || "null") as {
+        self?: { position?: { left: number; top: number } | null; width?: number; height?: number };
+        participant?: { position?: { left: number; top: number } | null; width?: number; height?: number };
+      } | null;
+      if (stored?.self) {
+        setSelfViewPosition(stored.self.position ?? null);
+        setSelfViewDimensions({ width: Math.max(160, stored.self.width ?? 240), height: Math.max(90, stored.self.height ?? 135) });
+      }
+      if (stored?.participant) {
+        setParticipantVideoPosition(stored.participant.position ?? null);
+        setParticipantVideoWidth(Math.max(180, stored.participant.width ?? 300));
+        setParticipantVideoHeight(Math.max(110, stored.participant.height ?? 169));
+      }
+    } catch { /* Ignore an obsolete saved layout. */ }
+    videoTileLayoutLoadedRef.current = true;
+  }, []);
+
+  useEffect(() => {
+    if (!videoTileLayoutLoadedRef.current) return;
+    window.localStorage.setItem(VIDEO_TILE_LAYOUT_STORAGE_KEY, JSON.stringify({
+      self: { position: selfViewPosition, ...selfViewDimensions },
+      participant: { position: participantVideoPosition, width: participantVideoWidth, height: participantVideoHeight },
+    }));
+  }, [participantVideoHeight, participantVideoPosition, participantVideoWidth, selfViewDimensions, selfViewPosition]);
+
+  useEffect(() => {
+    const keepVideoTilesVisible = () => {
+      const clamp = (position: { left: number; top: number } | null, width: number, height: number) => position ? {
+        left: Math.min(Math.max(8, position.left), Math.max(8, window.innerWidth - width - 8)),
+        top: Math.min(Math.max(8, position.top), Math.max(8, window.innerHeight - height - 8)),
+      } : null;
+      setSelfViewPosition((position) => clamp(position, selfViewDimensions.width, selfViewDimensions.height));
+      setParticipantVideoPosition((position) => clamp(position, participantVideoWidth, participantVideoHeight));
+    };
+    window.addEventListener("resize", keepVideoTilesVisible);
+    return () => window.removeEventListener("resize", keepVideoTilesVisible);
+  }, [participantVideoHeight, participantVideoWidth, selfViewDimensions]);
 
   useEffect(() => {
     const keepPanelVisible = () => {
@@ -3430,11 +3489,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return labels[state];
   };
 
-  const selfViewDimensions = {
-    small: { width: 180, height: 102 },
-    medium: { width: 240, height: 135 },
-    large: { width: 320, height: 180 },
-  }[selfViewSize];
   const showCallVideo = callLayoutMode === "standard" || callLayoutMode === "video";
   const callPanelWidth = isPreCall
     ? 440
@@ -3586,7 +3640,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   };
 
   const beginSelfViewDrag = (event: React.PointerEvent<HTMLDivElement>) => {
-    if ((event.target as HTMLElement).closest("button, select, option")) return;
+    if ((event.target as HTMLElement).closest("button, select, option, input")) return;
     const preview = selfViewRef.current;
     if (!preview) return;
     const rect = preview.getBoundingClientRect();
@@ -3626,6 +3680,59 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       event.currentTarget.releasePointerCapture(event.pointerId);
     }
     selfViewDragRef.current = null;
+  };
+
+  const beginParticipantVideoDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, select, option, input")) return;
+    const tile = participantVideoRef.current;
+    if (!tile) return;
+    const rect = tile.getBoundingClientRect();
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    participantVideoDragRef.current = { pointerId: event.pointerId, offsetX: event.clientX - rect.left, offsetY: event.clientY - rect.top };
+    setParticipantVideoPosition({ left: rect.left, top: rect.top });
+    beginParticipantLongPress(event);
+  };
+
+  const moveParticipantVideo = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = participantVideoDragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    cancelParticipantLongPress();
+    const margin = 8;
+    setParticipantVideoPosition({
+      left: Math.min(Math.max(margin, event.clientX - drag.offsetX), Math.max(margin, window.innerWidth - participantVideoWidth - margin)),
+      top: Math.min(Math.max(margin, event.clientY - drag.offsetY), Math.max(margin, window.innerHeight - participantVideoHeight - margin)),
+    });
+  };
+
+  const endParticipantVideoDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    cancelParticipantLongPress();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    participantVideoDragRef.current = null;
+  };
+
+  const beginVideoResize = (tile: "self" | "participant", event: React.PointerEvent<HTMLButtonElement>) => {
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    const dimensions = tile === "self" ? selfViewDimensions : { width: participantVideoWidth, height: participantVideoHeight };
+    videoResizeRef.current = { tile, pointerId: event.pointerId, startX: event.clientX, startY: event.clientY, ...dimensions };
+  };
+
+  const moveVideoResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const resize = videoResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const width = Math.min(560, Math.max(resize.tile === "self" ? 160 : 180, resize.width + event.clientX - resize.startX));
+    const height = Math.min(420, Math.max(resize.tile === "self" ? 90 : 110, resize.height + event.clientY - resize.startY));
+    if (resize.tile === "self") setSelfViewDimensions({ width, height });
+    else { setParticipantVideoWidth(width); setParticipantVideoHeight(height); }
+  };
+
+  const endVideoResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+    videoResizeRef.current = null;
   };
 
   const beginCallPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
@@ -4234,7 +4341,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && (
+          {typeof document !== "undefined" && phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && createPortal((
             <div
               ref={participantVideoRef}
               tabIndex={0}
@@ -4249,19 +4356,26 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   setIsParticipantVideoMenuOpen(true);
                 }
               }}
-              onPointerDown={beginParticipantLongPress}
-              onPointerUp={cancelParticipantLongPress}
-              onPointerCancel={cancelParticipantLongPress}
-              onPointerMove={cancelParticipantLongPress}
+              onPointerDown={beginParticipantVideoDrag}
+              onPointerUp={endParticipantVideoDrag}
+              onPointerCancel={endParticipantVideoDrag}
+              onPointerMove={moveParticipantVideo}
               style={{
-                position: "relative",
+                position: "fixed",
+                left: participantVideoPosition ? participantVideoPosition.left : 272,
+                top: participantVideoPosition ? participantVideoPosition.top : 70,
+                zIndex: 220,
                 overflow: "visible",
+                width: `${participantVideoWidth}px`,
                 height: `${participantVideoHeight}px`,
                 minHeight: "140px",
                 maxHeight: "min(420px, calc(100dvh - 190px))",
                 borderRadius: "14px",
                 background: "#0f172a",
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
+                boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
+                cursor: participantVideoDragRef.current ? "grabbing" : "grab",
+                touchAction: "none",
               }}
             >
               <video
@@ -4360,8 +4474,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
               )}
+              <button type="button" aria-label={t("Resize participant video", "Zmień rozmiar wideo uczestnika")} onPointerDown={(event) => beginVideoResize("participant", event)} onPointerMove={moveVideoResize} onPointerUp={endVideoResize} onPointerCancel={endVideoResize} style={videoResizeHandleStyle} />
             </div>
-          )}
+          ), document.body)}
 
           {phase === "connected" && showCallVideo && isRemoteVideoOn && isParticipantVideoHidden && (
             <button
@@ -4677,10 +4792,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }}
           style={{
             position: "fixed",
-            left: selfViewPosition ? `${selfViewPosition.left}px` : "auto",
-            right: selfViewPosition ? "auto" : "18px",
-            top: selfViewPosition ? `${selfViewPosition.top}px` : "auto",
-            bottom: selfViewPosition ? "auto" : "80px",
+            left: selfViewPosition ? `${selfViewPosition.left}px` : "16px",
+            right: "auto",
+            top: selfViewPosition ? `${selfViewPosition.top}px` : "70px",
+            bottom: "auto",
             zIndex: 220,
             width: `min(${selfViewDimensions.width}px, calc(100vw - 16px))`,
             height: `${selfViewDimensions.height}px`,
@@ -4787,7 +4902,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
               <label style={{ display: "grid", gap: 4, padding: "5px 8px", fontSize: 11, fontWeight: 700 }}>
                 {t("Preview size", "Rozmiar podglądu")}
-                <select value={selfViewSize} onChange={(event) => setSelfViewSize(event.target.value as "small" | "medium" | "large")} style={{ height: 30, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
+                <select value={selfViewSize} onChange={(event) => {
+                  const size = event.target.value as "small" | "medium" | "large";
+                  setSelfViewSize(size);
+                  setSelfViewDimensions({ small: { width: 180, height: 102 }, medium: { width: 240, height: 135 }, large: { width: 320, height: 180 } }[size]);
+                }} style={{ height: 30, border: "1px solid #cbd5e1", borderRadius: 8, background: "#fff" }}>
                   <option value="small">{t("Small", "Mały")}</option>
                   <option value="medium">{t("Medium", "Średni")}</option>
                   <option value="large">{t("Large", "Duży")}</option>
@@ -4809,6 +4928,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           )}
+          <button type="button" aria-label={t("Resize your video", "Zmień rozmiar swojego wideo")} onPointerDown={(event) => beginVideoResize("self", event)} onPointerMove={moveVideoResize} onPointerUp={endVideoResize} onPointerCancel={endVideoResize} style={videoResizeHandleStyle} />
         </div>
       )}
       {phase === "connected" && isShortcutHelpOpen && (
@@ -4842,6 +4962,23 @@ const overlayStyle: React.CSSProperties = {
   padding: "16px",
   background: "rgba(15,23,42,0.34)",
   backdropFilter: "blur(6px)",
+};
+const videoResizeHandleStyle: React.CSSProperties = {
+  position: "absolute",
+  right: 3,
+  bottom: 3,
+  zIndex: 5,
+  width: 26,
+  height: 26,
+  minWidth: 26,
+  minHeight: 26,
+  border: 0,
+  borderRight: "3px solid rgba(255,255,255,.9)",
+  borderBottom: "3px solid rgba(255,255,255,.9)",
+  borderRadius: "0 0 9px 0",
+  background: "transparent",
+  cursor: "nwse-resize",
+  touchAction: "none",
 };
 const dialogStyle: React.CSSProperties = {
   position: "relative",
