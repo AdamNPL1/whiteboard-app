@@ -3,6 +3,7 @@ export type RealtimeDiagnosticsUpdate = {
   boardLastEvent?: string;
   boardLatencyMs?: number | null;
   incomingCallStatus?: string;
+  incomingCallLatencyMs?: number | null;
   callStage?: string;
   signalingState?: string;
   iceState?: string;

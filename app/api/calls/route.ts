@@ -4,6 +4,7 @@ import { getActiveCallsForUser, getBoardCallParticipants, startBoardCall } from 
 import { sendCallPush } from "@/lib/call-push-store";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
+import { getCallContactPermission } from "@/lib/call-spam-store";
 
 export const runtime = "nodejs";
 
@@ -16,7 +17,7 @@ export async function GET(request: NextRequest) {
 
   try {
     return NextResponse.json(
-      { calls: await getActiveCallsForUser(user.id) },
+      { calls: await getActiveCallsForUser(user.id), serverNow: new Date().toISOString() },
       { headers: { "Cache-Control": "no-store" } }
     );
   } catch (error) {
@@ -59,6 +60,19 @@ export async function POST(request: NextRequest) {
   if (!hourlyLimit.allowed) return rateLimitResponse(hourlyLimit);
 
   try {
+    const permission = await getCallContactPermission(user.id, recipientUserId);
+    if (!permission.allowed) {
+      if (permission.reason === "cooldown") {
+        return NextResponse.json(
+          { error: "Please wait before calling this participant again.", code: "CALL_COOLDOWN", retryAfter: permission.retryAfterSeconds },
+          { status: 429, headers: { "Retry-After": String(permission.retryAfterSeconds), "Cache-Control": "no-store" } }
+        );
+      }
+      return NextResponse.json(
+        { error: "The participant is unavailable right now.", code: "CALL_PARTICIPANT_UNAVAILABLE" },
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
     const call = await startBoardCall(
       boardId,
       user.id,
@@ -79,6 +93,7 @@ export async function POST(request: NextRequest) {
         call,
         signalingTopic: `call:${call.id}`,
         recipientTopic: `user:${call.recipientUserId}:calls`,
+        serverNow: new Date().toISOString(),
       },
       { status: 201, headers: { "Cache-Control": "no-store" } }
     );

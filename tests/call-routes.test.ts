@@ -15,6 +15,8 @@ const mocks = vi.hoisted(() => ({
   saveSignal: vi.fn(),
   getSignals: vi.fn(),
   generateTurn: vi.fn(),
+  getContactPermission: vi.fn(),
+  acknowledgeIncoming: vi.fn(),
 }));
 
 vi.mock("@/lib/supabase-auth", () => ({
@@ -30,6 +32,7 @@ vi.mock("@/lib/call-store", () => ({
   claimCallDeviceSession: mocks.claimDeviceSession,
   updateCallParticipantState: mocks.updateParticipantState,
   getCallParticipantStates: mocks.getParticipantStates,
+  acknowledgeIncomingBoardCall: mocks.acknowledgeIncoming,
 }));
 vi.mock("@/lib/cloudflare-turn", () => ({
   generateCloudflareTurnCredentials: mocks.generateTurn,
@@ -48,6 +51,9 @@ vi.mock("@/lib/monitoring", () => ({
 vi.mock("@/lib/call-push-store", () => ({
   sendCallPush: vi.fn().mockResolvedValue(undefined),
 }));
+vi.mock("@/lib/call-spam-store", () => ({
+  getCallContactPermission: mocks.getContactPermission,
+}));
 
 import { POST as startCall } from "@/app/api/calls/route";
 import { PATCH as transitionCall } from "@/app/api/calls/[callId]/route";
@@ -61,6 +67,7 @@ import {
   GET as recoverSignals,
   POST as persistSignal,
 } from "@/app/api/calls/[callId]/signals/route";
+import { POST as acknowledgeDelivery } from "@/app/api/calls/[callId]/delivery/route";
 
 const caller = {
   id: "11111111-1111-4111-8111-111111111111",
@@ -119,6 +126,8 @@ describe("call API authorization", () => {
     mocks.getParticipantStates.mockResolvedValue([]);
     mocks.saveSignal.mockResolvedValue(undefined);
     mocks.getSignals.mockResolvedValue([]);
+    mocks.getContactPermission.mockResolvedValue({ allowed: true, reason: "allowed", retryAfterSeconds: 0 });
+    mocks.acknowledgeIncoming.mockResolvedValue({ ...call, recipientNotifiedAt: new Date().toISOString() });
   });
 
   it("requires authentication before starting a call", async () => {
@@ -167,6 +176,22 @@ describe("call API authorization", () => {
     expect(response.status).toBe(403);
   });
 
+  it("returns a neutral response for blocked or DND recipients", async () => {
+    mocks.getContactPermission.mockResolvedValue({ allowed: false, reason: "unavailable", retryAfterSeconds: 0 });
+    const response = await startCall(request("/api/calls", "POST", { boardId: "board-1", recipientUserId: recipientId, clientRequestId }));
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "CALL_PARTICIPANT_UNAVAILABLE" });
+    expect(mocks.startCall).not.toHaveBeenCalled();
+  });
+
+  it("returns a retry time during repeated-call cooldown", async () => {
+    mocks.getContactPermission.mockResolvedValue({ allowed: false, reason: "cooldown", retryAfterSeconds: 90 });
+    const response = await startCall(request("/api/calls", "POST", { boardId: "board-1", recipientUserId: recipientId, clientRequestId }));
+    expect(response.status).toBe(429);
+    expect(response.headers.get("retry-after")).toBe("90");
+    expect(mocks.startCall).not.toHaveBeenCalled();
+  });
+
   it("lets the database enforce who may accept or end a call", async () => {
     const response = await transitionCall(
       request(`/api/calls/${callId}`, "PATCH", { action: "accept" }),
@@ -187,6 +212,16 @@ describe("call API authorization", () => {
     expect(response.status).toBe(200);
     expect(mocks.claimDeviceSession).toHaveBeenCalledWith(callId, caller.id, browserSessionId);
     expect(await response.json()).toEqual({ owned: true });
+  });
+
+  it("acknowledges that the recipient displayed an incoming call", async () => {
+    const response = await acknowledgeDelivery(
+      request(`/api/calls/${callId}/delivery`, "POST"),
+      { params: Promise.resolve({ callId }) }
+    );
+    expect(response.status).toBe(200);
+    expect(mocks.acknowledgeIncoming).toHaveBeenCalledWith(callId, caller.id);
+    expect(await response.json()).toMatchObject({ acknowledged: true });
   });
 
   it("rejects a second session that does not own the call", async () => {

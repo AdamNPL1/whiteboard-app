@@ -47,6 +47,7 @@ type CallSessionRow = {
   state_reason?: string;
   caller_last_seen_at?: string | null;
   recipient_last_seen_at?: string | null;
+  recipient_notified_at?: string | null;
 };
 
 type BoardRow = {
@@ -62,7 +63,7 @@ type ShareRow = {
 };
 
 const callColumns =
-  "id,board_id,caller_user_id,recipient_user_id,status,outcome,version,state_changed_at,state_reason,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id,caller_last_seen_at,recipient_last_seen_at";
+  "id,board_id,caller_user_id,recipient_user_id,status,outcome,version,state_changed_at,state_reason,created_at,updated_at,ring_expires_at,expires_at,accepted_at,declined_at,ended_at,ended_by_user_id,caller_last_seen_at,recipient_last_seen_at,recipient_notified_at";
 
 const normalizeStoredStatus = (
   status: StoredCallStatus
@@ -97,6 +98,7 @@ const mapCallSession = (row: CallSessionRow): CallSession => ({
   endedByUserId: row.ended_by_user_id ?? undefined,
   callerLastSeenAt: row.caller_last_seen_at ?? undefined,
   recipientLastSeenAt: row.recipient_last_seen_at ?? undefined,
+  recipientNotifiedAt: row.recipient_notified_at ?? undefined,
 });
 
 const unwrapRpcRow = (data: unknown): CallSessionRow | null => {
@@ -327,6 +329,18 @@ export const heartbeatBoardCall = async (callId: string, userId: string) => {
   const { data, error } = await getSupabaseServiceRoleClient().rpc(
     "heartbeat_board_call",
     { p_call_id: callId, p_user_id: userId }
+  );
+  if (error) throw new Error(normalizeDatabaseCallError(error.message));
+  const row = unwrapRpcRow(data);
+  if (!row) throw new Error("CALL_DATABASE_ERROR");
+  return mapCallSession(row);
+};
+
+export const acknowledgeIncomingBoardCall = async (callId: string, userId: string) => {
+  const call = await getCallSessionForUser(callId, userId);
+  if (call.recipientUserId !== userId) throw new Error("CALL_NOT_FOUND");
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "acknowledge_incoming_board_call", { p_call_id: callId, p_recipient_user_id: userId }
   );
   if (error) throw new Error(normalizeDatabaseCallError(error.message));
   const row = unwrapRpcRow(data);

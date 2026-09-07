@@ -39,6 +39,7 @@ export type CallRecord = {
   endedByUserId?: string;
   callerLastSeenAt?: string;
   recipientLastSeenAt?: string;
+  recipientNotifiedAt?: string;
 };
 
 export type CallParticipantState = {

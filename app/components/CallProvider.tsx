@@ -97,6 +97,7 @@ import {
   getCallKeyboardAction,
   isEditableCallShortcutTarget,
 } from "@/lib/call-accessibility";
+import { claimIncomingRing, releaseIncomingRing } from "@/lib/call-ring-coordinator";
 
 const CALL_LAYOUT_STORAGE_KEY = "scriboo-call-layout-v1";
 import type { AudioDeviceState } from "@/lib/audio-device-management";
@@ -369,6 +370,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const callStatusPollBusyRef = useRef(false);
   const callHeartbeatRef = useRef<number | null>(null);
   const callHeartbeatBusyRef = useRef(false);
+  const serverClockOffsetMsRef = useRef(0);
   const localCandidateTypesRef = useRef(new Set<string>());
   const remoteCandidateTypesRef = useRef(new Set<string>());
   const isTerminatingCallRef = useRef(false);
@@ -712,8 +714,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       void playOutgoingCallTone().catch(() => undefined);
 
     if (phase === "incoming" || phase === "precall-incoming") {
-      playIncomingRing();
-      callSoundIntervalRef.current = window.setInterval(playIncomingRing, 2_700);
+      const ownerId = getCallSessionId();
+      const callId = callRef.current?.id ?? "incoming";
+      const playIfOwner = () => {
+        if (claimIncomingRing(window.localStorage, callId, ownerId)) playIncomingRing();
+      };
+      playIfOwner();
+      callSoundIntervalRef.current = window.setInterval(playIfOwner, 2_700);
+      return () => {
+        releaseIncomingRing(window.localStorage, ownerId);
+        stopCallSounds();
+      };
     } else if (phase === "outgoing") {
       playOutgoingRing();
       callSoundIntervalRef.current = window.setInterval(playOutgoingRing, 2_900);
@@ -726,7 +737,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
 
     return stopCallSounds;
-  }, [phase, playCallTonePattern, playIncomingCallTone, playOutgoingCallTone, stopCallSounds]);
+  }, [getCallSessionId, phase, playCallTonePattern, playIncomingCallTone, playOutgoingCallTone, stopCallSounds]);
 
   const clearCallResources = useCallback(() => {
     stopCallSounds();
@@ -1051,7 +1062,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setPhase("ended");
     };
 
-    const remaining = new Date(call.ringExpiresAt).getTime() - Date.now();
+    const remaining = new Date(call.ringExpiresAt).getTime() -
+      (Date.now() + serverClockOffsetMsRef.current);
     if (remaining <= 0) {
       expireCall();
       return;
@@ -2138,6 +2150,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setCallBoardName(context.boardName);
       setMessage("");
       setPhase("incoming");
+      const latencyMs = Math.max(0, Math.round(
+        Date.now() + serverClockOffsetMsRef.current - new Date(incomingCall.createdAt).getTime()
+      ));
+      reportRealtimeDiagnostics({ incomingCallStatus: "panel visible", incomingCallLatencyMs: latencyMs });
+      window.requestAnimationFrame(() => {
+        void apiRequest(`/api/calls/${incomingCall.id}/delivery`, { method: "POST" })
+          .catch(() => undefined);
+      });
     },
     [loadCallContext]
   );
@@ -2146,7 +2166,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (!userRef.current) return;
     if (activeCallsRequestRef.current) return activeCallsRequestRef.current;
     const request = (async () => {
-      const data = await apiRequest<{ calls: CallRecord[] }>("/api/calls");
+      const data = await apiRequest<{ calls: CallRecord[]; serverNow: string }>("/api/calls");
+      if (data.serverNow) {
+        serverClockOffsetMsRef.current = new Date(data.serverNow).getTime() - Date.now();
+      }
       const current = callRef.current;
       if (current) {
         const refreshed = data.calls.find((candidate) => candidate.id === current.id);
@@ -2198,6 +2221,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     activeCallsRequestRef.current = request;
     return request;
   }, [clearCallResources, loadCallContext, refreshCallOwnership, showIncomingCall, t]);
+
+  useEffect(() => {
+    if (!user) return;
+    const checkImmediately = () => {
+      if (document.visibilityState === "hidden" || !navigator.onLine) return;
+      void loadActiveCalls().catch(() => undefined);
+    };
+    window.addEventListener("focus", checkImmediately);
+    window.addEventListener("pageshow", checkImmediately);
+    document.addEventListener("visibilitychange", checkImmediately);
+    return () => {
+      window.removeEventListener("focus", checkImmediately);
+      window.removeEventListener("pageshow", checkImmediately);
+      document.removeEventListener("visibilitychange", checkImmediately);
+    };
+  }, [loadActiveCalls, user]);
 
   const refreshIdentity = useCallback(async () => {
     if (identityRefreshRef.current) {
@@ -2301,6 +2340,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             error: subscriptionError,
           });
         }
+        if (notificationReady) void loadActiveCalls().catch(() => undefined);
       });
       userChannelRef.current = nextChannel;
     })().catch((error: unknown) => {
@@ -2315,9 +2355,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     let lastFallbackPollAt = 0;
     const pollForCalls = () => {
       const now = Date.now();
-      // Realtime should deliver incoming calls instantly. Retain a slow safety
-      // poll for missed events, and poll quickly only while the channel is down.
-      if (notificationReady && phaseRef.current !== "incoming" && now - lastFallbackPollAt < 30_000) return;
+      // Poll rapidly when Realtime is unavailable and keep a five-second
+      // durable safety check even while it looks healthy; a healthy socket can
+      // still miss one event during a device resume.
+      const minimumInterval = notificationReady ? 5_000 : 1_000;
+      if (now - lastFallbackPollAt < minimumInterval) return;
       lastFallbackPollAt = now;
       void loadActiveCalls().catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "Unknown API error";
@@ -2331,7 +2373,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     pollForCalls();
     const poll = window.setInterval(
       pollForCalls,
-      2_000
+      1_000
     );
 
     return () => {
@@ -2365,7 +2407,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             }
             if (
               refreshed.status === "ringing" &&
-              new Date(refreshed.ringExpiresAt).getTime() <= Date.now()
+              new Date(refreshed.ringExpiresAt).getTime() <= Date.now() + serverClockOffsetMsRef.current
             ) {
               if (userRef.current?.id === refreshed.callerUserId) {
                 void apiRequest(`/api/calls/${refreshed.id}`, {
@@ -2402,7 +2444,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           .finally(() => {
             callStatusPollBusyRef.current = false;
           });
-      }, 2_000);
+      }, 750);
     },
     [finishRemoteCall, preparePeerConnection, stopCallPoll, t]
   );
@@ -2444,7 +2486,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 : new Error("Could not access the microphone."),
           })
         );
-        const data = await apiRequest<{ call: CallRecord }>("/api/calls", {
+        const data = await apiRequest<{ call: CallRecord; serverNow: string }>("/api/calls", {
           method: "POST",
           body: JSON.stringify({
             boardId: board.id,
@@ -2452,6 +2494,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             clientRequestId: crypto.randomUUID(),
           }),
         });
+        if (data.serverNow) serverClockOffsetMsRef.current = new Date(data.serverNow).getTime() - Date.now();
         createdCall = data.call;
         if (!await claimCallOwnership(data.call.id)) {
           throw new Error(t("Call active on another device.", "Rozmowa jest aktywna na innym urządzeniu."));
@@ -3345,7 +3388,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     ending: t("Ending call…", "Kończenie rozmowy…"),
     idle: "",
   }[statusKind];
-  const visibleStatusText = statusKind === "connected" &&
+  const visibleStatusText = phase === "outgoing" && call?.recipientNotifiedAt
+    ? t("Ringing on participant's device", "Dzwoni na urządzeniu uczestnika")
+    : statusKind === "connected" &&
     (callQuality?.rating === "poor" || callQuality?.rating === "no-media")
       ? callQuality.rating === "no-media"
         ? t("No media received", "Brak odbieranych danych")
@@ -3430,6 +3475,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     participantMutedForMeRef.current = muted;
     setIsParticipantMutedForMe(muted);
     if (remoteAudioRef.current) remoteAudioRef.current.muted = muted;
+  };
+
+  const blockCurrentParticipant = async () => {
+    const activeCall = callRef.current;
+    const activeUser = userRef.current;
+    if (!activeCall || !activeUser) return;
+    const peerUserId = activeCall.callerUserId === activeUser.id
+      ? activeCall.recipientUserId : activeCall.callerUserId;
+    if (!window.confirm(t(
+      `Block ${peerName || "this participant"} from calling you? This call will end.`,
+      `Zablokować połączenia od ${peerName || "tego uczestnika"}? Ta rozmowa zostanie zakończona.`
+    ))) return;
+    const response = await fetch("/api/call-blocks", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId: peerUserId }),
+    });
+    if (!response.ok) {
+      setMessage(t("Could not block this participant.", "Nie udało się zablokować uczestnika."));
+      return;
+    }
+    resetToIdle();
   };
 
   const openParticipantPictureInPicture = async () => {
@@ -4287,6 +4354,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   </button>
                   <button type="button" role="menuitem" onClick={() => void openParticipantFullscreen()} style={selfViewMenuButtonStyle}>
                     {t("Full screen", "Pełny ekran")}
+                  </button>
+                  <button type="button" role="menuitem" onClick={() => void blockCurrentParticipant()} style={{ ...selfViewMenuButtonStyle, color: "#b91c1c" }}>
+                    {t("Block calls from participant", "Zablokuj połączenia od uczestnika")}
                   </button>
                 </div>
               )}
