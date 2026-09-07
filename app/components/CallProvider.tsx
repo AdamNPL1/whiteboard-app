@@ -1269,12 +1269,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const activeCall = callRef.current;
     const activeUser = userRef.current;
     if (!activeCall || !activeUser || phaseRef.current !== "connected") return;
-    if (activeUser.id === activeCall.callerUserId) {
-      await createAndSendOffer();
-    } else {
-      await sendSignal({ kind: "renegotiate" });
-    }
-  }, [createAndSendOffer, sendSignal]);
+    // Either participant may need to add or replace a media track. Making the
+    // recipient ask the caller to offer creates a race: if the caller is not
+    // stable at that instant, the acknowledged request is effectively lost.
+    // The offer-collision handling below already implements the polite-peer
+    // rules needed for either side to negotiate safely.
+    await createAndSendOffer();
+  }, [createAndSendOffer]);
 
   const resendPendingSignals = useCallback(() => {
     const channel = callChannelRef.current;
@@ -1613,6 +1614,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }).catch(() => {
             localMediaAnnouncedRef.current = false;
           });
+          // The accepting participant owns its outbound camera track and must
+          // advertise it directly. This avoids a role-dependent audio-only
+          // connection when the camera became ready around accept time.
+          if (
+            localCameraTrackRef.current &&
+            userRef.current?.id === activeCall.recipientUserId
+          ) {
+            void requestRenegotiation().catch(() => {
+              localMediaAnnouncedRef.current = false;
+            });
+          }
         }
       };
       connection.onconnectionstatechange = () => {
@@ -1913,7 +1925,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, requestRenegotiation, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
