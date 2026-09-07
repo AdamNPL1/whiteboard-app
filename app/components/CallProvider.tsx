@@ -359,6 +359,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const remoteVideoIntentRef = useRef<boolean | null>(null);
+  const remoteVideoSignalSequenceRef = useRef(0);
   const localMediaAnnouncedRef = useRef(false);
   const queuedCandidatesRef = useRef<
     Array<{ generation: number; candidate: RTCIceCandidateInit }>
@@ -886,6 +887,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     remoteVideoStreamRef.current = null;
     remoteVideoIntentRef.current = null;
+    remoteVideoSignalSequenceRef.current = 0;
     localMediaAnnouncedRef.current = false;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setIsCameraOn(false);
@@ -1504,10 +1506,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (event.track.kind === "video") {
           const videoStream = event.streams[0] ?? new MediaStream([event.track]);
           remoteVideoStreamRef.current = videoStream;
-          setIsRemoteVideoOn(
-            remoteVideoIntentRef.current === true ||
-              (remoteVideoIntentRef.current !== false && !event.track.muted)
-          );
+          // A live incoming WebRTC track is stronger evidence than a
+          // potentially delayed camera-state broadcast.
+          setIsRemoteVideoOn(!event.track.muted);
           event.track.onunmute = () => setIsRemoteVideoOn(true);
           event.track.onended = () => {
             if (remoteVideoStreamRef.current === videoStream) {
@@ -2033,9 +2034,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (signal.kind === "video-state") {
         // This signal describes only the other participant. Receiving it must
         // never request permission for or activate this browser's camera.
+        // Realtime retries can arrive out of order. Never let an older
+        // "camera off" broadcast overwrite a newer "camera on" state.
+        if (payload.sequenceNumber <= remoteVideoSignalSequenceRef.current) return;
+        remoteVideoSignalSequenceRef.current = payload.sequenceNumber;
         remoteVideoIntentRef.current = signal.enabled;
         if (!signal.enabled) {
-          remoteVideoStreamRef.current = null;
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
           setIsParticipantVideoMenuOpen(false);
