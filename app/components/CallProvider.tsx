@@ -293,6 +293,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [inboundAudioActive, setInboundAudioActive] = useState(false);
   const [audioTransmissionWarning, setAudioTransmissionWarning] = useState(false);
   const [callQuality, setCallQuality] = useState<CallQualitySnapshot | null>(null);
+  const [videoDiagnostics, setVideoDiagnostics] = useState({
+    outgoingPackets: 0,
+    senderTrack: "none",
+    direction: "none",
+    signaling: "stable",
+  });
   const [isCallQualityOpen, setIsCallQualityOpen] = useState(false);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
   const [isParticipantVideoMenuOpen, setIsParticipantVideoMenuOpen] = useState(false);
@@ -816,6 +822,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setInboundAudioActive(false);
     setAudioTransmissionWarning(false);
     setCallQuality(null);
+    setVideoDiagnostics({
+      outgoingPackets: 0,
+      senderTrack: "none",
+      direction: "none",
+      signaling: "stable",
+    });
     setIsCallQualityOpen(false);
     setAudioDeviceMessage("");
     const cameraTrack = localCameraTrackRef.current;
@@ -1625,6 +1637,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         let packetsSent = 0;
         let packetsReceived = 0;
         let audioPacketsLost = 0;
+        let videoPacketsSent = 0;
         let videoPacketsReceived = 0;
         let videoPacketsLost = 0;
         let roundTripTimeMs: number | null = null;
@@ -1640,6 +1653,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           const mediaKind = report.kind ?? report.mediaType;
           if (report.type === "outbound-rtp" && mediaKind === "audio") {
             packetsSent += Number(report.packetsSent) || 0;
+          }
+          if (report.type === "outbound-rtp" && mediaKind === "video") {
+            videoPacketsSent += Number(report.packetsSent) || 0;
           }
           if (report.type === "inbound-rtp" && mediaKind === "audio") {
             packetsReceived += Number(report.packetsReceived) || 0;
@@ -1677,6 +1693,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 ? "TURN relay"
                 : `${local?.candidateType ?? "unknown"} → ${remote?.candidateType ?? "unknown"}`;
           }
+        });
+        const videoSenderTrack = localVideoSenderRef.current?.track;
+        setVideoDiagnostics({
+          outgoingPackets: videoPacketsSent,
+          senderTrack: videoSenderTrack
+            ? `${videoSenderTrack.readyState}${videoSenderTrack.enabled ? "/enabled" : "/disabled"}${videoSenderTrack.muted ? "/muted" : ""}`
+            : "none",
+          direction: localVideoTransceiverRef.current?.currentDirection ??
+            localVideoTransceiverRef.current?.direction ?? "none",
+          signaling: connection.signalingState,
         });
         const previous = previousAudioPacketsRef.current;
         const sentChanged = previous.sent !== null && packetsSent > previous.sent;
@@ -3925,6 +3951,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   <span>{t("Frozen video", "Zatrzymane wideo")}: <strong>{callQuality.frozenVideoSeconds === null ? "—" : `${callQuality.frozenVideoSeconds.toFixed(1)} s`}</strong></span>
                   <span>{t("Connection route", "Trasa połączenia")}: <strong>{callQuality.route}</strong></span>
                   <span>{t("Last media", "Ostatnie dane")}: <strong>{callQuality.secondsSinceMediaReceived === null ? "—" : `${callQuality.secondsSinceMediaReceived.toFixed(1)} s`}</strong></span>
+                  <span>Outgoing video packets: <strong>{videoDiagnostics.outgoingPackets}</strong></span>
+                  <span>Video sender: <strong>{videoDiagnostics.senderTrack}</strong></span>
+                  <span>Video direction: <strong>{videoDiagnostics.direction}</strong></span>
+                  <span>Signaling: <strong>{videoDiagnostics.signaling}</strong></span>
                 </div>
               )}
             </div>
