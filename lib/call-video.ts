@@ -1,4 +1,3 @@
-export const getLocalVideoDirection = (
-  localCameraEnabled: boolean
-): RTCRtpTransceiverDirection =>
-  localCameraEnabled ? "sendrecv" : "recvonly";
+/** Reserve both video directions for the call; track presence controls privacy. */
+export const getReservedVideoDirection = (): RTCRtpTransceiverDirection =>
+  "sendrecv";

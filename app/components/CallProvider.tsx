@@ -31,7 +31,7 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
 import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
-import { getLocalVideoDirection } from "@/lib/call-video";
+import { getReservedVideoDirection } from "@/lib/call-video";
 import { CallReconnectionController } from "@/lib/call-reconnection";
 import { CallMediaWatchdog } from "@/lib/call-media-watchdog";
 import { TurnCredentialLoader } from "@/lib/turn-credential-loader";
@@ -1197,12 +1197,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     renegotiationPendingRef.current = false;
-    const videoTransceiver = localVideoTransceiverRef.current;
-    if (videoTransceiver && videoTransceiver.direction !== "stopped") {
-      videoTransceiver.direction = getLocalVideoDirection(
-        localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
-      );
-    }
     makingOfferRef.current = true;
     try {
       negotiationGenerationRef.current += 1;
@@ -1471,11 +1465,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       const previewCameraTrack = localCameraTrackRef.current;
       const videoTransceiver = previewCameraTrack
         ? connection.addTransceiver(previewCameraTrack, {
-            direction: getLocalVideoDirection(true),
+            direction: getReservedVideoDirection(),
             streams: [new MediaStream([previewCameraTrack])],
           })
         : connection.addTransceiver("video", {
-            direction: getLocalVideoDirection(false),
+            direction: getReservedVideoDirection(),
           });
       localVideoTransceiverRef.current = videoTransceiver;
       localVideoSenderRef.current = videoTransceiver.sender;
@@ -1486,6 +1480,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           remoteVideoStreamRef.current = videoStream;
           setIsRemoteVideoOn(!event.track.muted);
           event.track.onunmute = () => setIsRemoteVideoOn(true);
+          event.track.onmute = () => {
+            setIsRemoteVideoOn(false);
+            setIsParticipantVideoMenuOpen(false);
+          };
           event.track.onended = () => {
             if (remoteVideoStreamRef.current === videoStream) {
               remoteVideoStreamRef.current = null;
@@ -2026,10 +2024,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         // This signal describes only the other participant. Receiving it must
         // never request permission for or activate this browser's camera.
         if (!signal.enabled) {
-          remoteVideoStreamRef.current = null;
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
           setIsParticipantVideoMenuOpen(false);
+        } else if (remoteVideoStreamRef.current) {
+          setIsRemoteVideoOn(true);
         }
         return;
       }
@@ -2062,12 +2061,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           await connection.setLocalDescription({ type: "rollback" });
         }
         await connection.setRemoteDescription(signal.description);
-        const videoTransceiver = localVideoTransceiverRef.current;
-        if (videoTransceiver && videoTransceiver.direction !== "stopped") {
-          videoTransceiver.direction = getLocalVideoDirection(
-            localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
-          );
-        }
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
@@ -2832,7 +2825,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const stopCamera = useCallback(async () => {
     const cameraTrack = localCameraTrackRef.current;
     const videoSender = localVideoSenderRef.current;
-    const videoTransceiver = localVideoTransceiverRef.current;
     localCameraTrackRef.current = null;
     localCameraIntentRef.current = false;
     if (cameraTrack) {
@@ -2841,9 +2833,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       cameraTrack.stop();
     }
     if (videoSender) await videoSender.replaceTrack(null).catch(() => undefined);
-    if (videoTransceiver && videoTransceiver.direction !== "stopped") {
-      videoTransceiver.direction = getLocalVideoDirection(false);
-    }
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     setIsCameraOn(false);
     setJoinWithCamera(false);
@@ -2851,9 +2840,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setCameraMessage("");
     if (phaseRef.current === "connected") {
       await sendSignal({ kind: "video-state", enabled: false }).catch(() => undefined);
-      await requestRenegotiation().catch(() => undefined);
     }
-  }, [requestRenegotiation, sendSignal]);
+  }, [sendSignal]);
 
   const refreshMediaDevices = useCallback(async () => {
     if (!navigator.mediaDevices?.enumerateDevices) return;
@@ -3114,13 +3102,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         let videoTransceiver = localVideoTransceiverRef.current;
         if (!videoTransceiver || videoTransceiver.direction === "stopped") {
           videoTransceiver = connection.addTransceiver(cameraTrack, {
-            direction: getLocalVideoDirection(true),
+            direction: getReservedVideoDirection(),
             streams: [cameraStream],
           });
           localVideoTransceiverRef.current = videoTransceiver;
           localVideoSenderRef.current = videoTransceiver.sender;
         } else {
-          videoTransceiver.direction = getLocalVideoDirection(true);
           await videoTransceiver.sender.replaceTrack(cameraTrack);
           localVideoSenderRef.current = videoTransceiver.sender;
         }
@@ -3132,7 +3119,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       try {
         if (connection) {
           await sendSignal({ kind: "video-state", enabled: true });
-          await requestRenegotiation();
         }
       } catch {
         // The camera opened successfully. A transient signaling failure must
@@ -3147,13 +3133,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } catch (error) {
       const failedTrack = localCameraTrackRef.current;
       const failedSender = localVideoSenderRef.current;
-      const failedTransceiver = localVideoTransceiverRef.current;
       localCameraTrackRef.current = null;
       localCameraIntentRef.current = false;
       if (failedSender) await failedSender.replaceTrack(null).catch(() => undefined);
-      if (failedTransceiver && failedTransceiver.direction !== "stopped") {
-        failedTransceiver.direction = getLocalVideoDirection(false);
-      }
       if (failedTrack) {
         failedTrack.onended = null;
         localStreamRef.current?.removeTrack(failedTrack);
@@ -3204,7 +3186,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsCameraStarting(false);
     }
-  }, [activateLocalVideoSender, isCameraStarting, refreshMediaDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
+  }, [activateLocalVideoSender, isCameraStarting, refreshMediaDevices, selectedCameraId, sendSignal, stopCamera, t]);
 
   const switchCamera = useCallback(async (cameraId: string) => {
     if (!cameraId || isSwitchingCamera || !navigator.mediaDevices?.getUserMedia) return;
