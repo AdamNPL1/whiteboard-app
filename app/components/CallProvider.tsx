@@ -1223,11 +1223,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     const activeCall = callRef.current;
     const activeUser = userRef.current;
     if (!activeCall || !activeUser || phaseRef.current !== "connected") return;
-    // Both participants can safely offer. If signaling is temporarily busy,
-    // createAndSendOffer records the request and the stable-state handler
-    // retries it instead of silently losing a camera change.
-    await createAndSendOffer();
-  }, [createAndSendOffer]);
+    // Keep the caller as the sole offerer. The recipient requests an offer;
+    // the caller queues that request if its signaling state is temporarily
+    // busy. This avoids two simultaneous local offers while still ensuring a
+    // post-connect camera change cannot be lost.
+    if (activeUser.id === activeCall.callerUserId) {
+      await createAndSendOffer();
+    } else {
+      await sendSignal({ kind: "renegotiate" });
+    }
+  }, [createAndSendOffer, sendSignal]);
 
   const resendPendingSignals = useCallback(() => {
     const channel = callChannelRef.current;
@@ -1548,7 +1553,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         setPhase("connected");
         setMessage("");
         if (renegotiationPendingRef.current) {
-          void createAndSendOffer().catch(() => undefined);
+          renegotiationPendingRef.current = false;
+          void requestRenegotiation().catch(() => undefined);
         }
       };
       connection.onconnectionstatechange = () => {
@@ -1599,7 +1605,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           renegotiationPendingRef.current &&
           phaseRef.current === "connected"
         ) {
-          void createAndSendOffer().catch(() => undefined);
+          renegotiationPendingRef.current = false;
+          void requestRenegotiation().catch(() => undefined);
         }
       };
       connection.onnegotiationneeded = () => {
