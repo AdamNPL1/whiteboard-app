@@ -1241,9 +1241,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     if (!connection || connection.signalingState !== "stable") return;
     const videoTransceiver = localVideoTransceiverRef.current;
     if (videoTransceiver && videoTransceiver.direction !== "stopped") {
+      const cameraTrack = localCameraTrackRef.current;
       videoTransceiver.direction = getLocalVideoDirection(
-        localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
+        localCameraIntentRef.current && Boolean(cameraTrack)
       );
+      if (videoTransceiver.sender.track !== cameraTrack) {
+        await videoTransceiver.sender.replaceTrack(cameraTrack);
+      }
     }
     makingOfferRef.current = true;
     try {
@@ -1609,14 +1613,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }).catch(() => {
             localMediaAnnouncedRef.current = false;
           });
-          // Some browsers finish the initial audio transport before applying
-          // a preview camera track to the negotiated video m-line. Force one
-          // post-connect negotiation when this participant joined with video.
-          if (localCameraTrackRef.current) {
-            void requestRenegotiation().catch(() => {
-              localMediaAnnouncedRef.current = false;
-            });
-          }
         }
       };
       connection.onconnectionstatechange = () => {
@@ -1917,7 +1913,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       return connection;
     },
-    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, requestRenegotiation, sendSignal, setConnectionState, t]
+    [clearCallResources, createAndSendOffer, getFreshTurnCredentials, getMicrophone, refreshTurnConfiguration, reportCallFailure, reportParticipantState, sendSignal, setConnectionState, t]
   );
 
   const finishRemoteCall = useCallback(
@@ -2098,9 +2094,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         await connection.setRemoteDescription(signal.description);
         const videoTransceiver = localVideoTransceiverRef.current;
         if (videoTransceiver && videoTransceiver.direction !== "stopped") {
+          const cameraTrack = localCameraTrackRef.current;
           videoTransceiver.direction = getLocalVideoDirection(
-            localCameraIntentRef.current && Boolean(localCameraTrackRef.current)
+            localCameraIntentRef.current && Boolean(cameraTrack)
           );
+          // A working preview does not prove that the track is bound to the
+          // outgoing sender. Attach it explicitly before producing the answer.
+          if (videoTransceiver.sender.track !== cameraTrack) {
+            await videoTransceiver.sender.replaceTrack(cameraTrack);
+          }
         }
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
