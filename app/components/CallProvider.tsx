@@ -31,7 +31,10 @@ import {
 import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
 import { useLanguage } from "@/lib/i18n";
 import { reportRealtimeDiagnostics } from "@/lib/realtime-diagnostics";
-import { getReservedVideoDirection } from "@/lib/call-video";
+import {
+  findNegotiatedVideoTransceiver,
+  getReservedVideoDirection,
+} from "@/lib/call-video";
 import { CallReconnectionController } from "@/lib/call-reconnection";
 import { CallMediaWatchdog } from "@/lib/call-media-watchdog";
 import { TurnCredentialLoader } from "@/lib/turn-credential-loader";
@@ -297,6 +300,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     outgoingPackets: 0,
     senderTrack: "none",
     direction: "none",
+    mid: "none",
     signaling: "stable",
   });
   const [isCallQualityOpen, setIsCallQualityOpen] = useState(false);
@@ -826,6 +830,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       outgoingPackets: 0,
       senderTrack: "none",
       direction: "none",
+      mid: "none",
       signaling: "stable",
     });
     setIsCallQualityOpen(false);
@@ -1462,17 +1467,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         error: "",
       });
       stream.getAudioTracks().forEach((track) => connection.addTrack(track, stream));
-      const previewCameraTrack = localCameraTrackRef.current;
-      const videoTransceiver = previewCameraTrack
-        ? connection.addTransceiver(previewCameraTrack, {
-            direction: getReservedVideoDirection(),
-            streams: [new MediaStream([previewCameraTrack])],
-          })
-        : connection.addTransceiver("video", {
-            direction: getReservedVideoDirection(),
-          });
-      localVideoTransceiverRef.current = videoTransceiver;
-      localVideoSenderRef.current = videoTransceiver.sender;
+      // The offerer owns creation of the video m-line. Pre-creating another
+      // video transceiver on the answerer can leave its camera attached to an
+      // unnegotiated sender while the offer-created receiver handles A's video.
+      if (callerCreatesOffer) {
+        const previewCameraTrack = localCameraTrackRef.current;
+        const videoTransceiver = previewCameraTrack
+          ? connection.addTransceiver(previewCameraTrack, {
+              direction: getReservedVideoDirection(),
+              streams: [new MediaStream([previewCameraTrack])],
+            })
+          : connection.addTransceiver("video", {
+              direction: getReservedVideoDirection(),
+            });
+        localVideoTransceiverRef.current = videoTransceiver;
+        localVideoSenderRef.current = videoTransceiver.sender;
+      }
 
       connection.ontrack = (event) => {
         if (event.track.kind === "video") {
@@ -1723,6 +1733,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             : "none",
           direction: localVideoTransceiverRef.current?.currentDirection ??
             localVideoTransceiverRef.current?.direction ?? "none",
+          mid: localVideoTransceiverRef.current?.mid ?? "none",
           signaling: connection.signalingState,
         });
         const previous = previousAudioPacketsRef.current;
@@ -2061,9 +2072,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           await connection.setLocalDescription({ type: "rollback" });
         }
         await connection.setRemoteDescription(signal.description);
+        const videoTransceiver = findNegotiatedVideoTransceiver(
+          connection.getTransceivers()
+        );
+        if (!videoTransceiver) throw new Error("NEGOTIATED_VIDEO_TRANSCEIVER_MISSING");
+        videoTransceiver.direction = getReservedVideoDirection();
+        const cameraTrack = localCameraTrackRef.current;
+        await videoTransceiver.sender.replaceTrack(cameraTrack);
+        if (cameraTrack) {
+          videoTransceiver.sender.setStreams(new MediaStream([cameraTrack]));
+        }
+        localVideoTransceiverRef.current = videoTransceiver;
+        localVideoSenderRef.current = videoTransceiver.sender;
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
+        renegotiationPendingRef.current = false;
         await activateLocalVideoSender();
         await sendSignal({
           kind: "answer",
@@ -3961,6 +3985,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   <span>Outgoing video packets: <strong>{videoDiagnostics.outgoingPackets}</strong></span>
                   <span>Video sender: <strong>{videoDiagnostics.senderTrack}</strong></span>
                   <span>Video direction: <strong>{videoDiagnostics.direction}</strong></span>
+                  <span>Video m-line: <strong>{videoDiagnostics.mid}</strong></span>
                   <span>Signaling: <strong>{videoDiagnostics.signaling}</strong></span>
                 </div>
               )}
