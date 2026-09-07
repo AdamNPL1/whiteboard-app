@@ -1767,8 +1767,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             connection.connectionState === "connected" ||
             connection.iceConnectionState === "connected" ||
             connection.iceConnectionState === "completed",
-          packetsSent,
-          packetsReceived,
+          packetsSent: packetsSent + videoPacketsSent,
+          packetsReceived: packetsReceived + videoPacketsReceived,
         });
       };
       callStatsBusyRef.current = true;

@@ -24,13 +24,13 @@ describe("CallMediaWatchdog", () => {
     expect(onStalled).toHaveBeenCalledTimes(1);
   });
 
-  it("detects a one-way media failure even while the other direction progresses", () => {
+  it("does not treat legitimate one-way media activity as a dead connection", () => {
     const onStalled = vi.fn();
     const watchdog = new CallMediaWatchdog({ stalledAfterMs: 5_000, onStalled });
     watchdog.observe({ connected: true, packetsSent: 1, packetsReceived: 1, sampledAt: 0 });
     watchdog.observe({ connected: true, packetsSent: 2, packetsReceived: 1, sampledAt: 3_000 });
     watchdog.observe({ connected: true, packetsSent: 3, packetsReceived: 1, sampledAt: 5_000 });
-    expect(onStalled).toHaveBeenCalledTimes(1);
+    expect(onStalled).not.toHaveBeenCalled();
   });
 
   it("reports when bidirectional media resumes after a stall", () => {

@@ -47,13 +47,16 @@ export class CallMediaWatchdog {
     if (receivedProgressed) this.lastReceivedProgressAt = sampledAt;
     const sentStalled = sampledAt - this.lastSentProgressAt >= this.stalledAfterMs;
     const receivedStalled = sampledAt - this.lastReceivedProgressAt >= this.stalledAfterMs;
-    if (!sentStalled && !receivedStalled) {
+    if (!(sentStalled && receivedStalled)) {
       const recovered = this.stalledReported;
       this.stalledReported = false;
       if (recovered) this.options.onRecovered?.();
       return false;
     }
-    if (!this.stalledReported && (sentStalled || receivedStalled)) {
+    // A quiet/DTX audio sender, a muted participant, or a disabled camera can
+    // legitimately stop one direction while the peer connection is healthy.
+    // Recovery is warranted only when media stops moving in both directions.
+    if (!this.stalledReported && sentStalled && receivedStalled) {
       this.stalledReported = true;
       this.options.onStalled();
       return true;
