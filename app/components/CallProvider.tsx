@@ -1234,6 +1234,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   }, [createAndSendOffer, sendSignal]);
 
+  const activateLocalVideoSender = useCallback(async () => {
+    const sender = localVideoSenderRef.current;
+    const cameraTrack = localCameraTrackRef.current;
+    if (!sender || !cameraTrack) return;
+    if (sender.track !== cameraTrack) await sender.replaceTrack(cameraTrack);
+    const parameters = sender.getParameters();
+    if (!parameters.encodings?.length) return;
+    let changed = false;
+    parameters.encodings = parameters.encodings.map((encoding) => {
+      if (encoding.active !== false) return encoding;
+      changed = true;
+      return { ...encoding, active: true };
+    });
+    if (changed) await sender.setParameters(parameters);
+  }, []);
+
   const resendPendingSignals = useCallback(() => {
     const channel = callChannelRef.current;
     const activeCallId = callRef.current?.id;
@@ -2055,6 +2071,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         await flushQueuedCandidates();
         const answer = await connection.createAnswer();
         await connection.setLocalDescription(answer);
+        await activateLocalVideoSender();
         await sendSignal({
           kind: "answer",
           description: await getGatheredLocalDescription(connection),
@@ -2093,7 +2110,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
       }
     },
-    [applyRemoteConnectionState, createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
+    [activateLocalVideoSender, applyRemoteConnectionState, createAndSendOffer, finishRemoteCall, flushQueuedCandidates, preparePeerConnection, sendSignal, t]
   );
   signalHandlerRef.current = (payload) => {
     void handleSignal(payload).catch(() => {
@@ -3107,6 +3124,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           await videoTransceiver.sender.replaceTrack(cameraTrack);
           localVideoSenderRef.current = videoTransceiver.sender;
         }
+        await activateLocalVideoSender();
       }
       setCameraPermission("granted");
       setIsCameraOn(true);
@@ -3186,7 +3204,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     } finally {
       setIsCameraStarting(false);
     }
-  }, [isCameraStarting, refreshMediaDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
+  }, [activateLocalVideoSender, isCameraStarting, refreshMediaDevices, requestRenegotiation, selectedCameraId, sendSignal, stopCamera, t]);
 
   const switchCamera = useCallback(async (cameraId: string) => {
     if (!cameraId || isSwitchingCamera || !navigator.mediaDevices?.getUserMedia) return;
