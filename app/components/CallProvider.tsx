@@ -358,6 +358,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoIntentRef = useRef<boolean | null>(null);
+  const localMediaAnnouncedRef = useRef(false);
   const queuedCandidatesRef = useRef<
     Array<{ generation: number; candidate: RTCIceCandidateInit }>
   >([]);
@@ -883,6 +885,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     localVideoTransceiverRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     remoteVideoStreamRef.current = null;
+    remoteVideoIntentRef.current = null;
+    localMediaAnnouncedRef.current = false;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setIsCameraOn(false);
     setIsCameraStarting(false);
@@ -1500,7 +1504,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (event.track.kind === "video") {
           const videoStream = event.streams[0] ?? new MediaStream([event.track]);
           remoteVideoStreamRef.current = videoStream;
-          setIsRemoteVideoOn(!event.track.muted);
+          setIsRemoteVideoOn(
+            remoteVideoIntentRef.current === true ||
+              (remoteVideoIntentRef.current !== false && !event.track.muted)
+          );
           event.track.onunmute = () => setIsRemoteVideoOn(true);
           event.track.onended = () => {
             if (remoteVideoStreamRef.current === videoStream) {
@@ -1584,6 +1591,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         }
         setPhase("connected");
         setMessage("");
+        // Camera/microphone choices can be made in the preview before the
+        // signaling channel and peer connection exist. Announce that state
+        // once transport is ready so the other browser cannot remain stuck on
+        // a stale "Camera off" label after accepting the call.
+        if (!localMediaAnnouncedRef.current) {
+          localMediaAnnouncedRef.current = true;
+          void sendSignal({ kind: "mute", muted: isMutedRef.current }).catch(
+            () => {
+              localMediaAnnouncedRef.current = false;
+            }
+          );
+          void sendSignal({
+            kind: "video-state",
+            enabled: Boolean(localCameraTrackRef.current),
+          }).catch(() => {
+            localMediaAnnouncedRef.current = false;
+          });
+        }
       };
       connection.onconnectionstatechange = () => {
         if (isTerminatingCallRef.current || phaseRef.current === "ended") return;
@@ -2008,11 +2033,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (signal.kind === "video-state") {
         // This signal describes only the other participant. Receiving it must
         // never request permission for or activate this browser's camera.
+        remoteVideoIntentRef.current = signal.enabled;
         if (!signal.enabled) {
           remoteVideoStreamRef.current = null;
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
           setIsParticipantVideoMenuOpen(false);
+        } else if (remoteVideoStreamRef.current) {
+          setIsRemoteVideoOn(true);
         }
         return;
       }
