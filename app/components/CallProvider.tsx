@@ -318,7 +318,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [callLayoutMode, setCallLayoutMode] = useState<CallLayoutMode>("standard");
   const [callPanelDock, setCallPanelDock] = useState<CallPanelDock>("top-right");
+  const [participantVideoWidth, setParticipantVideoWidth] = useState(320);
   const [participantVideoHeight, setParticipantVideoHeight] = useState(210);
+  const [participantVideoPosition, setParticipantVideoPosition] = useState<{
+    left: number;
+    top: number;
+  } | null>(null);
   const [callPanelPosition, setCallPanelPosition] = useState<{
     left: number;
     top: number;
@@ -348,6 +353,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
   const participantVideoRef = useRef<HTMLDivElement | null>(null);
+  const participantVideoDragRef = useRef<{
+    pointerId: number;
+    offsetX: number;
+    offsetY: number;
+  } | null>(null);
+  const participantVideoResizeRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startWidth: number;
+    startHeight: number;
+  } | null>(null);
   const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
   const queuedCandidatesRef = useRef<
@@ -861,6 +878,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setParticipantVolume(1);
     setIsParticipantVideoPinned(false);
     setIsParticipantVideoHidden(false);
+    setParticipantVideoPosition(null);
+    setParticipantVideoWidth(320);
     setParticipantVideoFit("cover");
     participantVolumeRef.current = 1;
     participantMutedForMeRef.current = false;
@@ -3635,6 +3654,84 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     }
   };
 
+  const beginParticipantVideoDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    if ((event.target as HTMLElement).closest("button, input")) return;
+    const video = participantVideoRef.current;
+    if (!video) return;
+    beginParticipantLongPress(event);
+    const rect = video.getBoundingClientRect();
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    participantVideoDragRef.current = {
+      pointerId: event.pointerId,
+      offsetX: event.clientX - rect.left,
+      offsetY: event.clientY - rect.top,
+    };
+    setParticipantVideoPosition({ left: rect.left, top: rect.top });
+  };
+
+  const moveParticipantVideo = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = participantVideoDragRef.current;
+    const video = participantVideoRef.current;
+    if (!drag || drag.pointerId !== event.pointerId || !video) return;
+    cancelParticipantLongPress();
+    event.preventDefault();
+    event.stopPropagation();
+    const margin = 8;
+    const rect = video.getBoundingClientRect();
+    setParticipantVideoPosition({
+      left: Math.min(
+        Math.max(margin, event.clientX - drag.offsetX),
+        Math.max(margin, window.innerWidth - rect.width - margin)
+      ),
+      top: Math.min(
+        Math.max(margin, event.clientY - drag.offsetY),
+        Math.max(margin, window.innerHeight - rect.height - margin)
+      ),
+    });
+  };
+
+  const endParticipantVideoDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+    cancelParticipantLongPress();
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    participantVideoDragRef.current = null;
+  };
+
+  const beginParticipantVideoResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const video = participantVideoRef.current;
+    if (!video) return;
+    const rect = video.getBoundingClientRect();
+    event.preventDefault();
+    event.stopPropagation();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    participantVideoResizeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startWidth: rect.width,
+      startHeight: rect.height,
+    };
+  };
+
+  const resizeParticipantVideo = (event: React.PointerEvent<HTMLButtonElement>) => {
+    const resize = participantVideoResizeRef.current;
+    if (!resize || resize.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setParticipantVideoWidth(Math.min(640, Math.max(180, resize.startWidth + event.clientX - resize.startX)));
+    setParticipantVideoHeight(Math.min(420, Math.max(102, resize.startHeight + event.clientY - resize.startY)));
+  };
+
+  const endParticipantVideoResize = (event: React.PointerEvent<HTMLButtonElement>) => {
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    participantVideoResizeRef.current = null;
+  };
+
   const openSelfViewPictureInPicture = async () => {
     const video = localVideoRef.current;
     if (!video) return;
@@ -4338,18 +4435,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   setIsParticipantVideoMenuOpen(true);
                 }
               }}
-              onPointerDown={beginParticipantLongPress}
-              onPointerUp={cancelParticipantLongPress}
-              onPointerCancel={cancelParticipantLongPress}
-              onPointerMove={cancelParticipantLongPress}
+              onPointerDown={beginParticipantVideoDrag}
+              onPointerUp={endParticipantVideoDrag}
+              onPointerCancel={endParticipantVideoDrag}
+              onPointerMove={moveParticipantVideo}
               style={{
-                position: "relative",
+                position: "fixed",
+                left: participantVideoPosition ? `${participantVideoPosition.left}px` : "18px",
+                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "80px",
+                zIndex: 221,
                 overflow: "visible",
+                width: `min(${participantVideoWidth}px, calc(100vw - 16px))`,
                 height: `${participantVideoHeight}px`,
-                minHeight: "140px",
-                maxHeight: "min(420px, calc(100dvh - 190px))",
+                minWidth: "180px",
+                minHeight: "102px",
+                maxWidth: "min(640px, calc(100vw - 16px))",
+                maxHeight: "min(420px, calc(100dvh - 16px))",
                 borderRadius: "14px",
                 background: "#0f172a",
+                boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
+                cursor: participantVideoDragRef.current ? "grabbing" : "grab",
+                touchAction: "none",
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
               }}
             >
@@ -4449,6 +4555,28 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   </button>
                 </div>
               )}
+              <button
+                type="button"
+                aria-label={t("Resize participant video", "Zmień rozmiar wideo uczestnika")}
+                title={t("Drag to resize", "Przeciągnij, aby zmienić rozmiar")}
+                onPointerDown={beginParticipantVideoResize}
+                onPointerMove={resizeParticipantVideo}
+                onPointerUp={endParticipantVideoResize}
+                onPointerCancel={endParticipantVideoResize}
+                style={{
+                  position: "absolute",
+                  right: -5,
+                  bottom: -5,
+                  width: 24,
+                  height: 24,
+                  padding: 0,
+                  border: 0,
+                  borderRadius: "8px 0 12px 0",
+                  background: "linear-gradient(135deg, transparent 45%, rgba(255,255,255,0.9) 46% 54%, transparent 55% 65%, rgba(255,255,255,0.9) 66% 74%, transparent 75%)",
+                  cursor: "nwse-resize",
+                  touchAction: "none",
+                }}
+              />
             </div>
           )}
 
