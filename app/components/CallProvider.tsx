@@ -10,6 +10,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { createPortal } from "react-dom";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   LoaderCircle,
@@ -4420,7 +4421,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && (
+          {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && typeof document !== "undefined" && createPortal((
             <div
               ref={participantVideoRef}
               tabIndex={0}
@@ -4578,7 +4579,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 }}
               />
             </div>
-          )}
+          ), document.body)}
 
           {phase === "connected" && showCallVideo && isRemoteVideoOn && isParticipantVideoHidden && (
             <button
