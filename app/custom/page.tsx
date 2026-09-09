@@ -43,6 +43,7 @@ import {
   Moon,
   Plus,
   Phone,
+  PhoneOff,
   RefreshCw,
   Redo2,
   Ruler,
@@ -16806,7 +16807,11 @@ export default function Page() {
                     cursor: "pointer",
                   }}
                 >
-                  <Phone size={17} strokeWidth={2.2} />
+                  {isCallConnected ? (
+                    <PhoneOff size={18} strokeWidth={2.2} />
+                  ) : (
+                    <Phone size={17} strokeWidth={2.2} />
+                  )}
                 </button>
               </>
             )}
