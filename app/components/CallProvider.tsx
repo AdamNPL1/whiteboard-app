@@ -3296,14 +3296,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [isSwitchingCamera, refreshMediaDevices, startCamera, stopCamera, t]);
 
   const prepareSelectedMedia = useCallback(async () => {
-    if (joinWithCamera && !localCameraTrackRef.current) {
+    // Every participant joins with video by default. Do this in the media
+    // pipeline itself so a stale saved/UI preference cannot produce an
+    // audio-only offer or answer. Camera failures remain non-fatal and the
+    // browser's permission prompt is still authoritative.
+    if (!localCameraTrackRef.current) {
       await startCamera(selectedCameraId);
     }
     const stream = await getMicrophone(selectedMicrophoneId, isMuted);
     stream.getAudioTracks().forEach((track) => {
       track.enabled = !isMuted;
     });
-  }, [getMicrophone, isMuted, joinWithCamera, selectedCameraId, selectedMicrophoneId, startCamera]);
+  }, [getMicrophone, isMuted, selectedCameraId, selectedMicrophoneId, startCamera]);
 
   const joinOutgoingCall = useCallback(async () => {
     if (!pendingParticipant || isPreparingMedia) return;
@@ -4402,8 +4406,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               onPointerMove={moveParticipantVideo}
               style={{
                 position: "fixed",
-                left: participantVideoPosition ? `${participantVideoPosition.left}px` : "18px",
-                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "80px",
+                left: participantVideoPosition
+                  ? `${participantVideoPosition.left}px`
+                  : "clamp(8px, calc(50% - 284px), calc(100vw - 328px))",
+                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "60px",
                 zIndex: 221,
                 overflow: "visible",
                 width: `min(${participantVideoWidth}px, calc(100vw - 16px))`,
@@ -4841,10 +4847,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }}
           style={{
             position: "fixed",
-            left: selfViewPosition ? `${selfViewPosition.left}px` : "auto",
-            right: selfViewPosition ? "auto" : "18px",
-            top: selfViewPosition ? `${selfViewPosition.top}px` : "auto",
-            bottom: selfViewPosition ? "auto" : "80px",
+            left: selfViewPosition
+              ? `${selfViewPosition.left}px`
+              : "clamp(8px, calc(50% + 44px), calc(100vw - 248px))",
+            right: "auto",
+            top: selfViewPosition ? `${selfViewPosition.top}px` : "60px",
+            bottom: "auto",
             zIndex: 220,
             width: `min(${selfViewDimensions.width}px, calc(100vw - 16px))`,
             height: `${selfViewDimensions.height}px`,
