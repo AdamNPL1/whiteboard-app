@@ -130,6 +130,8 @@ type MediaPermissionState = "prompt" | "granted" | "denied" | "unavailable";
 
 type CallContextValue = {
   setBoardContext: (board: BoardContext | null) => void;
+  isCallConnected: boolean;
+  endActiveCall: () => void;
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -3434,8 +3436,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [clearCallResources]);
 
   const contextValue = useMemo(
-    () => ({ setBoardContext: setBoard }),
-    []
+    () => ({
+      setBoardContext: setBoard,
+      isCallConnected: phase === "connected",
+      endActiveCall: () => void endCall(),
+    }),
+    [endCall, phase]
   );
 
   const presentedCallMessage = presentCallMessage(message);
@@ -3912,34 +3918,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }}
         >
           <Phone size={16} />
-        </button>
-      )}
-
-      {user && board && phase === "connected" && (
-        <button
-          type="button"
-          aria-label={t("End call", "Zakończ rozmowę")}
-          title={t("End call", "Zakończ rozmowę")}
-          onClick={() => void endCall()}
-          style={{
-            position: "fixed",
-            top: "7px",
-            left: "112px",
-            zIndex: 72,
-            width: "34px",
-            height: "34px",
-            borderRadius: "10px",
-            border: "none",
-            background: "transparent",
-            color: "#ffffff",
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            padding: 0,
-            boxShadow: "none",
-          }}
-        >
-          <PhoneOff size={17} />
         </button>
       )}
 

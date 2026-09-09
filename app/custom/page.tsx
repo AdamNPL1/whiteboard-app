@@ -44,6 +44,7 @@ import {
   Monitor,
   Moon,
   Plus,
+  Phone,
   RefreshCw,
   Redo2,
   Ruler,
@@ -468,7 +469,7 @@ type BoardBrowserView =
 
 export default function Page() {
   const { language, setLanguage, text: t } = useLanguage();
-  const { setBoardContext } = useCall();
+  const { setBoardContext, isCallConnected, endActiveCall } = useCall();
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -16734,15 +16735,6 @@ export default function Page() {
               </button>
             )}
 
-            <span
-              aria-hidden="true"
-              style={{
-                width: "1px",
-                height: "18px",
-                margin: "0 2px",
-                background: "rgba(255,255,255,0.28)",
-              }}
-            />
             <button
               type="button"
               aria-label={t("Undo last change", "Cofnij ostatnią zmianę")}
@@ -16789,6 +16781,39 @@ export default function Page() {
             >
               <Redo2 size={17} strokeWidth={2.2} />
             </button>
+            {isCallConnected && (
+              <>
+                <span
+                  aria-hidden="true"
+                  style={{
+                    width: "1px",
+                    height: "18px",
+                    margin: "0 2px",
+                    background: "rgba(255,255,255,0.28)",
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-label={t("End call", "Zakończ rozmowę")}
+                  title={t("End call", "Zakończ rozmowę")}
+                  onClick={endActiveCall}
+                  style={{
+                    width: "28px",
+                    height: "28px",
+                    padding: 0,
+                    borderRadius: "8px",
+                    border: "none",
+                    background: "transparent",
+                    color: "#ffffff",
+                    display: "grid",
+                    placeItems: "center",
+                    cursor: "pointer",
+                  }}
+                >
+                  <Phone size={17} strokeWidth={2.2} />
+                </button>
+              </>
+            )}
           </div>
         )}
 
