@@ -1024,6 +1024,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(interval);
   }, [call?.acceptedAt, call?.stateChangedAt, phase]);
 
+  useEffect(() => {
+    if (phase === "connected") setIsCallPanelMinimized(true);
+  }, [phase]);
+
   const heartbeatCallId = call?.id;
   const heartbeatCallStatus = call?.status;
 
@@ -4510,6 +4514,93 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     boxShadow: "0 14px 35px rgba(15,23,42,0.26)",
                   }}
                 >
+                  <strong style={{ padding: "5px 8px 2px", fontSize: 11 }}>
+                    {t("Call controls", "Sterowanie rozmową")}
+                  </strong>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={isCameraStarting}
+                    onClick={() => {
+                      setIsParticipantVideoMenuOpen(false);
+                      if (isCameraOn) void stopCamera();
+                      else void startCamera(selectedCameraId);
+                    }}
+                    style={{ ...selfViewMenuButtonStyle, opacity: isCameraStarting ? 0.55 : 1 }}
+                  >
+                    {isCameraOn
+                      ? t("Turn my camera off", "Wyłącz moją kamerę")
+                      : t("Turn my camera on", "Włącz moją kamerę")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsCallPanelMinimized(false);
+                      setIsCallQualityOpen(true);
+                      setIsCallDeviceMenuOpen(false);
+                      setIsCallParticipantsMenuOpen(false);
+                      setIsCallMoreMenuOpen(false);
+                      setIsParticipantVideoMenuOpen(false);
+                    }}
+                    style={selfViewMenuButtonStyle}
+                  >
+                    {t("Call quality", "Jakość rozmowy")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsCallPanelMinimized(false);
+                      setIsCallDeviceMenuOpen(true);
+                      setIsCallParticipantsMenuOpen(false);
+                      setIsCallMoreMenuOpen(false);
+                      setIsParticipantVideoMenuOpen(false);
+                    }}
+                    style={selfViewMenuButtonStyle}
+                  >
+                    {t("Devices", "Urządzenia")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsCallPanelMinimized(false);
+                      setIsCallParticipantsMenuOpen(true);
+                      setIsCallDeviceMenuOpen(false);
+                      setIsCallMoreMenuOpen(false);
+                      setIsParticipantVideoMenuOpen(false);
+                    }}
+                    style={selfViewMenuButtonStyle}
+                  >
+                    {t("People", "Osoby")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsCallPanelMinimized(false);
+                      setIsCallMoreMenuOpen(true);
+                      setIsCallDeviceMenuOpen(false);
+                      setIsCallParticipantsMenuOpen(false);
+                      setIsParticipantVideoMenuOpen(false);
+                    }}
+                    style={selfViewMenuButtonStyle}
+                  >
+                    {t("More call options", "Więcej opcji rozmowy")}
+                  </button>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    onClick={() => {
+                      setIsCallPanelMinimized(false);
+                      setIsParticipantVideoMenuOpen(false);
+                    }}
+                    style={selfViewMenuButtonStyle}
+                  >
+                    {t("Open full call panel", "Otwórz pełny panel rozmowy")}
+                  </button>
+                  <div aria-hidden="true" style={{ height: 1, margin: "3px 5px", background: "#e2e8f0" }} />
                   <label style={{ display: "grid", gap: 5, padding: "5px 8px", fontSize: 11, fontWeight: 700 }}>
                     {t("Participant volume", "Głośność uczestnika")} · {Math.round(participantVolume * 100)}%
                     <input type="range" min="0" max="1" step="0.05" value={participantVolume} onChange={(event) => changeParticipantVolume(Number(event.target.value))} style={{ width: "100%", accentColor: "#7c3aed" }} />
