@@ -1026,10 +1026,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return () => window.clearInterval(interval);
   }, [call?.acceptedAt, call?.stateChangedAt, phase]);
 
-  useEffect(() => {
-    if (phase === "connected") setIsCallPanelMinimized(true);
-  }, [phase]);
-
   const heartbeatCallId = call?.id;
   const heartbeatCallStatus = call?.status;
 
@@ -4460,7 +4456,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               }}
             >
               <video
-                ref={remoteVideoRef}
+                ref={(video) => {
+                  remoteVideoRef.current = video;
+                  const stream = remoteVideoStreamRef.current;
+                  if (!video || !stream) return;
+                  if (video.srcObject !== stream) video.srcObject = stream;
+                  void video.play().catch(() => undefined);
+                }}
                 autoPlay
                 muted
                 playsInline
