@@ -37,6 +37,8 @@ import {
   Lock,
   LockOpen,
   Mail,
+  Mic,
+  MicOff,
   Clock3,
   History,
   Monitor,
@@ -472,8 +474,10 @@ export default function Page() {
     setBoardContext,
     canStartCall,
     isCallConnected,
+    isCallMuted,
     startCallChooser,
     endActiveCall,
+    toggleActiveCallMute,
   } = useCall();
   const topBarHeight = 48;
   const appSansFontFamily =
@@ -16813,6 +16817,37 @@ export default function Page() {
                     <Phone size={17} strokeWidth={2.2} />
                   )}
                 </button>
+                {isCallConnected && (
+                  <button
+                    type="button"
+                    aria-label={isCallMuted
+                      ? t("Unmute microphone", "Włącz mikrofon")
+                      : t("Mute microphone", "Wycisz mikrofon")}
+                    title={isCallMuted
+                      ? t("Unmute", "Włącz mikrofon")
+                      : t("Mute", "Wycisz")}
+                    aria-pressed={isCallMuted}
+                    onClick={toggleActiveCallMute}
+                    style={{
+                      width: "28px",
+                      height: "28px",
+                      padding: 0,
+                      borderRadius: "8px",
+                      border: "none",
+                      background: "transparent",
+                      color: "#ffffff",
+                      display: "grid",
+                      placeItems: "center",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {isCallMuted ? (
+                      <MicOff size={18} strokeWidth={2.2} />
+                    ) : (
+                      <Mic size={18} strokeWidth={2.2} />
+                    )}
+                  </button>
+                )}
               </>
             )}
           </div>

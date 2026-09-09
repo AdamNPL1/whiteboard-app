@@ -132,8 +132,10 @@ type CallContextValue = {
   setBoardContext: (board: BoardContext | null) => void;
   canStartCall: boolean;
   isCallConnected: boolean;
+  isCallMuted: boolean;
   startCallChooser: () => void;
   endActiveCall: () => void;
+  toggleActiveCallMute: () => void;
 };
 
 const CallContext = createContext<CallContextValue | null>(null);
@@ -3442,10 +3444,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setBoardContext: setBoard,
       canStartCall: Boolean(user && board && phase === "idle"),
       isCallConnected: phase === "connected",
+      isCallMuted: isMuted,
       startCallChooser: () => void openCallChooser(),
       endActiveCall: () => void endCall(),
+      toggleActiveCallMute: toggleMute,
     }),
-    [board, endCall, openCallChooser, phase, user]
+    [board, endCall, isMuted, openCallChooser, phase, toggleMute, user]
   );
 
   const presentedCallMessage = presentCallMessage(message);
