@@ -12487,7 +12487,7 @@ export default function Page() {
                 style={{
                   position: "absolute",
                   top: 0,
-                  left: "90px",
+                  left: "48px",
                   width: "34px",
                   height: "34px",
                   border: "none",
@@ -16654,7 +16654,7 @@ export default function Page() {
             style={{
               position: "absolute",
               top: "50%",
-              left: "202px",
+              left: "154px",
               transform: "translateY(-50%)",
               minHeight: "30px",
               padding: "0 10px",
