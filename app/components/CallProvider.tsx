@@ -3944,31 +3944,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           className="scriboo-call-panel"
           tabIndex={-1}
           aria-label={t("Audio call", "Połączenie audio")}
-          onPointerDown={beginCallPanelDrag}
-          onPointerMove={moveCallPanel}
-          onPointerUp={endCallPanelDrag}
-          onPointerCancel={endCallPanelDrag}
+          onPointerDown={phase === "connected" ? undefined : beginCallPanelDrag}
+          onPointerMove={phase === "connected" ? undefined : moveCallPanel}
+          onPointerUp={phase === "connected" ? undefined : endCallPanelDrag}
+          onPointerCancel={phase === "connected" ? undefined : endCallPanelDrag}
           style={{
             position: "fixed",
             ...callPanelDockStyle,
             zIndex: 210,
-            width: `min(${callPanelWidth}px, calc(100vw - max(24px, env(safe-area-inset-left)) - max(24px, env(safe-area-inset-right))))`,
+            width: phase === "connected"
+              ? 0
+              : `min(${callPanelWidth}px, calc(100vw - max(24px, env(safe-area-inset-left)) - max(24px, env(safe-area-inset-right))))`,
+            height: phase === "connected" ? 0 : "auto",
             maxHeight: "calc(100dvh - max(76px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))",
-            overflowY: isCallPanelMinimized ? "hidden" : "auto",
-            padding: isCallPanelMinimized ? "10px 12px" : "18px",
+            overflow: phase === "connected" ? "visible" : undefined,
+            overflowY: phase === "connected" || isCallPanelMinimized ? "hidden" : "auto",
+            padding: phase === "connected" ? 0 : isCallPanelMinimized ? "10px 12px" : "18px",
             borderRadius: "20px",
-            border: "1px solid rgba(203,213,225,0.88)",
-            background: "rgba(255,255,255,0.97)",
+            border: phase === "connected" ? "none" : "1px solid rgba(203,213,225,0.88)",
+            background: phase === "connected" ? "transparent" : "rgba(255,255,255,0.97)",
             color: "#0f172a",
-            boxShadow: "0 24px 70px rgba(15,23,42,0.24)",
-            backdropFilter: "blur(18px)",
+            boxShadow: phase === "connected" ? "none" : "0 24px 70px rgba(15,23,42,0.24)",
+            backdropFilter: phase === "connected" ? "none" : "blur(18px)",
+            pointerEvents: phase === "connected" ? "none" : "auto",
             display: "grid",
             gap: isCallPanelMinimized ? 0 : "13px",
           }}
         >
           <div
             style={{
-              display: "flex",
+              display: phase === "connected" ? "none" : "flex",
               alignItems: "center",
               gap: isCallPanelMinimized ? "9px" : "12px",
               cursor: callPanelDragRef.current ? "grabbing" : "grab",
@@ -4010,7 +4015,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {isCallPanelMinimized ? <Maximize2 size={15} /> : <Minus size={16} />}
             </button>
           </div>
-          <div style={{ display: isCallPanelMinimized ? "none" : "contents" }}>
+          <div style={{ display: phase === "connected" || isCallPanelMinimized ? "none" : "contents" }}>
           <div role="status" aria-live="polite" aria-atomic="true" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#854d0e" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {visibleStatusText}
           </div>
@@ -4438,7 +4443,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 left: participantVideoPosition
                   ? `${participantVideoPosition.left}px`
                   : "clamp(8px, calc(50% - 284px), calc(100vw - 328px))",
-                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "60px",
+                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "104px",
                 zIndex: 221,
                 overflow: "visible",
                 width: `min(${participantVideoWidth}px, calc(100vw - 16px))`,
@@ -4955,6 +4960,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         </section>
       )}
 
+      {phase === "connected" && (
+        <div
+          role="timer"
+          aria-label={t("Meeting duration", "Czas spotkania")}
+          style={{
+            position: "fixed",
+            top: "60px",
+            left: "50%",
+            transform: "translateX(-50%)",
+            zIndex: 222,
+            minHeight: 32,
+            padding: "0 14px",
+            border: "1px solid rgba(203,213,225,0.92)",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.94)",
+            color: "#334155",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.14)",
+            backdropFilter: "blur(12px)",
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 8,
+            whiteSpace: "nowrap",
+            fontSize: 12,
+            fontWeight: 750,
+            pointerEvents: "none",
+          }}
+        >
+          <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "#22c55e" }} />
+          <span>{formatCallDuration(callDurationSeconds)}</span>
+        </div>
+      )}
+
       {phase === "connected" && showCallVideo && isCameraOn && isSelfViewVisible && (
         <div
           ref={selfViewRef}
@@ -4972,7 +5009,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               ? `${selfViewPosition.left}px`
               : "clamp(8px, calc(50% + 44px), calc(100vw - 248px))",
             right: "auto",
-            top: selfViewPosition ? `${selfViewPosition.top}px` : "60px",
+            top: selfViewPosition ? `${selfViewPosition.top}px` : "104px",
             bottom: "auto",
             zIndex: 220,
             width: `min(${selfViewDimensions.width}px, calc(100vw - 16px))`,
