@@ -356,6 +356,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const localCameraIntentRef = useRef(false);
+  const connectedCameraAttemptCallIdRef = useRef<string | null>(null);
   const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -867,6 +868,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsMicrophoneReady(false);
     localCameraTrackRef.current = null;
     localCameraIntentRef.current = false;
+    connectedCameraAttemptCallIdRef.current = null;
     localVideoSenderRef.current = null;
     localVideoTransceiverRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
@@ -3240,6 +3242,19 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       setIsCameraStarting(false);
     }
   }, [activateLocalVideoSender, isCameraStarting, refreshMediaDevices, selectedCameraId, sendSignal, stopCamera, t]);
+
+  useEffect(() => {
+    if (phase !== "connected" || isCameraOn || isCameraStarting) return;
+    const activeCallId = callRef.current?.id;
+    if (!activeCallId || connectedCameraAttemptCallIdRef.current === activeCallId) return;
+
+    // The answer transition can race React's pre-call camera preference state.
+    // Guarantee one camera-start attempt after the peer is actually connected,
+    // on both caller and recipient. Marking the call first prevents a deliberate
+    // later camera-off action from being automatically reversed.
+    connectedCameraAttemptCallIdRef.current = activeCallId;
+    void startCamera(selectedCameraId);
+  }, [isCameraOn, isCameraStarting, phase, selectedCameraId, startCamera]);
 
   const switchCamera = useCallback(async (cameraId: string) => {
     if (!cameraId || isSwitchingCamera || !navigator.mediaDevices?.getUserMedia) return;
