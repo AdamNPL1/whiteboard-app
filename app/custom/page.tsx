@@ -24,7 +24,6 @@ import {
   BookOpenText,
   CalendarDays,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -40,7 +39,6 @@ import {
   Mail,
   Clock3,
   History,
-  CloudOff,
   Monitor,
   Moon,
   Plus,
@@ -16671,18 +16669,6 @@ export default function Page() {
               boxShadow: "none",
             }}
           >
-            {boardSaveState === "offline" || !isOnline ? (
-              <CloudOff size={14} />
-            ) : boardSaveState === "error" || boardSaveState === "conflict" ? (
-              <AlertTriangle size={14} />
-            ) : boardSaveState === "saving" ? (
-              <RefreshCw size={14} />
-            ) : boardSaveState === "saved" ? (
-              <CheckCircle2 size={14} />
-            ) : (
-              <RefreshCw size={14} />
-            )}
-
             {(boardSaveState === "offline" ||
               !isOnline ||
               boardSaveState === "conflict" ||
