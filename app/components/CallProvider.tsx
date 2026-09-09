@@ -3929,14 +3929,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             width: "34px",
             height: "34px",
             borderRadius: "10px",
-            border: "1px solid rgba(255,255,255,0.42)",
-            background: "#dc2626",
+            border: "none",
+            background: "transparent",
             color: "#ffffff",
             display: "grid",
             placeItems: "center",
             cursor: "pointer",
             padding: 0,
-            boxShadow: "0 5px 14px rgba(153,27,27,0.3)",
+            boxShadow: "none",
           }}
         >
           <PhoneOff size={17} />
