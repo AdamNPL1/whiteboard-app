@@ -469,7 +469,13 @@ type BoardBrowserView =
 
 export default function Page() {
   const { language, setLanguage, text: t } = useLanguage();
-  const { setBoardContext, isCallConnected, endActiveCall } = useCall();
+  const {
+    setBoardContext,
+    canStartCall,
+    isCallConnected,
+    startCallChooser,
+    endActiveCall,
+  } = useCall();
   const topBarHeight = 48;
   const appSansFontFamily =
     'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
@@ -16781,7 +16787,7 @@ export default function Page() {
             >
               <Redo2 size={17} strokeWidth={2.2} />
             </button>
-            {isCallConnected && (
+            {(canStartCall || isCallConnected) && (
               <>
                 <span
                   aria-hidden="true"
@@ -16794,9 +16800,13 @@ export default function Page() {
                 />
                 <button
                   type="button"
-                  aria-label={t("End call", "Zakończ rozmowę")}
-                  title={t("End call", "Zakończ rozmowę")}
-                  onClick={endActiveCall}
+                  aria-label={isCallConnected
+                    ? t("End call", "Zakończ rozmowę")
+                    : t("Start audio call", "Rozpocznij połączenie audio")}
+                  title={isCallConnected
+                    ? t("End call", "Zakończ rozmowę")
+                    : t("Start audio call", "Rozpocznij połączenie audio")}
+                  onClick={isCallConnected ? endActiveCall : startCallChooser}
                   style={{
                     width: "28px",
                     height: "28px",

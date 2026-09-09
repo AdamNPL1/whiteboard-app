@@ -130,7 +130,9 @@ type MediaPermissionState = "prompt" | "granted" | "denied" | "unavailable";
 
 type CallContextValue = {
   setBoardContext: (board: BoardContext | null) => void;
+  canStartCall: boolean;
   isCallConnected: boolean;
+  startCallChooser: () => void;
   endActiveCall: () => void;
 };
 
@@ -3438,10 +3440,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const contextValue = useMemo(
     () => ({
       setBoardContext: setBoard,
+      canStartCall: Boolean(user && board && phase === "idle"),
       isCallConnected: phase === "connected",
+      startCallChooser: () => void openCallChooser(),
       endActiveCall: () => void endCall(),
     }),
-    [endCall, phase]
+    [board, endCall, openCallChooser, phase, user]
   );
 
   const presentedCallMessage = presentCallMessage(message);
@@ -3860,66 +3864,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     <CallContext.Provider value={contextValue}>
       {children}
       <audio ref={remoteAudioRef} autoPlay playsInline hidden />
-
-      {user && !board && phase === "idle" && (
-        <button
-          type="button"
-          aria-label="Audio call is loading"
-          disabled
-          style={{
-            position: "fixed",
-            top: "7px",
-            left: "112px",
-            zIndex: 72,
-            width: "34px",
-            height: "34px",
-            border: "none",
-            borderRadius: "10px",
-            background: "transparent",
-            color: "#ffffff",
-            display: "grid",
-            placeItems: "center",
-            opacity: 0.72,
-            padding: 0,
-          }}
-        >
-          <Phone size={16} />
-        </button>
-      )}
-
-      {user && board && phase === "idle" && (
-        <button
-          type="button"
-          aria-label={t(`Call from ${board.name}`, `Zadzwoń z tablicy ${board.name}`)}
-          title={t("Start audio call", "Rozpocznij połączenie audio")}
-          onClick={() => void openCallChooser()}
-          style={{
-            position: "fixed",
-            top: "7px",
-            left: "112px",
-            zIndex: 72,
-            width: "34px",
-            height: "34px",
-            borderRadius: "10px",
-            border: "none",
-            background: "transparent",
-            backgroundColor: "transparent",
-            backgroundImage: "none",
-            color: "#ffffff",
-            display: "grid",
-            placeItems: "center",
-            cursor: "pointer",
-            backdropFilter: "none",
-            boxShadow: "none",
-            outline: "none",
-            appearance: "none",
-            padding: 0,
-            lineHeight: 0,
-          }}
-        >
-          <Phone size={16} />
-        </button>
-      )}
 
       {phase === "choosing" && participants.length === 0 && (
         <div style={overlayStyle}>
