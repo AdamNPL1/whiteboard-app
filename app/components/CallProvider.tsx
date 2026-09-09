@@ -3915,6 +3915,34 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         </button>
       )}
 
+      {user && board && phase === "connected" && (
+        <button
+          type="button"
+          aria-label={t("End call", "Zakończ rozmowę")}
+          title={t("End call", "Zakończ rozmowę")}
+          onClick={() => void endCall()}
+          style={{
+            position: "fixed",
+            top: "7px",
+            left: "112px",
+            zIndex: 72,
+            width: "34px",
+            height: "34px",
+            borderRadius: "10px",
+            border: "1px solid rgba(255,255,255,0.42)",
+            background: "#dc2626",
+            color: "#ffffff",
+            display: "grid",
+            placeItems: "center",
+            cursor: "pointer",
+            padding: 0,
+            boxShadow: "0 5px 14px rgba(153,27,27,0.3)",
+          }}
+        >
+          <PhoneOff size={17} />
+        </button>
+      )}
+
       {phase === "choosing" && participants.length === 0 && (
         <div style={overlayStyle}>
           <div className="scriboo-call-dialog" style={dialogStyle} role="status" aria-live="polite">
@@ -4814,20 +4842,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               >
                 <Minus size={19} />
                 <span>{t("Minimize", "Minimalizuj")}</span>
-              </button>
-              <button
-                type="button"
-                aria-label={t("End call", "Zakończ rozmowę")}
-                title={t("End call", "Zakończ rozmowę")}
-                onPointerDown={(event) => event.stopPropagation()}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void endCall();
-                }}
-                style={{ ...callToolbarButtonStyle, gridColumn: "span 2", background: "#fee2e2", borderColor: "#fecaca", color: "#b91c1c" }}
-              >
-                <PhoneOff size={19} />
-                <span>{t("End call", "Zakończ")}</span>
               </button>
             </div>
           ) : phase === "error" || phase === "ended" ? (
