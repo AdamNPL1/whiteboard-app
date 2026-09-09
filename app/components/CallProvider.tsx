@@ -375,6 +375,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   } | null>(null);
   const participantLongPressTimerRef = useRef<number | null>(null);
   const remoteVideoStreamRef = useRef<MediaStream | null>(null);
+  const remoteVideoIntentRef = useRef(false);
   const queuedCandidatesRef = useRef<
     Array<{ generation: number; candidate: RTCIceCandidateInit }>
   >([]);
@@ -873,6 +874,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     localVideoTransceiverRef.current = null;
     if (localVideoRef.current) localVideoRef.current.srcObject = null;
     remoteVideoStreamRef.current = null;
+    remoteVideoIntentRef.current = false;
     if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
     setIsCameraOn(false);
     setIsCameraStarting(false);
@@ -1520,9 +1522,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (event.track.kind === "video") {
           const videoStream = event.streams[0] ?? new MediaStream([event.track]);
           remoteVideoStreamRef.current = videoStream;
-          setIsRemoteVideoOn(!event.track.muted);
+          setIsRemoteVideoOn(remoteVideoIntentRef.current || !event.track.muted);
           event.track.onunmute = () => setIsRemoteVideoOn(true);
           event.track.onmute = () => {
+            if (remoteVideoIntentRef.current) return;
             setIsRemoteVideoOn(false);
             setIsParticipantVideoMenuOpen(false);
           };
@@ -2066,6 +2069,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       if (signal.kind === "video-state") {
         // This signal describes only the other participant. Receiving it must
         // never request permission for or activate this browser's camera.
+        remoteVideoIntentRef.current = signal.enabled;
         if (!signal.enabled) {
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
@@ -3259,6 +3263,17 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     connectedCameraAttemptCallIdRef.current = activeCallId;
     void startCamera(selectedCameraId);
   }, [isCameraOn, isCameraStarting, phase, selectedCameraId, startCamera]);
+
+  useEffect(() => {
+    if (phase !== "connected" || !isCameraOn || !localCameraTrackRef.current) return;
+
+    // A camera opened before negotiation has no peer connection at the moment
+    // startCamera normally broadcasts video-state. Announce it again after the
+    // call reaches connected so the other client renders the already-sending
+    // track without requiring a manual off/on toggle.
+    void activateLocalVideoSender();
+    void sendSignal({ kind: "video-state", enabled: true });
+  }, [activateLocalVideoSender, isCameraOn, phase, sendSignal]);
 
   const switchCamera = useCallback(async (cameraId: string) => {
     if (!cameraId || isSwitchingCamera || !navigator.mediaDevices?.getUserMedia) return;
