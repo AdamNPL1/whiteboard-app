@@ -2574,6 +2574,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setParticipants([]);
     setPeerName(participant.name);
     setCallBoardName(board?.name ?? "");
+    // New calls default to publishing video on both sides. The user can still
+    // explicitly turn the camera off from the pre-call screen before joining.
+    setJoinWithCamera(true);
     setPreCallMessage("");
     setPhase("precall-outgoing");
   }, [board]);
@@ -3335,6 +3338,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [acceptCall, isPreparingMedia, prepareSelectedMedia, t]);
 
   const openIncomingPreCall = useCallback(() => {
+    // Answering uses the same camera-on default as starting a call, rather than
+    // inheriting a stale audio-only preference from an earlier session.
+    setJoinWithCamera(true);
     setPreCallMessage("");
     setPhase("precall-incoming");
   }, []);
