@@ -4014,8 +4014,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {isCallPanelMinimized ? <Maximize2 size={15} /> : <Minus size={16} />}
             </button>
           </div>
-          {!isCallPanelMinimized && (
-            <>
+          <div style={{ display: isCallPanelMinimized ? "none" : "contents" }}>
           <div role="status" aria-live="polite" aria-atomic="true" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#854d0e" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {visibleStatusText}
           </div>
@@ -4950,8 +4949,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </button>
             </div>
           )}
-            </>
-          )}
+          </div>
         </section>
       )}
 
