@@ -101,6 +101,13 @@ export async function PATCH(request: NextRequest) {
     if (error) {
       return NextResponse.json({ error: "Could not change your password." }, { status: 400 });
     }
+    const { error: revokeError } = await supabase.auth.signOut({ scope: "others" });
+    if (revokeError) {
+      return NextResponse.json(
+        { error: "Password changed, but other sessions could not be revoked." },
+        { status: 500 }
+      );
+    }
     return NextResponse.json({ ok: true, message: "Password changed successfully." });
   }
 

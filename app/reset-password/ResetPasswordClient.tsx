@@ -5,8 +5,6 @@ import { useSearchParams } from "next/navigation";
 import type { CSSProperties, FormEvent } from "react";
 import { useMemo, useState } from "react";
 
-import { getSupabaseBrowserClient } from "@/lib/supabase-browser";
-
 export function ResetPasswordClient() {
   const searchParams = useSearchParams();
   const [password, setPassword] = useState("");
@@ -53,19 +51,26 @@ export function ResetPasswordClient() {
     setMessage("");
 
     try {
-      const supabase = getSupabaseBrowserClient();
-      const { error } = await supabase.auth.updateUser({ password });
+      const response = await fetch("/api/auth/reset-password", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ password, confirmPassword }),
+      });
+      const result = (await response.json().catch(() => ({}))) as {
+        error?: string;
+        message?: string;
+      };
 
-      if (error) {
+      if (!response.ok) {
         setIsSuccess(false);
-        setMessage("Could not update your password.");
+        setMessage(result.error ?? "Could not update your password.");
         return;
       }
 
       setIsSuccess(true);
       setPassword("");
       setConfirmPassword("");
-      setMessage("Password updated. You can now go back to the board and log in.");
+      setMessage(result.message ?? "Password updated. Sign in again.");
     } finally {
       setIsSubmitting(false);
     }
