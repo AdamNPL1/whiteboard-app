@@ -1,0 +1,7 @@
+MediaPipe Selfie Segmentation runtime assets
+Package: @mediapipe/selfie_segmentation 0.1.1675465747
+License: Apache-2.0
+Source: https://www.npmjs.com/package/@mediapipe/selfie_segmentation
+
+These files are copied without modification from the installed npm package so
+Scriboo can run background segmentation from its own origin.

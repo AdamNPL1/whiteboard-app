@@ -27,6 +27,7 @@ import { POST as register } from "@/app/api/auth/register/route";
 import { POST as login } from "@/app/api/auth/login/route";
 import { POST as logout } from "@/app/api/auth/logout/route";
 import { POST as forgotPassword } from "@/app/api/auth/forgot-password/route";
+import { getSafeInternalRedirectPath } from "@/lib/auth-utils";
 
 const request = (path: string, body: unknown) =>
   new NextRequest(`https://scribooapp.com${path}`, {
@@ -160,5 +161,23 @@ describe("authentication routes", () => {
       { redirectTo: "https://scribooapp.com/auth/callback?next=/reset-password" }
     );
     expect(await response.json()).toMatchObject({ ok: true });
+  });
+});
+
+describe("authentication redirects", () => {
+  it("keeps valid application paths", () => {
+    expect(getSafeInternalRedirectPath("/custom?welcome=login")).toBe(
+      "/custom?welcome=login"
+    );
+  });
+
+  it.each([
+    "https://attacker.example/",
+    "//attacker.example/",
+    "/\\attacker.example/",
+    "javascript:alert(1)",
+    "/custom\nLocation: https://attacker.example",
+  ])("rejects an unsafe callback destination: %s", (destination) => {
+    expect(getSafeInternalRedirectPath(destination)).toBe("/custom");
   });
 });

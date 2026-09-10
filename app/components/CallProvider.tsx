@@ -3558,11 +3558,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
     void (async () => {
       try {
-        const { SelfieSegmentation, VERSION } = await import("@mediapipe/selfie_segmentation");
+        const { SelfieSegmentation } = await import("@mediapipe/selfie_segmentation");
         if (cancelled) return;
         segmenter = new SelfieSegmentation({
-          locateFile: (file) =>
-            `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@${VERSION}/${file}`,
+          locateFile: (file) => `/mediapipe/selfie-segmentation/${file}`,
         });
         segmenter.setOptions({ modelSelection: 1, selfieMode: true });
         segmenter.onResults(drawSegmentedFrame);

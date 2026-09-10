@@ -1,21 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
 
+import { getSafeInternalRedirectPath } from "@/lib/auth-utils";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 
 export const runtime = "nodejs";
 
-const getSafeRedirectPath = (next: string | null) => {
-  if (!next || !next.startsWith("/")) {
-    return "/custom";
-  }
-
-  return next;
-};
-
 export async function GET(request: NextRequest) {
   const requestUrl = new URL(request.url);
   const code = requestUrl.searchParams.get("code");
-  const nextPath = getSafeRedirectPath(requestUrl.searchParams.get("next"));
+  const nextPath = getSafeInternalRedirectPath(requestUrl.searchParams.get("next"));
   const responseCookies: Array<{
     name: string;
     value: string;

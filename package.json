@@ -24,14 +24,14 @@
     "bcrypt": "^6.0.0",
     "konva": "^10.3.0",
     "lucide-react": "^1.7.0",
-    "next": "^16.2.12",
-    "nodemailer": "^9.0.3",
+    "next": "^16.3.4",
+    "nodemailer": "^9.1.1",
     "react": "19.2.4",
     "react-dom": "19.2.4",
     "react-konva": "^19.2.5",
     "react-rnd": "^10.5.3",
     "stripe": "^22.2.3",
-    "tldraw": "^4.5.7",
+    "tldraw": "^4.5.12",
     "web-push": "^3.6.7"
   },
   "devDependencies": {
@@ -43,15 +43,19 @@
     "@types/react-dom": "^19",
     "@types/web-push": "^3.6.4",
     "eslint": "^9",
-    "eslint-config-next": "^16.2.12",
+    "eslint-config-next": "^16.3.4",
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.10"
   },
   "overrides": {
+    "@tiptap/core": "3.31.3",
+    "@tiptap/extension-code": "3.31.3",
+    "@tiptap/extension-highlight": "3.31.3",
+    "@tiptap/extension-list": "3.31.3",
     "next": {
       "postcss": "8.5.25",
-      "sharp": "0.35.3"
+      "sharp": "0.35.4"
     }
   }
 }
