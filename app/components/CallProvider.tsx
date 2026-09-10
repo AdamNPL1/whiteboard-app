@@ -3920,6 +3920,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     <CallContext.Provider value={contextValue}>
       {children}
       <audio ref={remoteAudioRef} autoPlay playsInline hidden />
+      <style jsx global>{`
+        .scriboo-video-hover-control {
+          transition: opacity 160ms ease;
+        }
+        @media (hover: hover) and (pointer: fine) {
+          .scriboo-video-tile > .scriboo-video-hover-control {
+            opacity: 0;
+            pointer-events: none;
+          }
+          .scriboo-video-tile:hover > .scriboo-video-hover-control,
+          .scriboo-video-tile:focus-within > .scriboo-video-hover-control {
+            opacity: 1;
+            pointer-events: auto;
+          }
+        }
+      `}</style>
 
       {phase === "choosing" && participants.length === 0 && (
         <div style={overlayStyle}>
@@ -4440,6 +4456,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && typeof document !== "undefined" && createPortal((
             <div
               ref={participantVideoRef}
+              className="scriboo-video-tile"
               tabIndex={0}
               aria-label={t("Participant video and options", "Wideo uczestnika i opcje")}
               onContextMenu={(event) => {
@@ -4493,6 +4510,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 style={{ width: "100%", height: "100%", display: "block", objectFit: participantVideoFit, borderRadius: "inherit" }}
               />
               <span
+                className="scriboo-video-hover-control"
                 style={{
                   position: "absolute",
                   left: "9px",
@@ -4510,6 +4528,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               </span>
               <button
                 type="button"
+                className="scriboo-video-hover-control"
                 aria-label={t("Participant options", "Opcje uczestnika")}
                 aria-expanded={isParticipantVideoMenuOpen}
                 onClick={(event) => {
@@ -5050,6 +5069,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       {phase === "connected" && showCallVideo && (isCameraOn || isSelfAvatarShown) && isSelfViewVisible && (
         <div
           ref={selfViewRef}
+          className="scriboo-video-tile"
+          tabIndex={0}
           onPointerDown={beginSelfViewDrag}
           onPointerMove={moveSelfView}
           onPointerUp={endSelfViewDrag}
@@ -5118,6 +5139,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           />
           )}
           <span
+            className="scriboo-video-hover-control"
             style={{
               position: "absolute",
               left: "9px",
@@ -5135,6 +5157,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           </span>
           <button
             type="button"
+            className="scriboo-video-hover-control"
             aria-label={t("Self-view options", "Opcje własnego podglądu")}
             aria-expanded={isSelfViewMenuOpen}
             onClick={(event) => {
