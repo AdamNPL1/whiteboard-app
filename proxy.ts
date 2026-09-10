@@ -4,6 +4,7 @@ import {
   hasValidTesterAccess,
   TESTER_ACCESS_COOKIE,
 } from "@/lib/tester-access";
+import { isCrossSiteApiMutation } from "@/lib/request-security";
 
 const isSiteClosed = () => {
   const value = process.env.SITE_CLOSED?.trim().toLowerCase();
@@ -36,6 +37,16 @@ const isPublicAsset = (pathname: string) =>
   pathname.endsWith(".ico");
 
 export async function proxy(request: NextRequest) {
+  if (isCrossSiteApiMutation(request)) {
+    return NextResponse.json(
+      { error: "Cross-site request blocked." },
+      {
+        status: 403,
+        headers: { "Cache-Control": "no-store" },
+      }
+    );
+  }
+
   if (!isSiteClosed()) {
     return NextResponse.next();
   }
