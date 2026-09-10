@@ -1,68 +1,57 @@
 -- Run after the Scriboo schema scripts in the Supabase SQL Editor.
--- This migration is idempotent: it can be rerun safely after a deployment.
--- It makes the browser/database trust boundary explicit instead of relying on
--- Supabase public-schema default grants.
+-- This migration is idempotent and supports projects where an optional
+-- feature table has not been installed yet. Existing tables are hardened;
+-- security-audit.sql reports anything that is missing.
 
 begin;
 
-alter table public.boards enable row level security;
-alter table public.user_board_state enable row level security;
-alter table public.profiles enable row level security;
-alter table public.board_shares enable row level security;
-alter table public.board_versions enable row level security;
-alter table public.board_personal_notes enable row level security;
-alter table public.call_sessions enable row level security;
-alter table public.call_participant_states enable row level security;
-alter table public.call_state_events enable row level security;
-alter table public.call_signal_messages enable row level security;
-alter table public.call_device_ownership enable row level security;
-alter table public.call_blocks enable row level security;
-alter table public.call_abuse_events enable row level security;
-alter table public.call_push_subscriptions enable row level security;
-alter table public.call_notification_preferences enable row level security;
-alter table public.api_rate_limits enable row level security;
-alter table public.stripe_webhook_events enable row level security;
+do $security$
+declare
+  table_name text;
+  application_tables constant text[] := array[
+    'boards', 'user_board_state', 'profiles', 'board_shares',
+    'board_versions', 'board_personal_notes', 'call_sessions',
+    'call_participant_states', 'call_state_events', 'call_signal_messages',
+    'call_device_ownership', 'call_blocks', 'call_abuse_events',
+    'call_push_subscriptions', 'call_notification_preferences',
+    'api_rate_limits', 'stripe_webhook_events'
+  ];
+  browser_read_tables constant text[] := array[
+    'boards', 'user_board_state', 'profiles', 'board_shares',
+    'board_versions', 'call_sessions', 'call_participant_states',
+    'call_state_events', 'call_signal_messages'
+  ];
+begin
+  foreach table_name in array application_tables loop
+    if to_regclass(format('public.%I', table_name)) is not null then
+      execute format('alter table public.%I enable row level security', table_name);
+      execute format(
+        'revoke all on table public.%I from public, anon, authenticated',
+        table_name
+      );
+    end if;
+  end loop;
 
--- Start from no browser access. The small read/write allowlist below is the
--- complete intended Data API surface. service_role intentionally bypasses RLS
--- and is only used in server-only modules after API authorization checks.
-revoke all on table
-  public.boards,
-  public.user_board_state,
-  public.profiles,
-  public.board_shares,
-  public.board_versions,
-  public.board_personal_notes,
-  public.call_sessions,
-  public.call_participant_states,
-  public.call_state_events,
-  public.call_signal_messages,
-  public.call_device_ownership,
-  public.call_blocks,
-  public.call_abuse_events,
-  public.call_push_subscriptions,
-  public.call_notification_preferences,
-  public.api_rate_limits,
-  public.stripe_webhook_events
-from public, anon, authenticated;
+  -- These tables expose RLS-filtered reads to signed-in browser users. All
+  -- mutations continue through trusted server routes.
+  foreach table_name in array browser_read_tables loop
+    if to_regclass(format('public.%I', table_name)) is not null then
+      execute format(
+        'grant select on table public.%I to authenticated',
+        table_name
+      );
+    end if;
+  end loop;
 
-grant select on table
-  public.boards,
-  public.user_board_state,
-  public.profiles,
-  public.board_shares,
-  public.board_versions,
-  public.call_sessions,
-  public.call_participant_states,
-  public.call_state_events,
-  public.call_signal_messages
-to authenticated;
-
--- Personal notes are the only table intentionally written directly by the
--- signed-in browser. Its policies bind every row to auth.uid() and board access.
-grant select, insert, update, delete
-  on table public.board_personal_notes
-  to authenticated;
+  -- Personal notes are the only table intentionally written directly by the
+  -- browser. Its policies bind rows to auth.uid() and current board access.
+  if to_regclass('public.board_personal_notes') is not null then
+    grant select, insert, update, delete
+      on table public.board_personal_notes
+      to authenticated;
+  end if;
+end
+$security$;
 
 commit;
 

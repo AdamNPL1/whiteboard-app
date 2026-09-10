@@ -45,9 +45,10 @@ describe("Supabase write boundaries", () => {
     const hardening = readSql("security-hardening.sql");
     const audit = readSql("security-audit.sql");
 
-    expect(hardening).toContain("alter table public.boards enable row level security");
+    expect(hardening).toContain("enable row level security");
     expect(hardening).toContain("from public, anon, authenticated");
     expect(hardening).toContain("public.board_personal_notes");
+    expect(hardening).toContain("to_regclass");
     expect(audit).toContain("or not tables.rowsecurity");
     expect(audit).toContain("information_schema.role_table_grants");
   });
