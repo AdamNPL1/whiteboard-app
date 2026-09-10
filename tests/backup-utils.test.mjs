@@ -3,6 +3,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
   LEGACY_PAYLOAD_FORMAT,
   PAYLOAD_FORMAT,
+  PREVIOUS_PAYLOAD_FORMAT,
+  PREVIOUS_TABLES,
   TABLES,
   decryptBackup,
   encryptBackup,
@@ -17,6 +19,11 @@ const rows = {
   user_board_state: [{ user_id: "user-1", active_board_id: "board-1" }],
   board_shares: [{ id: "share-1", board_id: "board-1" }],
   stripe_webhook_events: [{ event_id: "evt_test_1" }],
+  board_personal_notes: [
+    { board_id: "board-1", user_id: "user-1", title: "Private", content: "Notes" },
+  ],
+  call_push_subscriptions: [{ id: "push-1", user_id: "user-1" }],
+  call_notification_preferences: [{ user_id: "user-1", enabled: true }],
 };
 
 const payload = () => ({
@@ -29,6 +36,7 @@ const payload = () => ({
       authUsers: false,
       storageObjects: false,
       excludedEphemeralTables: ["api_rate_limits"],
+      excludedManagedTables: ["auth.users"],
     },
     tables: Object.fromEntries(
       TABLES.map(({ name, key }) => [name, { count: rows[name].length, sha256: hashRows(rows[name], key) }])
@@ -48,6 +56,9 @@ describe("Scriboo backup safeguards", () => {
       boards: 1,
       boardVersions: 1,
       processedStripeEvents: 1,
+      personalNotes: 1,
+      pushSubscriptions: 1,
+      notificationPreferences: 1,
       includesAuthUsers: false,
     });
   });
@@ -65,6 +76,27 @@ describe("Scriboo backup safeguards", () => {
       "id"
     );
     expect(() => validatePayload(invalid)).toThrow("references a missing board");
+  });
+
+  it("rejects an orphaned personal note", () => {
+    const invalid = payload();
+    invalid.tables.board_personal_notes[0].board_id = "missing";
+    invalid.manifest.tables.board_personal_notes.sha256 = hashRows(
+      invalid.tables.board_personal_notes,
+      ["board_id", "user_id"]
+    );
+    expect(() => validatePayload(invalid)).toThrow("references a missing board");
+  });
+
+  it("keeps v2 application backups verifiable", () => {
+    const previous = payload();
+    previous.format = PREVIOUS_PAYLOAD_FORMAT;
+    for (const { name } of TABLES) {
+      if (PREVIOUS_TABLES.some((table) => table.name === name)) continue;
+      delete previous.tables[name];
+      delete previous.manifest.tables[name];
+    }
+    expect(validatePayload(previous).personalNotes).toBe(0);
   });
 
   it("keeps old v1 application backups verifiable", () => {

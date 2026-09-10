@@ -28,6 +28,17 @@ const tableManifest = {};
 
 for (const { name, key } of TABLES) {
   const rows = await readAllRows(client, name, key);
+  const { count, error: countError } = await client
+    .from(name)
+    .select("*", { count: "exact", head: true });
+  if (countError) {
+    throw new Error(`BACKUP_COUNT_FAILED:${name}:${countError.code || "unknown"}`);
+  }
+  if (count !== rows.length) {
+    throw new Error(
+      `BACKUP_SOURCE_CHANGED:${name}: expected ${count ?? "unknown"} rows but read ${rows.length}`
+    );
+  }
   tables[name] = rows;
   tableManifest[name] = { count: rows.length, sha256: hashRows(rows, key) };
 }
@@ -42,7 +53,16 @@ const payload = {
       type: "application-data-only",
       authUsers: false,
       storageObjects: false,
-      excludedEphemeralTables: ["api_rate_limits"],
+      excludedEphemeralTables: [
+        "api_rate_limits",
+        "call_sessions",
+        "call_participant_states",
+        "call_state_events",
+        "call_signal_messages",
+        "call_device_ownership",
+        "call_abuse_events",
+      ],
+      excludedManagedTables: ["auth.users"],
     },
     tables: tableManifest,
   },

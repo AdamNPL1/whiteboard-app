@@ -5,8 +5,10 @@ import { gunzipSync, gzipSync } from "node:zlib";
 
 export const BACKUP_FORMAT = "scriboo-encrypted-backup-v1";
 export const LEGACY_PAYLOAD_FORMAT = "scriboo-app-data-v1";
-export const PAYLOAD_FORMAT = "scriboo-app-data-v2";
+export const PREVIOUS_PAYLOAD_FORMAT = "scriboo-app-data-v2";
+export const PAYLOAD_FORMAT = "scriboo-app-data-v3";
 export const BACKUP_DIRECTORY = resolve("backups");
+const MAX_ENCRYPTED_BACKUP_BYTES = 512 * 1024 * 1024;
 
 export const LEGACY_TABLES = [
   { name: "profiles", key: "id" },
@@ -15,7 +17,7 @@ export const LEGACY_TABLES = [
   { name: "board_shares", key: "id" },
 ];
 
-export const TABLES = [
+export const PREVIOUS_TABLES = [
   { name: "profiles", key: "id" },
   { name: "boards", key: "id" },
   { name: "board_versions", key: "id" },
@@ -24,8 +26,23 @@ export const TABLES = [
   { name: "stripe_webhook_events", key: "event_id" },
 ];
 
-export const getTableDefinitions = (payload) =>
-  payload?.format === LEGACY_PAYLOAD_FORMAT ? LEGACY_TABLES : TABLES;
+export const TABLES = [
+  { name: "profiles", key: "id" },
+  { name: "boards", key: "id" },
+  { name: "board_versions", key: "id" },
+  { name: "user_board_state", key: "user_id" },
+  { name: "board_shares", key: "id" },
+  { name: "board_personal_notes", key: ["board_id", "user_id"] },
+  { name: "call_push_subscriptions", key: "id" },
+  { name: "call_notification_preferences", key: "user_id" },
+  { name: "stripe_webhook_events", key: "event_id" },
+];
+
+export const getTableDefinitions = (payload) => {
+  if (payload?.format === LEGACY_PAYLOAD_FORMAT) return LEGACY_TABLES;
+  if (payload?.format === PREVIOUS_PAYLOAD_FORMAT) return PREVIOUS_TABLES;
+  return TABLES;
+};
 
 const getEncryptionKey = () => {
   const encoded = process.env.BACKUP_ENCRYPTION_KEY?.trim();
@@ -50,9 +67,14 @@ const canonicalize = (value) => {
   return value;
 };
 
+const rowIdentifier = (row, key) =>
+  (Array.isArray(key) ? key : [key])
+    .map((column) => String(row?.[column] ?? ""))
+    .join("\u0000");
+
 export const sortRows = (rows, key) =>
   [...rows].sort((left, right) =>
-    String(left?.[key] ?? "").localeCompare(String(right?.[key] ?? ""))
+    rowIdentifier(left, key).localeCompare(rowIdentifier(right, key))
   );
 
 export const hashRows = (rows, key) =>
@@ -78,17 +100,29 @@ export const encryptBackup = (payload) => {
 export const decryptBackup = (envelope) => {
   if (envelope?.format !== BACKUP_FORMAT) throw new Error("Unsupported backup format.");
 
+  const iv = Buffer.from(envelope.iv ?? "", "base64");
+  const authTag = Buffer.from(envelope.authTag ?? "", "base64");
+  const ciphertext = Buffer.from(envelope.ciphertext ?? "", "base64");
+  if (iv.length !== 12 || authTag.length !== 16 || ciphertext.length === 0) {
+    throw new Error("Encrypted backup envelope is malformed.");
+  }
+  if (ciphertext.length > MAX_ENCRYPTED_BACKUP_BYTES) {
+    throw new Error("Encrypted backup exceeds the safe size limit.");
+  }
+
   const decipher = createDecipheriv(
     "aes-256-gcm",
     getEncryptionKey(),
-    Buffer.from(envelope.iv, "base64")
+    iv
   );
-  decipher.setAuthTag(Buffer.from(envelope.authTag, "base64"));
+  decipher.setAuthTag(authTag);
   const compressed = Buffer.concat([
-    decipher.update(Buffer.from(envelope.ciphertext, "base64")),
+    decipher.update(ciphertext),
     decipher.final(),
   ]);
-  return JSON.parse(gunzipSync(compressed).toString("utf8"));
+  return JSON.parse(
+    gunzipSync(compressed, { maxOutputLength: MAX_ENCRYPTED_BACKUP_BYTES }).toString("utf8")
+  );
 };
 
 export const readBackup = (filePath) => {
@@ -118,11 +152,11 @@ export const readAllRows = async (client, table, key) => {
   const pageSize = 500;
   const rows = [];
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await client
-      .from(table)
-      .select("*")
-      .order(key, { ascending: true })
-      .range(from, from + pageSize - 1);
+    let query = client.from(table).select("*");
+    for (const column of Array.isArray(key) ? key : [key]) {
+      query = query.order(column, { ascending: true });
+    }
+    const { data, error } = await query.range(from, from + pageSize - 1);
     if (error) throw new Error(`BACKUP_READ_FAILED:${table}:${error.code || "unknown"}`);
     rows.push(...(data ?? []));
     if (!data || data.length < pageSize) break;
@@ -131,7 +165,7 @@ export const readAllRows = async (client, table, key) => {
 };
 
 export const validatePayload = (payload) => {
-  if (![PAYLOAD_FORMAT, LEGACY_PAYLOAD_FORMAT].includes(payload?.format)) {
+  if (![PAYLOAD_FORMAT, PREVIOUS_PAYLOAD_FORMAT, LEGACY_PAYLOAD_FORMAT].includes(payload?.format)) {
     throw new Error("Invalid Scriboo backup payload.");
   }
 
@@ -143,7 +177,7 @@ export const validatePayload = (payload) => {
   for (const { name, key } of tableDefinitions) {
     const rows = payload.tables?.[name];
     if (!Array.isArray(rows)) throw new Error(`Backup table ${name} is missing.`);
-    const identifiers = rows.map((row) => String(row?.[key] ?? ""));
+    const identifiers = rows.map((row) => rowIdentifier(row, key));
     if (identifiers.some((value) => !value)) throw new Error(`${name} contains a missing primary key.`);
     if (new Set(identifiers).size !== identifiers.length) throw new Error(`${name} contains duplicate keys.`);
     if (payload.manifest?.tables?.[name]?.count !== rows.length) {
@@ -175,6 +209,11 @@ export const validatePayload = (payload) => {
       throw new Error(`Board version ${version.id} references a missing board.`);
     }
   }
+  for (const note of payload.tables.board_personal_notes ?? []) {
+    if (!boardIds.has(note.board_id)) {
+      throw new Error(`Personal note for ${note.user_id} references a missing board.`);
+    }
+  }
 
   if (payload.format === PAYLOAD_FORMAT) {
     const coverage = payload.manifest?.coverage;
@@ -196,6 +235,9 @@ export const validatePayload = (payload) => {
     ),
     sharingRelationships: payload.tables.board_shares.length,
     boardVersions: payload.tables.board_versions?.length ?? 0,
+    personalNotes: payload.tables.board_personal_notes?.length ?? 0,
+    pushSubscriptions: payload.tables.call_push_subscriptions?.length ?? 0,
+    notificationPreferences: payload.tables.call_notification_preferences?.length ?? 0,
     processedStripeEvents: payload.tables.stripe_webhook_events?.length ?? 0,
     subscriptionMappings: payload.tables.profiles.filter(
       (profile) => profile.stripe_customer_id || profile.stripe_subscription_id
