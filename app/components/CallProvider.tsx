@@ -319,6 +319,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isParticipantVideoHidden, setIsParticipantVideoHidden] = useState(false);
   const [participantVideoFit, setParticipantVideoFit] = useState<"cover" | "contain">("cover");
   const [isCallPanelMinimized, setIsCallPanelMinimized] = useState(false);
+  const [isConnectedCallPanelOpen, setIsConnectedCallPanelOpen] = useState(false);
   const [isCallDeviceMenuOpen, setIsCallDeviceMenuOpen] = useState(false);
   const [isCallParticipantsMenuOpen, setIsCallParticipantsMenuOpen] = useState(false);
   const [isCallMoreMenuOpen, setIsCallMoreMenuOpen] = useState(false);
@@ -1001,6 +1002,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setRemoteMuted(false);
     setConnectionState("");
     setIsCallPanelMinimized(false);
+    setIsConnectedCallPanelOpen(false);
     try {
       clearCallResources();
     } catch (error) {
@@ -3567,6 +3569,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const isRemoteSpeaking = phase === "connected" && !remoteMuted &&
     Boolean(callQuality?.audioLevel && callQuality.audioLevel > 0.03);
   const isPreCall = phase === "precall-outgoing" || phase === "precall-incoming";
+  const isActiveCallPanelHidden = phase === "connected" && !isConnectedCallPanelOpen;
   const permissionText = (state: MediaPermissionState) =>
     state === "granted"
       ? t("allowed", "dozwolone")
@@ -3944,36 +3947,36 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           className="scriboo-call-panel"
           tabIndex={-1}
           aria-label={t("Audio call", "Połączenie audio")}
-          onPointerDown={phase === "connected" ? undefined : beginCallPanelDrag}
-          onPointerMove={phase === "connected" ? undefined : moveCallPanel}
-          onPointerUp={phase === "connected" ? undefined : endCallPanelDrag}
-          onPointerCancel={phase === "connected" ? undefined : endCallPanelDrag}
+          onPointerDown={isActiveCallPanelHidden ? undefined : beginCallPanelDrag}
+          onPointerMove={isActiveCallPanelHidden ? undefined : moveCallPanel}
+          onPointerUp={isActiveCallPanelHidden ? undefined : endCallPanelDrag}
+          onPointerCancel={isActiveCallPanelHidden ? undefined : endCallPanelDrag}
           style={{
             position: "fixed",
             ...callPanelDockStyle,
             zIndex: 210,
-            width: phase === "connected"
+            width: isActiveCallPanelHidden
               ? 0
               : `min(${callPanelWidth}px, calc(100vw - max(24px, env(safe-area-inset-left)) - max(24px, env(safe-area-inset-right))))`,
-            height: phase === "connected" ? 0 : "auto",
+            height: isActiveCallPanelHidden ? 0 : "auto",
             maxHeight: "calc(100dvh - max(76px, env(safe-area-inset-top)) - max(12px, env(safe-area-inset-bottom)))",
-            overflow: phase === "connected" ? "visible" : undefined,
-            overflowY: phase === "connected" || isCallPanelMinimized ? "hidden" : "auto",
-            padding: phase === "connected" ? 0 : isCallPanelMinimized ? "10px 12px" : "18px",
+            overflow: isActiveCallPanelHidden ? "visible" : undefined,
+            overflowY: isActiveCallPanelHidden || isCallPanelMinimized ? "hidden" : "auto",
+            padding: isActiveCallPanelHidden ? 0 : isCallPanelMinimized ? "10px 12px" : "18px",
             borderRadius: "20px",
-            border: phase === "connected" ? "none" : "1px solid rgba(203,213,225,0.88)",
-            background: phase === "connected" ? "transparent" : "rgba(255,255,255,0.97)",
+            border: isActiveCallPanelHidden ? "none" : "1px solid rgba(203,213,225,0.88)",
+            background: isActiveCallPanelHidden ? "transparent" : "rgba(255,255,255,0.97)",
             color: "#0f172a",
-            boxShadow: phase === "connected" ? "none" : "0 24px 70px rgba(15,23,42,0.24)",
-            backdropFilter: phase === "connected" ? "none" : "blur(18px)",
-            pointerEvents: phase === "connected" ? "none" : "auto",
+            boxShadow: isActiveCallPanelHidden ? "none" : "0 24px 70px rgba(15,23,42,0.24)",
+            backdropFilter: isActiveCallPanelHidden ? "none" : "blur(18px)",
+            pointerEvents: isActiveCallPanelHidden ? "none" : "auto",
             display: "grid",
             gap: isCallPanelMinimized ? 0 : "13px",
           }}
         >
           <div
             style={{
-              display: phase === "connected" ? "none" : "flex",
+              display: isActiveCallPanelHidden ? "none" : "flex",
               alignItems: "center",
               gap: isCallPanelMinimized ? "9px" : "12px",
               cursor: callPanelDragRef.current ? "grabbing" : "grab",
@@ -3997,7 +4000,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               type="button"
               aria-label={isCallPanelMinimized ? t("Restore call panel", "Przywróć panel połączenia") : t("Minimize call panel", "Zminimalizuj panel połączenia")}
               title={isCallPanelMinimized ? t("Restore", "Przywróć") : t("Minimize", "Zminimalizuj")}
-              onClick={() => setIsCallPanelMinimized((isMinimized) => !isMinimized)}
+              onClick={() => {
+                if (phase === "connected") {
+                  setIsConnectedCallPanelOpen(false);
+                  return;
+                }
+                setIsCallPanelMinimized((isMinimized) => !isMinimized);
+              }}
               style={{
                 width: "32px",
                 height: "32px",
@@ -4015,7 +4024,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {isCallPanelMinimized ? <Maximize2 size={15} /> : <Minus size={16} />}
             </button>
           </div>
-          <div style={{ display: phase === "connected" || isCallPanelMinimized ? "none" : "contents" }}>
+          <div style={{ display: isActiveCallPanelHidden || isCallPanelMinimized ? "none" : "contents" }}>
           <div role="status" aria-live="polite" aria-atomic="true" style={{ color: phase === "error" || connectionState === "failed" ? "#b91c1c" : connectionState === "reconnecting" ? "#854d0e" : "#475569", fontSize: "13px", fontWeight: 650 }}>
             {visibleStatusText}
           </div>
@@ -4557,6 +4566,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     type="button"
                     role="menuitem"
                     onClick={() => {
+                      setIsConnectedCallPanelOpen(true);
                       setIsCallPanelMinimized(false);
                       setIsCallQualityOpen(true);
                       setIsCallDeviceMenuOpen(false);
@@ -4572,6 +4582,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     type="button"
                     role="menuitem"
                     onClick={() => {
+                      setIsConnectedCallPanelOpen(true);
                       setIsCallPanelMinimized(false);
                       setIsCallDeviceMenuOpen(true);
                       setIsCallParticipantsMenuOpen(false);
@@ -4586,6 +4597,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     type="button"
                     role="menuitem"
                     onClick={() => {
+                      setIsConnectedCallPanelOpen(true);
                       setIsCallPanelMinimized(false);
                       setIsCallParticipantsMenuOpen(true);
                       setIsCallDeviceMenuOpen(false);
@@ -4600,6 +4612,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     type="button"
                     role="menuitem"
                     onClick={() => {
+                      setIsConnectedCallPanelOpen(true);
                       setIsCallPanelMinimized(false);
                       setIsCallMoreMenuOpen(true);
                       setIsCallDeviceMenuOpen(false);
@@ -4614,7 +4627,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                     type="button"
                     role="menuitem"
                     onClick={() => {
+                      setIsConnectedCallPanelOpen(true);
                       setIsCallPanelMinimized(false);
+                      setIsCallQualityOpen(false);
+                      setIsCallDeviceMenuOpen(false);
+                      setIsCallParticipantsMenuOpen(false);
+                      setIsCallMoreMenuOpen(false);
                       setIsParticipantVideoMenuOpen(false);
                     }}
                     style={selfViewMenuButtonStyle}
@@ -4902,7 +4920,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 aria-label={t("Minimize call panel", "Zminimalizuj panel rozmowy")}
                 title={t("Minimize", "Zminimalizuj")}
-                onClick={() => setIsCallPanelMinimized(true)}
+                onClick={() => {
+                  setIsCallPanelMinimized(true);
+                  setIsConnectedCallPanelOpen(false);
+                }}
                 style={callToolbarButtonStyle}
               >
                 <Minus size={19} />
@@ -4990,6 +5011,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: "#22c55e" }} />
           <span>{formatCallDuration(callDurationSeconds)}</span>
         </div>
+      )}
+
+      {phase === "connected" && isParticipantVideoHidden && (
+        <button
+          type="button"
+          onClick={() => setIsParticipantVideoHidden(false)}
+          style={{
+            position: "fixed",
+            top: 60,
+            left: "calc(50% + 62px)",
+            zIndex: 223,
+            minHeight: 32,
+            padding: "0 12px",
+            border: "1px solid rgba(203,213,225,0.92)",
+            borderRadius: 999,
+            background: "rgba(255,255,255,0.96)",
+            color: "#334155",
+            boxShadow: "0 8px 24px rgba(15,23,42,0.14)",
+            cursor: "pointer",
+            fontSize: 11,
+            fontWeight: 750,
+          }}
+        >
+          {t("Show participant video", "Pokaż wideo uczestnika")}
+        </button>
       )}
 
       {phase === "connected" && showCallVideo && isCameraOn && isSelfViewVisible && (
