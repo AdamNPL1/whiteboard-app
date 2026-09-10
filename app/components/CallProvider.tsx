@@ -316,6 +316,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   });
   const [isCallQualityOpen, setIsCallQualityOpen] = useState(false);
   const [isRemoteVideoOn, setIsRemoteVideoOn] = useState(false);
+  const [isRemoteVideoExplicitlyOff, setIsRemoteVideoExplicitlyOff] = useState(false);
   const [isParticipantVideoMenuOpen, setIsParticipantVideoMenuOpen] = useState(false);
   const [isParticipantMutedForMe, setIsParticipantMutedForMe] = useState(false);
   const [participantVolume, setParticipantVolume] = useState(1);
@@ -893,6 +894,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setSelfViewPosition(null);
     setCameraMessage("");
     setIsRemoteVideoOn(false);
+    setIsRemoteVideoExplicitlyOff(false);
     setIsParticipantVideoMenuOpen(false);
     setIsParticipantMutedForMe(false);
     setParticipantVolume(1);
@@ -1528,6 +1530,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         if (event.track.kind === "video") {
           const videoStream = event.streams[0] ?? new MediaStream([event.track]);
           remoteVideoStreamRef.current = videoStream;
+          setIsRemoteVideoExplicitlyOff(false);
           setIsRemoteVideoOn(remoteVideoIntentRef.current || !event.track.muted);
           event.track.onunmute = () => setIsRemoteVideoOn(true);
           event.track.onmute = () => {
@@ -2077,11 +2080,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         // never request permission for or activate this browser's camera.
         remoteVideoIntentRef.current = signal.enabled;
         if (!signal.enabled) {
+          setIsRemoteVideoExplicitlyOff(true);
           if (remoteVideoRef.current) remoteVideoRef.current.srcObject = null;
           setIsRemoteVideoOn(false);
           setIsParticipantVideoMenuOpen(false);
-        } else if (remoteVideoStreamRef.current) {
-          setIsRemoteVideoOn(true);
+        } else {
+          setIsRemoteVideoExplicitlyOff(false);
+          if (remoteVideoStreamRef.current) setIsRemoteVideoOn(true);
         }
         return;
       }
@@ -3273,6 +3278,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     if (phase !== "connected" || !isCameraOn || !localCameraTrackRef.current) return;
+    const activeCallId = callRef.current?.id;
+    if (activeCallId) connectedCameraAttemptCallIdRef.current = activeCallId;
 
     // A camera opened before negotiation has no peer connection at the moment
     // startCamera normally broadcasts video-state. Announce it again after the
@@ -4453,7 +4460,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {phase === "connected" && showCallVideo && isRemoteVideoOn && !isParticipantVideoHidden && typeof document !== "undefined" && createPortal((
+          {phase === "connected" && showCallVideo && (isRemoteVideoOn || isRemoteVideoExplicitlyOff) && !isParticipantVideoHidden && typeof document !== "undefined" && createPortal((
             <div
               ref={participantVideoRef}
               className="scriboo-video-tile"
@@ -4495,6 +4502,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
               }}
             >
+              {isRemoteVideoExplicitlyOff ? (
+                <div
+                  style={{ width: "100%", height: "100%", display: "grid", placeItems: "center", borderRadius: "inherit", background: "#111827", color: "#ffffff", fontSize: 36, fontWeight: 800 }}
+                >
+                  {getParticipantInitials(peerName || t("Participant", "Uczestnik"))}
+                </div>
+              ) : (
               <video
                 ref={(video) => {
                   remoteVideoRef.current = video;
@@ -4509,6 +4523,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 aria-label={t("Participant video", "Wideo uczestnika")}
                 style={{ width: "100%", height: "100%", display: "block", objectFit: participantVideoFit, borderRadius: "inherit" }}
               />
+              )}
               <span
                 className="scriboo-video-hover-control"
                 style={{
@@ -4522,8 +4537,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   fontSize: "10px",
                   fontWeight: 700,
                   pointerEvents: "none",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: 5,
                 }}
               >
+                {remoteMuted && <MicOff size={13} color="#ef4444" strokeWidth={2.6} />}
                 {peerName || t("Participant", "Uczestnik")}
               </span>
               <button
@@ -5066,7 +5085,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         </button>
       )}
 
-      {phase === "connected" && showCallVideo && (isCameraOn || isSelfAvatarShown) && isSelfViewVisible && (
+      {phase === "connected" && showCallVideo && isSelfViewVisible && (
         <div
           ref={selfViewRef}
           className="scriboo-video-tile"
@@ -5103,7 +5122,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             touchAction: "none",
           }}
         >
-          {isSelfAvatarShown ? (
+          {isSelfAvatarShown || !isCameraOn ? (
             <div
               aria-label={t("Your avatar", "Twój awatar")}
               style={{
@@ -5151,9 +5170,13 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               fontSize: "10px",
               fontWeight: 700,
               pointerEvents: "none",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
             }}
           >
-            {t("You", "Ty")}
+            {isMuted && <MicOff size={13} color="#ef4444" strokeWidth={2.6} />}
+            {user?.name || t("You", "Ty")}
           </span>
           <button
             type="button"
