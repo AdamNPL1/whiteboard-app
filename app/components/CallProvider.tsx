@@ -276,6 +276,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isSelfViewMenuOpen, setIsSelfViewMenuOpen] = useState(false);
   const [isSelfProfileOpen, setIsSelfProfileOpen] = useState(false);
   const [isSelfViewBlurred, setIsSelfViewBlurred] = useState(false);
+  const [hasSelfViewSegmentationFrame, setHasSelfViewSegmentationFrame] = useState(false);
   const [isSelfViewAutoFramed, setIsSelfViewAutoFramed] = useState(false);
   const [isSelfAvatarShown, setIsSelfAvatarShown] = useState(false);
   const [isSelfViewMirrored, setIsSelfViewMirrored] = useState(true);
@@ -354,6 +355,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const participantVolumeRef = useRef(1);
   const participantMutedForMeRef = useRef(false);
   const localVideoRef = useRef<HTMLVideoElement | null>(null);
+  const selfViewCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const selfViewRef = useRef<HTMLDivElement | null>(null);
   const selfViewDragRef = useRef<{
     pointerId: number;
@@ -3478,6 +3480,96 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [isCameraOn, isSelfViewVisible, phase]);
 
   useEffect(() => {
+    if (!isSelfViewBlurred || !isCameraOn) {
+      setHasSelfViewSegmentationFrame(false);
+      return;
+    }
+
+    const video = localVideoRef.current;
+    const canvas = selfViewCanvasRef.current;
+    if (!video || !canvas) return;
+
+    let cancelled = false;
+    let animationFrame = 0;
+    let processingFrame = false;
+    let segmenter: import("@mediapipe/selfie_segmentation").SelfieSegmentation | null = null;
+
+    const drawSegmentedFrame = (
+      results: import("@mediapipe/selfie_segmentation").Results
+    ) => {
+      if (cancelled) return;
+      const width = video.videoWidth;
+      const height = video.videoHeight;
+      if (!width || !height) return;
+      if (canvas.width !== width || canvas.height !== height) {
+        canvas.width = width;
+        canvas.height = height;
+      }
+      const context = canvas.getContext("2d");
+      if (!context) return;
+
+      context.save();
+      context.clearRect(0, 0, width, height);
+      context.filter = "blur(1px)";
+      context.drawImage(results.segmentationMask, 0, 0, width, height);
+      context.globalCompositeOperation = "source-in";
+      context.filter = "none";
+      context.drawImage(results.image, 0, 0, width, height);
+      context.globalCompositeOperation = "destination-over";
+      context.filter = "blur(18px)";
+      const bleed = 24;
+      context.drawImage(
+        results.image,
+        -bleed,
+        -bleed,
+        width + bleed * 2,
+        height + bleed * 2
+      );
+      context.restore();
+      setHasSelfViewSegmentationFrame(true);
+    };
+
+    const processFrame = async () => {
+      if (cancelled) return;
+      if (!processingFrame && video.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+        processingFrame = true;
+        try {
+          await segmenter?.send({ image: video });
+        } catch {
+          if (!cancelled) setIsSelfViewBlurred(false);
+        } finally {
+          processingFrame = false;
+        }
+      }
+      if (!cancelled) animationFrame = window.requestAnimationFrame(processFrame);
+    };
+
+    void (async () => {
+      try {
+        const { SelfieSegmentation, VERSION } = await import("@mediapipe/selfie_segmentation");
+        if (cancelled) return;
+        segmenter = new SelfieSegmentation({
+          locateFile: (file) =>
+            `https://cdn.jsdelivr.net/npm/@mediapipe/selfie_segmentation@${VERSION}/${file}`,
+        });
+        segmenter.setOptions({ modelSelection: 1, selfieMode: true });
+        segmenter.onResults(drawSegmentedFrame);
+        await segmenter.initialize();
+        if (!cancelled) animationFrame = window.requestAnimationFrame(processFrame);
+      } catch {
+        if (!cancelled) setIsSelfViewBlurred(false);
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+      window.cancelAnimationFrame(animationFrame);
+      setHasSelfViewSegmentationFrame(false);
+      if (segmenter) void segmenter.close().catch(() => undefined);
+    };
+  }, [isCameraOn, isSelfViewBlurred]);
+
+  useEffect(() => {
     const video = remoteVideoRef.current;
     if (!isRemoteVideoOn || !remoteVideoStreamRef.current || !video) return;
     video.srcObject = remoteVideoStreamRef.current;
@@ -5140,6 +5232,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               {getParticipantInitials(user?.name || t("You", "Ty"))}
             </div>
           ) : (
+          <>
           <video
             ref={localVideoRef}
             autoPlay
@@ -5151,11 +5244,27 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               height: "100%",
               display: "block",
               objectFit: selfViewFit,
-              filter: isSelfViewBlurred ? "blur(7px)" : "none",
+              opacity: isSelfViewBlurred && hasSelfViewSegmentationFrame ? 0 : 1,
               transform: `${isSelfViewMirrored ? "scaleX(-1)" : ""} ${isSelfViewAutoFramed ? "scale(1.12)" : ""}`.trim() || "none",
               borderRadius: "inherit",
             }}
           />
+          <canvas
+            ref={selfViewCanvasRef}
+            aria-hidden="true"
+            style={{
+              position: "absolute",
+              inset: 0,
+              width: "100%",
+              height: "100%",
+              objectFit: selfViewFit,
+              opacity: isSelfViewBlurred && hasSelfViewSegmentationFrame ? 1 : 0,
+              pointerEvents: "none",
+              transform: `${isSelfViewMirrored ? "scaleX(-1)" : ""} ${isSelfViewAutoFramed ? "scale(1.12)" : ""}`.trim() || "none",
+              borderRadius: "inherit",
+            }}
+          />
+          </>
           )}
           <span
             className="scriboo-video-hover-control"

@@ -17,6 +17,7 @@
   },
   "dependencies": {
     "@babel/core": "^8.0.1",
+    "@mediapipe/selfie_segmentation": "^0.1.1675465747",
     "@sentry/nextjs": "^10.65.0",
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.108.2",
