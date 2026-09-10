@@ -11,6 +11,7 @@ const request = new NextRequest("https://scribooapp.com/api/auth/register", {
 describe("Turnstile verification", () => {
   afterEach(() => {
     delete process.env.TURNSTILE_SECRET_KEY;
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 
@@ -23,18 +24,45 @@ describe("Turnstile verification", () => {
     await expect(verifyTurnstileToken(request, "")).resolves.toBe(false);
   });
 
+  it("fails closed when the production secret is missing", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    await expect(verifyTurnstileToken(request, "token")).resolves.toBe(false);
+  });
+
   it("accepts a token only after Cloudflare verifies it", async () => {
     process.env.TURNSTILE_SECRET_KEY = "secret";
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(JSON.stringify({ success: true }), {
+      new Response(
+        JSON.stringify({ success: true, hostname: "scribooapp.com" }), {
         status: 200,
         headers: { "content-type": "application/json" },
-      })
+        }
+      )
     );
 
     await expect(verifyTurnstileToken(request, "valid-token")).resolves.toBe(true);
     expect(fetchMock).toHaveBeenCalledOnce();
     const [, options] = fetchMock.mock.calls[0];
     expect(options?.method).toBe("POST");
+  });
+
+  it("rejects a valid token issued for another hostname", async () => {
+    process.env.TURNSTILE_SECRET_KEY = "secret";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(
+        JSON.stringify({ success: true, hostname: "attacker.example" }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )
+    );
+
+    await expect(verifyTurnstileToken(request, "stolen-token")).resolves.toBe(false);
+  });
+
+  it("rejects an oversized token before contacting Cloudflare", async () => {
+    process.env.TURNSTILE_SECRET_KEY = "secret";
+    const fetchMock = vi.spyOn(globalThis, "fetch");
+
+    await expect(verifyTurnstileToken(request, "x".repeat(2_049))).resolves.toBe(false);
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });

@@ -12,7 +12,7 @@ create table if not exists public.api_rate_limits (
 
 alter table public.api_rate_limits enable row level security;
 
-revoke all on table public.api_rate_limits from anon, authenticated;
+revoke all on table public.api_rate_limits from public, anon, authenticated;
 
 create or replace function public.consume_rate_limit(
   p_action text,
@@ -29,7 +29,12 @@ declare
   current_row public.api_rate_limits%rowtype;
   current_time timestamptz := clock_timestamp();
 begin
-  if p_limit < 1 or p_window_seconds < 1 then
+  if p_action is null
+    or length(p_action) not between 1 and 100
+    or p_identifier_hash is null
+    or p_identifier_hash !~ '^[0-9a-f]{64}$'
+    or p_limit not between 1 and 10000
+    or p_window_seconds not between 1 and 86400 then
     raise exception 'Invalid rate-limit configuration';
   end if;
 
@@ -65,7 +70,8 @@ begin
 end;
 $$;
 
-revoke all on function public.consume_rate_limit(text, text, integer, integer) from public;
+revoke all on function public.consume_rate_limit(text, text, integer, integer)
+  from public, anon, authenticated;
 grant execute on function public.consume_rate_limit(text, text, integer, integer) to service_role;
 
 -- Optional maintenance; safe to run periodically.

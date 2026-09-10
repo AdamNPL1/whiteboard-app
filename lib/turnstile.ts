@@ -5,6 +5,7 @@ const TURNSTILE_VERIFY_URL =
 
 type TurnstileVerificationResponse = {
   success?: boolean;
+  hostname?: string;
   [key: string]: unknown;
 };
 
@@ -16,12 +17,17 @@ export const verifyTurnstileToken = async (
   token?: string
 ) => {
   const secret = process.env.TURNSTILE_SECRET_KEY?.trim();
-  if (!secret) return true;
-  if (!token?.trim()) return false;
+  // Local development remains convenient, but a production deployment must
+  // never silently disable bot protection because an environment variable was
+  // forgotten or removed.
+  if (!secret) return process.env.NODE_ENV !== "production";
+
+  const normalizedToken = token?.trim() ?? "";
+  if (!normalizedToken || normalizedToken.length > 2_048) return false;
 
   const form = new FormData();
   form.set("secret", secret);
-  form.set("response", token.trim());
+  form.set("response", normalizedToken);
 
   const forwardedFor = request.headers.get("x-forwarded-for");
   const remoteIp = forwardedFor?.split(",")[0]?.trim();
@@ -37,7 +43,11 @@ export const verifyTurnstileToken = async (
     if (!response.ok) return false;
 
     const result = (await response.json()) as TurnstileVerificationResponse;
-    return result.success === true;
+    if (result.success !== true) return false;
+
+    // A stolen token issued for another website must not be accepted here.
+    const verifiedHostname = result.hostname?.trim().toLowerCase();
+    return verifiedHostname === request.nextUrl.hostname.toLowerCase();
   } catch (error) {
     console.error("Turnstile verification failed", {
       message: error instanceof Error ? error.message : "Unknown error",
