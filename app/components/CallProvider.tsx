@@ -14,6 +14,7 @@ import { createPortal } from "react-dom";
 import type { RealtimeChannel } from "@supabase/supabase-js";
 import {
   LoaderCircle,
+  ImageIcon,
   Maximize2,
   Mic,
   MicOff,
@@ -365,6 +366,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const localCameraTrackRef = useRef<MediaStreamTrack | null>(null);
   const localCameraIntentRef = useRef(false);
   const connectedCameraAttemptCallIdRef = useRef<string | null>(null);
+  const preCallCameraAttemptRef = useRef<CallPhase | null>(null);
   const localVideoSenderRef = useRef<RTCRtpSender | null>(null);
   const localVideoTransceiverRef = useRef<RTCRtpTransceiver | null>(null);
   const remoteVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -3266,6 +3268,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }, [activateLocalVideoSender, isCameraStarting, refreshMediaDevices, selectedCameraId, sendSignal, stopCamera, t]);
 
   useEffect(() => {
+    if (phase !== "precall-outgoing" && phase !== "precall-incoming") {
+      preCallCameraAttemptRef.current = null;
+      return;
+    }
+    if (preCallCameraAttemptRef.current === phase || isCameraOn || isCameraStarting) return;
+    preCallCameraAttemptRef.current = phase;
+    void startCamera(selectedCameraId);
+  }, [isCameraOn, isCameraStarting, phase, selectedCameraId, startCamera]);
+
+  useEffect(() => {
     if (phase !== "connected" || isCameraOn || isCameraStarting) return;
     const activeCallId = callRef.current?.id;
     if (!activeCallId || connectedCameraAttemptCallIdRef.current === activeCallId) return;
@@ -3706,7 +3718,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }[selfViewSize];
   const showCallVideo = callLayoutMode === "standard" || callLayoutMode === "video";
   const callPanelWidth = isPreCall
-    ? 440
+    ? 680
     : callLayoutMode === "video" || isParticipantVideoPinned
       ? 560
       : callLayoutMode === "whiteboard"
@@ -4282,7 +4294,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
           {isPreCall && (
-            <div style={{ display: "grid", gap: "12px" }}>
+            <div style={{ order: 2, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
               <div style={preCallFieldStyle}>
                 <label htmlFor="precall-microphone" style={preCallLabelStyle}>
                   {t("Microphone", "Mikrofon")}
@@ -4308,7 +4320,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   type="button"
                   onClick={() => void enableMicrophone()}
                   disabled={isPreparingMedia}
-                  style={{ ...preCallSmallButtonStyle, color: isMicrophoneReady ? "#166534" : "#334155" }}
+                  style={{ display: "none" }}
                 >
                   <Mic size={15} />
                   {isMicrophoneReady
@@ -4334,8 +4346,8 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 <select
                   id="precall-camera"
                   value={selectedCameraId}
-                  disabled={isCameraOn || isCameraStarting}
-                  onChange={(event) => setSelectedCameraId(event.target.value)}
+                  disabled={isCameraStarting || isSwitchingCamera}
+                  onChange={(event) => isCameraOn ? void switchCamera(event.target.value) : setSelectedCameraId(event.target.value)}
                   style={preCallSelectStyle}
                 >
                   {cameraDevices.length === 0 && (
@@ -4350,7 +4362,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   onClick={() => isCameraOn ? void stopCamera() : void startCamera(selectedCameraId)}
                   disabled={isCameraStarting}
                   aria-pressed={isCameraOn}
-                  style={{ ...preCallSmallButtonStyle, color: isCameraOn ? "#6d28d9" : "#334155" }}
+                  style={{ display: "none" }}
                 >
                   {isCameraOn ? <VideoOff size={15} /> : <Video size={15} />}
                   {isCameraStarting
@@ -4361,7 +4373,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              <div style={preCallFieldStyle}>
+              <div style={{ ...preCallFieldStyle, gridColumn: "1 / -1", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center" }}>
                 <span style={preCallLabelStyle}>{t("Speaker", "Głośnik")}</span>
                 {isSpeakerSelectionSupported && speakerDevices.length > 0 ? (
                   <select
@@ -4388,7 +4400,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={toggleMute}
                 aria-pressed={isMuted}
-                style={{ ...preCallSmallButtonStyle, justifyContent: "center", background: isMuted ? "#ede9fe" : "#ecfdf5" }}
+                style={{ display: "none" }}
               >
                 {isMuted ? <MicOff size={15} /> : <Mic size={15} />}
                 {isMuted
@@ -4396,7 +4408,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   : t("Join unmuted", "Dołącz bez wyciszenia")}
               </button>
 
-              <div style={{ color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
+              <div style={{ gridColumn: "1 / -1", color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
                 {t("Microphone permission", "Uprawnienie mikrofonu")}: {permissionText(microphonePermission)} · {t("Camera permission", "Uprawnienie kamery")}: {permissionText(cameraPermission)}
               </div>
               {(microphonePermission === "denied" || cameraPermission === "denied") && (
@@ -4841,14 +4853,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </button>
           )}
 
-          {isPreCall && isCameraOn && (
+          {isPreCall && (
             <div
               style={{
+                order: 1,
                 position: "relative",
                 overflow: "hidden",
                 aspectRatio: "16 / 9",
-                borderRadius: "14px",
-                background: "#0f172a",
+                borderRadius: "18px",
+                border: "1px solid #ddd6fe",
+                background: "linear-gradient(135deg,#1e293b,#0f172a)",
               }}
             >
               <video
@@ -4862,24 +4876,49 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   height: "100%",
                   display: "block",
                   objectFit: selfViewFit,
+                  opacity: isCameraOn && (!isSelfViewBlurred || !hasSelfViewSegmentationFrame) ? 1 : 0,
                   transform: isSelfViewMirrored ? "scaleX(-1)" : "none",
                 }}
               />
-              <span
+              <canvas
+                ref={selfViewCanvasRef}
+                aria-hidden="true"
                 style={{
                   position: "absolute",
-                  left: "9px",
-                  bottom: "8px",
-                  padding: "4px 8px",
-                  borderRadius: "999px",
-                  background: "rgba(15,23,42,0.68)",
-                  color: "#ffffff",
-                  fontSize: "10px",
-                  fontWeight: 700,
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  objectFit: selfViewFit,
+                  opacity: isCameraOn && isSelfViewBlurred && hasSelfViewSegmentationFrame ? 1 : 0,
+                  pointerEvents: "none",
+                  transform: isSelfViewMirrored ? "scaleX(-1)" : "none",
                 }}
+              />
+              {!isCameraOn && (
+                <div style={{ position: "absolute", inset: 0, display: "grid", placeItems: "center", color: "#cbd5e1", fontSize: 14, fontWeight: 700 }}>
+                  {isCameraStarting ? t("Starting camera…", "Uruchamianie kamery…") : t("Camera preview is off", "Podgląd kamery jest wyłączony")}
+                </div>
+              )}
+              <div style={{ position: "absolute", left: "50%", bottom: 16, transform: "translateX(-50%)", display: "flex", gap: 8, padding: 7, borderRadius: 14, background: "rgba(15,23,42,0.78)", backdropFilter: "blur(10px)" }}>
+                <button type="button" onClick={toggleMute} aria-pressed={isMuted} style={preCallPreviewButtonStyle}>
+                  {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                  <span>{isMuted ? t("Unmute", "Włącz mikrofon") : t("Audio", "Dźwięk")}</span>
+                </button>
+                <button type="button" onClick={() => isCameraOn ? void stopCamera() : void startCamera(selectedCameraId)} disabled={isCameraStarting} aria-pressed={!isCameraOn} style={preCallPreviewButtonStyle}>
+                  {isCameraOn ? <Video size={21} /> : <VideoOff size={21} />}
+                  <span>{t("Video", "Wideo")}</span>
+                </button>
+              </div>
+              <button
+                type="button"
+                onClick={() => setIsSelfViewBlurred((blurred) => !blurred)}
+                disabled={!isCameraOn}
+                aria-pressed={isSelfViewBlurred}
+                style={{ ...preCallPreviewButtonStyle, position: "absolute", right: 14, bottom: 16, minWidth: 116, flexDirection: "row", background: isSelfViewBlurred ? "rgba(109,40,217,0.9)" : "rgba(15,23,42,0.78)", opacity: isCameraOn ? 1 : 0.55 }}
               >
-                {t("Local preview only", "Tylko lokalny podgląd")}
-              </span>
+                <ImageIcon size={18} />
+                <span>{t("Background", "Tło")}</span>
+              </button>
             </div>
           )}
 
@@ -4941,7 +4980,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           )}
 
           {isPreCall ? (
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "9px" }}>
+            <div style={{ order: 3, display: "grid", gridTemplateColumns: "minmax(120px, .45fr) 1fr", gap: "9px" }}>
               <button
                 type="button"
                 onClick={() => phase === "precall-incoming" ? void declineCall() : resetToIdle()}
@@ -4954,7 +4993,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 type="button"
                 onClick={() => phase === "precall-incoming" ? void joinIncomingCall() : void joinOutgoingCall()}
                 disabled={isPreparingMedia}
-                style={{ ...callActionStyle, background: "#dcfce7", color: "#166534", opacity: isPreparingMedia ? 0.65 : 1 }}
+                style={{ ...callActionStyle, background: "linear-gradient(135deg,#7c3aed,#6366f1)", color: "#ffffff", opacity: isPreparingMedia ? 0.65 : 1 }}
               >
                 <Phone size={17} />
                 {isPreparingMedia
@@ -5544,6 +5583,23 @@ const preCallSmallButtonStyle: React.CSSProperties = {
   alignItems: "center",
   gap: "7px",
   fontSize: "12px",
+  fontWeight: 750,
+  cursor: "pointer",
+};
+const preCallPreviewButtonStyle: React.CSSProperties = {
+  minWidth: 76,
+  minHeight: 54,
+  padding: "7px 12px",
+  border: "1px solid rgba(255,255,255,0.14)",
+  borderRadius: 11,
+  background: "transparent",
+  color: "#ffffff",
+  display: "inline-flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: 3,
+  fontSize: 12,
   fontWeight: 750,
   cursor: "pointer",
 };
