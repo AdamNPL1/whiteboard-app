@@ -274,6 +274,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isSwitchingCamera, setIsSwitchingCamera] = useState(false);
   const [isSelfViewVisible, setIsSelfViewVisible] = useState(true);
   const [isSelfViewMenuOpen, setIsSelfViewMenuOpen] = useState(false);
+  const [isSelfProfileOpen, setIsSelfProfileOpen] = useState(false);
+  const [isSelfViewBlurred, setIsSelfViewBlurred] = useState(false);
+  const [isSelfViewAutoFramed, setIsSelfViewAutoFramed] = useState(false);
+  const [isSelfAvatarShown, setIsSelfAvatarShown] = useState(false);
   const [isSelfViewMirrored, setIsSelfViewMirrored] = useState(true);
   const [selfViewFit, setSelfViewFit] = useState<"cover" | "contain">("cover");
   const [selfViewSize, setSelfViewSize] = useState<"small" | "medium" | "large">("medium");
@@ -882,6 +886,10 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     setIsSwitchingCamera(false);
     setIsSelfViewVisible(true);
     setIsSelfViewMenuOpen(false);
+    setIsSelfProfileOpen(false);
+    setIsSelfViewBlurred(false);
+    setIsSelfViewAutoFramed(false);
+    setIsSelfAvatarShown(false);
     setSelfViewPosition(null);
     setCameraMessage("");
     setIsRemoteVideoOn(false);
@@ -3176,6 +3184,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       }
       setCameraPermission("granted");
       setIsCameraOn(true);
+      setIsSelfAvatarShown(false);
       setJoinWithCamera(true);
       try {
         if (connection) {
@@ -5038,7 +5047,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         </button>
       )}
 
-      {phase === "connected" && showCallVideo && isCameraOn && isSelfViewVisible && (
+      {phase === "connected" && showCallVideo && (isCameraOn || isSelfAvatarShown) && isSelfViewVisible && (
         <div
           ref={selfViewRef}
           onPointerDown={beginSelfViewDrag}
@@ -5073,6 +5082,24 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             touchAction: "none",
           }}
         >
+          {isSelfAvatarShown ? (
+            <div
+              aria-label={t("Your avatar", "Twój awatar")}
+              style={{
+                width: "100%",
+                height: "100%",
+                display: "grid",
+                placeItems: "center",
+                borderRadius: "inherit",
+                background: "linear-gradient(135deg,#7c3aed,#60a5fa)",
+                color: "#ffffff",
+                fontSize: 34,
+                fontWeight: 800,
+              }}
+            >
+              {getParticipantInitials(user?.name || t("You", "Ty"))}
+            </div>
+          ) : (
           <video
             ref={localVideoRef}
             autoPlay
@@ -5084,10 +5111,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               height: "100%",
               display: "block",
               objectFit: selfViewFit,
-              transform: isSelfViewMirrored ? "scaleX(-1)" : "none",
+              filter: isSelfViewBlurred ? "blur(7px)" : "none",
+              transform: `${isSelfViewMirrored ? "scaleX(-1)" : ""} ${isSelfViewAutoFramed ? "scale(1.12)" : ""}`.trim() || "none",
               borderRadius: "inherit",
             }}
           />
+          )}
           <span
             style={{
               position: "absolute",
@@ -5135,11 +5164,11 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               onPointerDown={(event) => event.stopPropagation()}
               style={{
                 position: "absolute",
-                top: "auto",
-                bottom: 8,
+                top: 46,
+                bottom: "auto",
                 right: 8,
-                width: "210px",
-                maxHeight: "calc(100% - 54px)",
+                width: "280px",
+                maxHeight: "calc(100vh - 180px)",
                 overflowY: "auto",
                 padding: 8,
                 display: "grid",
@@ -5152,6 +5181,31 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 cursor: "default",
               }}
             >
+              <div style={selfViewMenuGroupStyle}>
+                <button type="button" role="menuitem" onClick={() => { setIsSelfProfileOpen(true); setIsSelfViewMenuOpen(false); }} style={selfViewMenuButtonStyle}>{t("View profile", "Wyświetl profil")}</button>
+                <button type="button" role="menuitem" onClick={toggleMute} style={selfViewMenuButtonStyle}>
+                  {isMuted ? t("Unmute my audio", "Włącz mój dźwięk") : t("Mute my audio", "Wycisz mój dźwięk")}
+                  <span style={{ marginLeft: "auto", color: "#64748b", fontWeight: 600 }}>Ctrl+D</span>
+                </button>
+                <button type="button" role="menuitem" onClick={() => { setIsSelfViewMenuOpen(false); if (isCameraOn) { setIsSelfAvatarShown(false); void stopCamera(); } else { void startCamera(selectedCameraId); } }} style={selfViewMenuButtonStyle}>{isCameraOn ? t("Stop video", "Wyłącz wideo") : t("Start video", "Włącz wideo")}</button>
+              </div>
+              <div aria-hidden="true" style={selfViewMenuSeparatorStyle} />
+              <div style={selfViewMenuGroupStyle}>
+                <button type="button" role="menuitemcheckbox" aria-checked={isSelfViewBlurred} onClick={() => setIsSelfViewBlurred((blurred) => !blurred)} style={selfViewMenuButtonStyle}>{isSelfViewBlurred ? t("Remove background blur", "Usuń rozmycie tła") : t("Blur background", "Rozmyj tło")}</button>
+                <button type="button" role="menuitemcheckbox" aria-checked={isSelfViewAutoFramed} onClick={() => setIsSelfViewAutoFramed((framed) => !framed)} style={selfViewMenuButtonStyle}>{isSelfViewAutoFramed ? t("Disable auto-frame", "Wyłącz automatyczne kadrowanie") : t("Auto-frame video", "Automatycznie wykadruj wideo")}</button>
+                <button type="button" role="menuitem" onClick={() => { setIsConnectedCallPanelOpen(true); setIsCallPanelMinimized(false); setIsCallMoreMenuOpen(true); setIsCallDeviceMenuOpen(false); setIsCallParticipantsMenuOpen(false); setIsSelfViewMenuOpen(false); }} style={selfViewMenuButtonStyle}>{t("Video & effects settings", "Ustawienia wideo i efektów")}</button>
+                <button type="button" role="menuitem" onClick={() => { setIsSelfAvatarShown(true); setIsSelfViewMenuOpen(false); void stopCamera(); }} style={selfViewMenuButtonStyle}>{t("Show avatar", "Pokaż awatar")}</button>
+              </div>
+              <div aria-hidden="true" style={selfViewMenuSeparatorStyle} />
+              <div style={selfViewMenuGroupStyle}>
+                <button type="button" role="menuitem" onClick={() => { setIsSelfViewVisible(false); setIsSelfViewMenuOpen(false); }} style={selfViewMenuButtonStyle}>{t("Hide self-view", "Ukryj swój podgląd")}</button>
+              </div>
+              <div aria-hidden="true" style={selfViewMenuSeparatorStyle} />
+              <div style={selfViewMenuGroupStyle}>
+                <button type="button" role="menuitem" onClick={() => window.open("/account-settings", "_blank", "noopener,noreferrer")} style={selfViewMenuButtonStyle}>{t("Add profile picture", "Dodaj zdjęcie profilowe")}</button>
+                <button type="button" role="menuitem" onClick={() => window.open("/account-settings", "_blank", "noopener,noreferrer")} style={selfViewMenuButtonStyle}>{t("Rename", "Zmień nazwę")}</button>
+              </div>
+              <div style={{ display: "none" }}>
               <button type="button" role="menuitem" onClick={() => { setIsSelfViewVisible(false); setIsSelfViewMenuOpen(false); }} style={selfViewMenuButtonStyle}>
                 {t("Hide self-view", "Ukryj swój podgląd")}
               </button>
@@ -5184,7 +5238,49 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 {t("Full screen", "Pełny ekran")}
               </button>
             </div>
+            </div>
           )}
+        </div>
+      )}
+      {phase === "connected" && isSelfProfileOpen && (
+        <div style={overlayStyle} role="presentation" onPointerDown={() => setIsSelfProfileOpen(false)}>
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={t("Your profile", "Twój profil")}
+            onPointerDown={(event) => event.stopPropagation()}
+            style={{
+              position: "relative",
+              width: "min(520px, calc(100vw - 32px))",
+              padding: "28px",
+              border: "1px solid rgba(203,213,225,0.9)",
+              borderRadius: 20,
+              background: "#ffffff",
+              color: "#172036",
+              boxShadow: "0 24px 70px rgba(15,23,42,0.28)",
+              display: "grid",
+              gap: 24,
+            }}
+          >
+            <button type="button" aria-label={t("Close profile", "Zamknij profil")} onClick={() => setIsSelfProfileOpen(false)} style={{ ...closeButtonStyle, top: 18, right: 18 }}>
+              <X size={18} />
+            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: 18, paddingRight: 42 }}>
+              <span aria-hidden="true" style={{ width: 82, height: 82, borderRadius: 18, background: "linear-gradient(135deg,#7c3aed,#60a5fa)", color: "#fff", display: "grid", placeItems: "center", fontSize: 28, fontWeight: 800, flex: "0 0 auto" }}>
+                {getParticipantInitials(user?.name || t("You", "Ty"))}
+              </span>
+              <div style={{ display: "grid", gap: 7, minWidth: 0 }}>
+                <strong style={{ fontSize: 24, overflow: "hidden", textOverflow: "ellipsis" }}>{user?.name || t("You", "Ty")}</strong>
+                <span style={{ color: "#16a34a", fontSize: 13 }}>{t("In a Scriboo call", "W rozmowie Scriboo")}</span>
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "120px minmax(0,1fr)", gap: "12px 18px", color: "#475569", fontSize: 14 }}>
+              <span>{t("Local time", "Czas lokalny")}</span>
+              <strong style={{ color: "#172036" }}>{new Intl.DateTimeFormat(undefined, { hour: "2-digit", minute: "2-digit" }).format(new Date())}</strong>
+              <span>{t("Email", "E-mail")}</span>
+              <strong style={{ color: "#172036", overflowWrap: "anywhere" }}>{user?.email || "—"}</strong>
+            </div>
+          </div>
         </div>
       )}
       {phase === "connected" && isShortcutHelpOpen && (
@@ -5347,8 +5443,20 @@ const selfViewMenuButtonStyle: React.CSSProperties = {
   background: "transparent",
   color: "#334155",
   textAlign: "left",
+  display: "flex",
+  alignItems: "center",
+  gap: 8,
   font: "inherit",
   fontSize: 11,
   fontWeight: 700,
   cursor: "pointer",
+};
+const selfViewMenuGroupStyle: React.CSSProperties = {
+  display: "grid",
+  gap: 2,
+};
+const selfViewMenuSeparatorStyle: React.CSSProperties = {
+  height: 1,
+  margin: "5px 2px",
+  background: "#e2e8f0",
 };
