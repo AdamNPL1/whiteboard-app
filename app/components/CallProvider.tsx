@@ -3718,7 +3718,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   }[selfViewSize];
   const showCallVideo = callLayoutMode === "standard" || callLayoutMode === "video";
   const callPanelWidth = isPreCall
-    ? 680
+    ? 560
     : callLayoutMode === "video" || isParticipantVideoPinned
       ? 560
       : callLayoutMode === "whiteboard"
@@ -4090,6 +4090,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           style={{
             position: "fixed",
             ...callPanelDockStyle,
+            ...(isPreCall
+              ? {
+                  left: "50%",
+                  right: "auto",
+                  top: "50%",
+                  bottom: "auto",
+                  transform: "translate(-50%, -50%)",
+                }
+              : {}),
             zIndex: 210,
             width: isActiveCallPanelHidden
               ? 0
