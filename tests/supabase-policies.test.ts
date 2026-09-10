@@ -30,6 +30,28 @@ describe("Supabase write boundaries", () => {
     expect(sql).not.toContain('create policy "board_shares_delete_owner"');
   });
 
+  it("keeps board history read-only for browser users", () => {
+    const sql = readSql("board-versions.sql");
+
+    expect(sql).toContain(
+      "revoke all on table public.board_versions from public, anon, authenticated"
+    );
+    expect(sql).toContain(
+      "grant select on table public.board_versions to authenticated"
+    );
+  });
+
+  it("provides one explicit database privilege baseline and audit", () => {
+    const hardening = readSql("security-hardening.sql");
+    const audit = readSql("security-audit.sql");
+
+    expect(hardening).toContain("alter table public.boards enable row level security");
+    expect(hardening).toContain("from public, anon, authenticated");
+    expect(hardening).toContain("public.board_personal_notes");
+    expect(audit).toContain("or not tables.rowsecurity");
+    expect(audit).toContain("information_schema.role_table_grants");
+  });
+
   it("keeps browser users from bypassing board limits", () => {
     const sql = readSql("rls-policies.sql");
 

@@ -20,6 +20,12 @@ create index if not exists board_versions_owner_created_idx
 
 alter table public.board_versions enable row level security;
 
+-- Supabase projects can grant public-schema tables to API roles through
+-- default privileges. Keep snapshots read-only in browsers even if those
+-- defaults change; only trusted server code may create or restore them.
+revoke all on table public.board_versions from public, anon, authenticated;
+grant select on table public.board_versions to authenticated;
+
 drop policy if exists "board_versions_select_owner" on public.board_versions;
 create policy "board_versions_select_owner"
 on public.board_versions
