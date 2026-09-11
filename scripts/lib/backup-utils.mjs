@@ -12,15 +12,15 @@ const MAX_ENCRYPTED_BACKUP_BYTES = 512 * 1024 * 1024;
 
 export const LEGACY_TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id" },
+  { name: "boards", key: "id", pageSize: 5 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
 ];
 
 export const PREVIOUS_TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id" },
-  { name: "board_versions", key: "id" },
+  { name: "boards", key: "id", pageSize: 5 },
+  { name: "board_versions", key: "id", pageSize: 5 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
   { name: "stripe_webhook_events", key: "event_id" },
@@ -28,11 +28,11 @@ export const PREVIOUS_TABLES = [
 
 export const TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id" },
-  { name: "board_versions", key: "id" },
+  { name: "boards", key: "id", pageSize: 5 },
+  { name: "board_versions", key: "id", pageSize: 5 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
-  { name: "board_personal_notes", key: ["board_id", "user_id"] },
+  { name: "board_personal_notes", key: ["board_id", "user_id"], pageSize: 100 },
   { name: "call_push_subscriptions", key: "id" },
   { name: "call_notification_preferences", key: "user_id" },
   { name: "stripe_webhook_events", key: "event_id" },
@@ -148,8 +148,8 @@ export const ensureParentDirectory = (filePath) => {
   mkdirSync(dirname(filePath), { recursive: true });
 };
 
-export const readAllRows = async (client, table, key) => {
-  const pageSize = 500;
+export const readAllRows = async (client, table, key, requestedPageSize = 500) => {
+  const pageSize = Math.max(1, Math.min(500, requestedPageSize));
   const rows = [];
   for (let from = 0; ; from += pageSize) {
     let query = client.from(table).select("*");

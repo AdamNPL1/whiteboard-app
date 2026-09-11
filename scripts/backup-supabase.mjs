@@ -26,8 +26,8 @@ const client = createClient(sourceUrl, serviceRoleKey, {
 const tables = {};
 const tableManifest = {};
 
-for (const { name, key } of TABLES) {
-  const rows = await readAllRows(client, name, key);
+for (const { name, key, pageSize } of TABLES) {
+  const rows = await readAllRows(client, name, key, pageSize);
   const { count, error: countError } = await client
     .from(name)
     .select("*", { count: "exact", head: true });

@@ -63,6 +63,11 @@ describe("Scriboo backup safeguards", () => {
     });
   });
 
+  it("uses small pages for large board documents", () => {
+    expect(TABLES.find(({ name }) => name === "boards")?.pageSize).toBe(5);
+    expect(TABLES.find(({ name }) => name === "board_versions")?.pageSize).toBe(5);
+  });
+
   it("encrypts and authenticates the payload", () => {
     const original = payload();
     expect(decryptBackup(encryptBackup(original))).toEqual(original);

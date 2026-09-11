@@ -34,7 +34,7 @@ const client = createClient(targetUrl, targetKey, {
 
 const alreadyRestored = new Set();
 
-for (const { name, key } of tableDefinitions) {
+for (const { name, key, pageSize } of tableDefinitions) {
   const { count, error } = await client.from(name).select("*", { count: "exact", head: true });
   if (error) throw new Error(`RESTORE_TARGET_CHECK_FAILED:${name}:${error.code || "unknown"}`);
   if ((count ?? 0) === 0) continue;
@@ -42,7 +42,7 @@ for (const { name, key } of tableDefinitions) {
   // A previous restore attempt may have completed some tables before a later
   // table failed. Resume only when the existing table exactly matches the
   // encrypted backup; otherwise refuse to overwrite anything.
-  const existingRows = await readAllRows(client, name, key);
+  const existingRows = await readAllRows(client, name, key, pageSize);
   if (hashRows(existingRows, key) !== payload.manifest.tables[name].sha256) {
     throw new Error(`Refusing to restore: target table ${name} is not empty and does not match the backup.`);
   }
@@ -66,8 +66,8 @@ for (const { name } of tableDefinitions) {
   }
 }
 
-for (const { name, key } of tableDefinitions) {
-  const restoredRows = await readAllRows(client, name, key);
+for (const { name, key, pageSize } of tableDefinitions) {
+  const restoredRows = await readAllRows(client, name, key, pageSize);
   if (hashRows(restoredRows, key) !== payload.manifest.tables[name].sha256) {
     throw new Error(`RESTORE_VERIFICATION_FAILED:${name}`);
   }
