@@ -9,7 +9,7 @@ do $security$
 declare
   table_name text;
   application_tables constant text[] := array[
-    'boards', 'user_board_state', 'profiles', 'board_shares',
+    'boards', 'user_board_state', 'profiles', 'board_shares', 'board_share_audit_events',
     'board_versions', 'board_personal_notes', 'call_sessions',
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',

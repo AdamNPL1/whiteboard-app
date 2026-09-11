@@ -51,4 +51,21 @@ describe("board document safety limits", () => {
       )
     ).toBe("BOARD_DOCUMENT_TOO_LARGE");
   });
+
+  it("accepts supported elements and rejects malformed coordinates", () => {
+    expect(validateBoardDocumentPayload(document({ elements: [{ kind: "stroke", points: [{ x: 1, y: 2 }], tool: "pen", width: 2 }] }))).toBeNull();
+    expect(validateBoardDocumentPayload(document({ elements: [{ kind: "stroke", points: [{ x: Number.NaN, y: 2 }], tool: "pen", width: 2 }] }))).toBe("BOARD_DOCUMENT_INVALID");
+  });
+
+  it("blocks remote and active-content image sources", () => {
+    const image = (src: string) => document({ elements: [{ kind: "image", point: { x: 0, y: 0 }, width: 100, height: 100, src, name: "image" }] });
+    expect(validateBoardDocumentPayload(image("https://tracker.example/image.png"))).toBe("BOARD_DOCUMENT_INVALID");
+    expect(validateBoardDocumentPayload(image("data:image/svg+xml;base64,PHN2Zz4="))).toBe("BOARD_DOCUMENT_INVALID");
+    expect(validateBoardDocumentPayload(image("data:image/png;base64,aGVsbG8="))).toBeNull();
+  });
+
+  it("rejects unknown elements and malformed calendar entries", () => {
+    expect(validateBoardDocumentPayload(document({ elements: [{ kind: "iframe", src: "https://example.com" }] }))).toBe("BOARD_DOCUMENT_INVALID");
+    expect(validateBoardDocumentPayload(document({ calendarEntries: [{ id: "1", date: "today" }] }))).toBe("BOARD_DOCUMENT_INVALID");
+  });
 });

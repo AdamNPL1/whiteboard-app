@@ -14,6 +14,7 @@ import {
   MAX_BOARD_DOCUMENT_BYTES,
   validateBoardDocumentPayload,
 } from "@/lib/board-document-limits";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -88,6 +89,8 @@ export async function PUT(
   }
 
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-save", limit: 300, windowSeconds: 300, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   const body = (await request.json().catch(() => null)) as
     | {
         elements?: unknown[];
@@ -207,6 +210,8 @@ export async function PATCH(
   }
 
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-settings", limit: 60, windowSeconds: 900, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   const body = (await request.json().catch(() => null)) as
     | {
         name?: string;
@@ -288,6 +293,8 @@ export async function DELETE(
   }
 
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-trash", limit: 30, windowSeconds: 3600, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   const {
     data: { user: authUser },
   } = await supabase.auth.getUser();

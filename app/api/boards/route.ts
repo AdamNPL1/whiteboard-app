@@ -3,6 +3,7 @@ import { createBoardForUser, getUserBoards } from "@/lib/board-store";
 import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -43,6 +44,9 @@ export async function POST(request: NextRequest) {
   if (!user) {
     return NextResponse.json({ error: "Unauthorized." }, { status: 401 });
   }
+
+  const rateLimit = await enforceRateLimit(request, { action: "board-create", limit: 20, windowSeconds: 3600, identifiers: [user.id] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
 
   try {
     const {

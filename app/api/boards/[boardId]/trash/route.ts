@@ -7,6 +7,7 @@ import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { reportOperationalError } from "@/lib/monitoring";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -69,6 +70,8 @@ export async function POST(
   }
 
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-trash-restore", limit: 30, windowSeconds: 3600, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   try {
     return NextResponse.json(
       await restoreBoardFromTrashForUser(
@@ -95,6 +98,8 @@ export async function DELETE(
   }
 
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-delete-permanent", limit: 30, windowSeconds: 3600, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   try {
     return NextResponse.json(
       await permanentlyDeleteBoardForUser(

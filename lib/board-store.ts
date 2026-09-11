@@ -1489,7 +1489,7 @@ export const acceptBoardInvitationForUser = async (
   }
 
   const acceptedAt = new Date().toISOString();
-  const { error: updateError } = await client
+  const { data: acceptedInvitation, error: updateError } = await client
     .from("board_shares")
     .update({
       recipient_user_id: userId,
@@ -1501,10 +1501,15 @@ export const acceptBoardInvitationForUser = async (
     })
     .eq("id", invitation.id)
     .eq("status", "pending")
-    .eq("invite_token_hash", tokenHash);
+    .eq("invite_token_hash", tokenHash)
+    .select("id")
+    .maybeSingle();
 
   if (updateError) {
     throw new Error(`SUPABASE_BOARD_INVITATION_ACCEPT_FAILED:${updateError.message}`);
+  }
+  if (!acceptedInvitation) {
+    throw new Error("BOARD_INVITATION_USED");
   }
 
   return { ok: true, boardId: invitation.board_id };

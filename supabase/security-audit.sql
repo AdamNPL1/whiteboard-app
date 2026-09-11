@@ -4,7 +4,7 @@
 -- 1. Every expected application table must exist and use RLS.
 with expected(tablename) as (
   select unnest(array[
-    'boards', 'user_board_state', 'profiles', 'board_shares',
+    'boards', 'user_board_state', 'profiles', 'board_shares', 'board_share_audit_events',
     'board_versions', 'board_personal_notes', 'call_sessions',
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',
@@ -55,7 +55,7 @@ left join allowed
 where grants.table_schema = 'public'
   and grants.grantee in ('anon', 'authenticated')
   and grants.table_name in (
-    'boards', 'user_board_state', 'profiles', 'board_shares',
+    'boards', 'user_board_state', 'profiles', 'board_shares', 'board_share_audit_events',
     'board_versions', 'board_personal_notes', 'call_sessions',
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',

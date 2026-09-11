@@ -7,6 +7,7 @@ import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { reportOperationalError } from "@/lib/monitoring";
+import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 
 export const runtime = "nodejs";
 
@@ -73,6 +74,8 @@ export async function POST(
     getAll: () => request.cookies.getAll(),
   });
   const { boardId } = await context.params;
+  const rateLimit = await enforceRateLimit(request, { action: "board-version-restore", limit: 20, windowSeconds: 3600, identifiers: [user.id, boardId] });
+  if (!rateLimit.allowed) return rateLimitResponse(rateLimit);
   const body = (await request.json().catch(() => null)) as
     | { versionId?: string }
     | null;
