@@ -6,6 +6,7 @@ import {
   createSupabaseServerAuthClient,
   getSupabaseServiceRoleClient,
 } from "@/lib/supabase-server";
+import { getPasswordPolicyError } from "@/lib/password-policy";
 
 export const runtime = "nodejs";
 
@@ -85,9 +86,10 @@ export async function PATCH(request: NextRequest) {
 
   if (action === "password") {
     const newPassword = body?.newPassword ?? "";
-    if (newPassword.length < 8) {
+    const passwordPolicyError = getPasswordPolicyError(newPassword);
+    if (passwordPolicyError) {
       return NextResponse.json(
-        { error: "New password must be at least 8 characters." },
+        { error: passwordPolicyError },
         { status: 400 }
       );
     }

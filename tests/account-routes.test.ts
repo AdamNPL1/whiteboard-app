@@ -122,6 +122,12 @@ describe("account deletion and export", () => {
     expect(mocks.deletedTables).toEqual(
       expect.arrayContaining([
         "user_board_state",
+        "board_personal_notes",
+        "call_push_subscriptions",
+        "call_notification_preferences",
+        "call_device_ownership",
+        "call_participant_states",
+        "call_blocks",
         "board_shares",
         "boards",
         "profiles",

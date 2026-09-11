@@ -35,9 +35,9 @@ export function ResetPasswordClient() {
     event.preventDefault();
     if (isSubmitting) return;
 
-    if (password.length < 8) {
+    if (password.length < 12 || !/[a-z]/.test(password) || !/[A-Z]/.test(password) || !/\d/.test(password) || !/[^A-Za-z0-9]/.test(password)) {
       setIsSuccess(false);
-      setMessage("Password must be at least 8 characters.");
+      setMessage("Use at least 12 characters with uppercase, lowercase, a number and a symbol.");
       return;
     }
 
@@ -97,6 +97,7 @@ export function ResetPasswordClient() {
           <input
             type="password"
             autoComplete="new-password"
+            minLength={12}
             value={password}
             onChange={(event) => setPassword(event.currentTarget.value)}
             style={inputStyle}
@@ -108,6 +109,7 @@ export function ResetPasswordClient() {
           <input
             type="password"
             autoComplete="new-password"
+            minLength={12}
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.currentTarget.value)}
             style={inputStyle}

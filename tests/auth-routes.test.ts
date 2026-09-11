@@ -2,7 +2,13 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
 const mocks = vi.hoisted(() => ({
-  client: null as unknown as { auth: Record<string, ReturnType<typeof vi.fn>> },
+  client: null as unknown as { auth: {
+    signUp: ReturnType<typeof vi.fn>;
+    signInWithPassword: ReturnType<typeof vi.fn>;
+    signOut: ReturnType<typeof vi.fn>;
+    resetPasswordForEmail: ReturnType<typeof vi.fn>;
+    mfa: { listFactors: ReturnType<typeof vi.fn> };
+  } },
   ensureProfile: vi.fn(),
 }));
 
@@ -45,6 +51,7 @@ describe("authentication routes", () => {
         signInWithPassword: vi.fn(),
         signOut: vi.fn().mockResolvedValue({ error: null }),
         resetPasswordForEmail: vi.fn().mockResolvedValue({ error: null }),
+        mfa: { listFactors: vi.fn().mockResolvedValue({ data: { totp: [] }, error: null }) },
       },
     };
   });
@@ -54,8 +61,8 @@ describe("authentication routes", () => {
       request("/api/auth/register", {
         name: "A",
         email: "person@example.com",
-        password: "password1",
-        confirmPassword: "password1",
+        password: "Secure-board9!",
+        confirmPassword: "Secure-board9!",
         acceptedLegal: true,
       })
     );
@@ -73,8 +80,8 @@ describe("authentication routes", () => {
       request("/api/auth/register", {
         name: "Person",
         email: " PERSON@EXAMPLE.COM ",
-        password: "password1",
-        confirmPassword: "password1",
+        password: "Secure-board9!",
+        confirmPassword: "Secure-board9!",
         acceptedLegal: true,
       })
     );
@@ -101,8 +108,8 @@ describe("authentication routes", () => {
       request("/api/auth/register", {
         name: "Person",
         email: "person@example.com",
-        password: "password1",
-        confirmPassword: "password1",
+        password: "Secure-board9!",
+        confirmPassword: "Secure-board9!",
         acceptedLegal: false,
       })
     );

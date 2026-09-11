@@ -7,6 +7,7 @@ import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { PRIVACY_VERSION, TERMS_VERSION } from "@/lib/legal";
 import { verifyTurnstileToken } from "@/lib/turnstile";
+import { getPasswordPolicyError } from "@/lib/password-policy";
 
 export const runtime = "nodejs";
 
@@ -51,9 +52,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  if (password.length < 8) {
+  const passwordPolicyError = getPasswordPolicyError(password);
+  if (passwordPolicyError) {
     return NextResponse.json(
-      { error: "Password must be at least 8 characters." },
+      { error: passwordPolicyError },
       { status: 400 }
     );
   }
@@ -136,7 +138,7 @@ export async function POST(request: NextRequest) {
       (errorMessage.includes("weak") || errorMessage.includes("strength"))
     ) {
       return NextResponse.json(
-        { error: "Password must be at least 8 characters." },
+        { error: "This password does not meet the security requirements." },
         { status: 400 }
       );
     }

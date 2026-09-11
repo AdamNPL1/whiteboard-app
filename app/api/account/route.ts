@@ -124,6 +124,24 @@ export async function DELETE(request: NextRequest) {
   try {
     await cancelCustomerSubscriptions(profile?.stripe_customer_id ?? null);
 
+    for (const table of [
+      "board_personal_notes",
+      "call_push_subscriptions",
+      "call_notification_preferences",
+      "call_device_ownership",
+      "call_participant_states",
+    ]) {
+      const { error } = await serviceRole.from(table).delete().eq("user_id", user.id);
+      assertDeleted(error, `${table.toUpperCase()}_DELETE_FAILED`);
+    }
+
+    const { error: blocksCreatedError } = await serviceRole
+      .from("call_blocks").delete().eq("blocker_user_id", user.id);
+    assertDeleted(blocksCreatedError, "CALL_BLOCKS_CREATED_DELETE_FAILED");
+    const { error: blocksReceivedError } = await serviceRole
+      .from("call_blocks").delete().eq("blocked_user_id", user.id);
+    assertDeleted(blocksReceivedError, "CALL_BLOCKS_RECEIVED_DELETE_FAILED");
+
     const { error: stateError } = await serviceRole
       .from("user_board_state")
       .delete()

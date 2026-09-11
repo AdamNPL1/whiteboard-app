@@ -90,6 +90,17 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  const { data: factors, error: factorsError } = await supabase.auth.mfa.listFactors();
+  if (factorsError) {
+    return NextResponse.json({ error: "Could not verify account security settings." }, { status: 500 });
+  }
+  const verifiedFactor = factors.totp.find((factor) => factor.status === "verified");
+  if (verifiedFactor) {
+    const response = NextResponse.json({ ok: true, needsMfa: true, factorId: verifiedFactor.id });
+    responseCookies.forEach(({ name, value, options }) => response.cookies.set(name, value, options));
+    return response;
+  }
+
   const profile = await ensureProfileForSupabaseUser(supabase, user);
   const appUser = profile ?? mapSupabaseUserToAppUser(user);
   const response = NextResponse.json({

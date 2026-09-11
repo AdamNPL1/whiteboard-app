@@ -6,6 +6,7 @@ import {
 } from "@/lib/password-recovery-ticket";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { createSupabaseServerAuthClient } from "@/lib/supabase-server";
+import { getPasswordPolicyError } from "@/lib/password-policy";
 
 export const runtime = "nodejs";
 
@@ -16,9 +17,10 @@ export async function POST(request: NextRequest) {
   const password = body?.password ?? "";
   const confirmPassword = body?.confirmPassword ?? "";
 
-  if (password.length < 8 || password.length > 128) {
+  const passwordPolicyError = getPasswordPolicyError(password);
+  if (passwordPolicyError) {
     return NextResponse.json(
-      { error: "Password must be between 8 and 128 characters." },
+      { error: passwordPolicyError },
       { status: 400 }
     );
   }

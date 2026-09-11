@@ -113,6 +113,8 @@ export default function RegisterPage() {
           <input
             type="password"
             autoComplete="new-password"
+            minLength={12}
+            title="Use 12 or more characters with uppercase, lowercase, a number and a symbol."
             value={password}
             onChange={(event) => setPassword(event.currentTarget.value)}
             style={inputStyle}
@@ -124,6 +126,7 @@ export default function RegisterPage() {
           <input
             type="password"
             autoComplete="new-password"
+            minLength={12}
             value={confirmPassword}
             onChange={(event) => setConfirmPassword(event.currentTarget.value)}
             style={inputStyle}

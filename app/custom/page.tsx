@@ -788,6 +788,8 @@ export default function Page() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authConfirmPassword, setAuthConfirmPassword] = useState("");
+  const [authMfaFactorId, setAuthMfaFactorId] = useState("");
+  const [authMfaCode, setAuthMfaCode] = useState("");
   const [authMessage, setAuthMessage] = useState("");
   const [canResendConfirmation, setCanResendConfirmation] = useState(false);
   const [isAuthSubmitting, setIsAuthSubmitting] = useState(false);
@@ -1777,6 +1779,8 @@ export default function Page() {
       message?: string;
       user?: PublicAccount;
       needsVerification?: boolean;
+      needsMfa?: boolean;
+      factorId?: string;
     };
 
     if (!response.ok) {
@@ -1792,6 +1796,18 @@ export default function Page() {
 
   const handleAuthSubmit = async () => {
     if (isAuthSubmitting) return;
+
+    if (authMfaFactorId) {
+      setIsAuthSubmitting(true); setAuthMessage("");
+      try {
+        await readAuthResponse(await fetch("/api/auth/mfa/verify", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ factorId: authMfaFactorId, code: authMfaCode }) }));
+        setAuthMfaFactorId(""); setAuthMfaCode(""); setShowLoginModal(false);
+        window.dispatchEvent(new Event("scriboo-auth-changed"));
+        await loadCurrentAccount();
+      } catch (error) { setAuthMessage(error instanceof Error ? error.message : "Authentication failed."); }
+      finally { setIsAuthSubmitting(false); }
+      return;
+    }
 
     const email = authEmail.trim().toLowerCase();
     const name = authName.trim();
@@ -1864,6 +1880,11 @@ export default function Page() {
           body: JSON.stringify({ email, password, turnstileToken }),
         })
       );
+
+      if (data.needsMfa && data.factorId) {
+        setAuthPassword(""); setAuthMfaFactorId(data.factorId); setAuthMessage("");
+        return;
+      }
 
       setCurrentAccountId(data.user?.id ?? "");
       setCurrentAccountName(data.user?.name ?? "");
@@ -11140,6 +11161,24 @@ export default function Page() {
               />
             </div>
 
+            {authMfaFactorId && (
+              <label style={{ display: "block", marginBottom: "14px" }}>
+                <span style={{ display: "block", marginBottom: "6px", color: "#475569", fontSize: "13px", fontWeight: 700 }}>
+                  {t("Authenticator code", "Kod uwierzytelniający")}
+                </span>
+                <input
+                  autoFocus
+                  inputMode="numeric"
+                  autoComplete="one-time-code"
+                  maxLength={6}
+                  placeholder="000000"
+                  value={authMfaCode}
+                  onChange={(event) => setAuthMfaCode(event.currentTarget.value.replace(/\D/g, ""))}
+                  style={{ width: "100%", height: "46px", padding: "0 14px", borderRadius: "14px", border: "1px solid rgba(203,213,225,0.92)", fontSize: "17px", letterSpacing: "0.28em", boxSizing: "border-box" }}
+                />
+              </label>
+            )}
+
             {authMessage && (
               <div
                 role={isPositiveAuthMessage ? "status" : "alert"}
@@ -11734,6 +11773,8 @@ export default function Page() {
                   ? "Please wait..."
                   : authMode === "register"
                   ? "Create account"
+                  : authMfaFactorId
+                  ? "Verify code"
                   : "Log in"}
               </span>
             </button>

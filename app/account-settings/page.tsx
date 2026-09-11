@@ -5,6 +5,7 @@ import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Download, LogOut, ShieldCheck, Trash2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
 import CallNotificationSettings from "@/app/components/CallNotificationSettings";
+import MfaSettings from "@/app/components/MfaSettings";
 
 type AccountUser = { email: string; name: string };
 
@@ -87,7 +88,7 @@ export default function AccountSettingsPage() {
           </SettingsSection>
 
           <SettingsSection title={t("Change password", "Zmień hasło")} description={t("Enter your current password before choosing a new one.", "Wprowadź obecne hasło przed wybraniem nowego.")}>
-            <form onSubmit={(event: FormEvent) => { event.preventDefault(); void patchSecurity({ action: "password", currentPassword, newPassword }, "password"); }} style={formStyle}><input required type="password" autoComplete="current-password" placeholder={t("Current password", "Obecne hasło")} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={inputStyle}/><input required minLength={8} type="password" autoComplete="new-password" placeholder={t("New password (8+ characters)", "Nowe hasło (minimum 8 znaków)")} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={inputStyle}/><button disabled={!!busy} style={buttonStyle}>{busy === "password" ? t("Changing...", "Zmienianie...") : t("Change password", "Zmień hasło")}</button></form>
+            <form onSubmit={(event: FormEvent) => { event.preventDefault(); void patchSecurity({ action: "password", currentPassword, newPassword }, "password"); }} style={formStyle}><input required type="password" autoComplete="current-password" placeholder={t("Current password", "Obecne hasło")} value={currentPassword} onChange={(e) => setCurrentPassword(e.target.value)} style={inputStyle}/><input required minLength={12} type="password" autoComplete="new-password" placeholder={t("12+ characters, upper/lowercase, number and symbol", "Minimum 12 znaków, duża/mała litera, cyfra i symbol")} value={newPassword} onChange={(e) => setNewPassword(e.target.value)} style={inputStyle}/><button disabled={!!busy} style={buttonStyle}>{busy === "password" ? t("Changing...", "Zmienianie...") : t("Change password", "Zmień hasło")}</button></form>
           </SettingsSection>
 
           <SettingsSection title={t("Change email", "Zmień e-mail")} description={t("Your email changes only after Supabase completes the required verification.", "Adres e-mail zmieni się dopiero po wymaganej weryfikacji przez Supabase.")}>
@@ -106,7 +107,7 @@ export default function AccountSettingsPage() {
             <a href="/api/account/export" style={{ ...secondaryButton, textDecoration: "none" }}><Download size={16}/> {t("Download my data", "Pobierz moje dane")}</a>
           </SettingsSection>
 
-          <SettingsSection title={t("Multi-factor authentication", "Uwierzytelnianie wieloskładnikowe")} description={t("MFA/2FA is planned for a later security upgrade.", "MFA/2FA jest planowane w późniejszej aktualizacji bezpieczeństwa.")}><span style={{ ...noticeStyle, display: "inline-block" }}>{t("Not available yet", "Jeszcze niedostępne")}</span></SettingsSection>
+          <SettingsSection title={t("Multi-factor authentication", "Uwierzytelnianie wieloskładnikowe")} description={t("Protect your account with a six-digit code from an authenticator app.", "Chroń konto sześciocyfrowym kodem z aplikacji uwierzytelniającej.")}><MfaSettings /></SettingsSection>
 
           <div style={{ ...sectionStyle, borderColor: "#fecaca" }}><h2 style={{ margin: 0, color: "#991b1b", fontSize: 20 }}>{t("Delete account", "Usuń konto")}</h2><p style={mutedStyle}>{t("Cancels active subscriptions and permanently removes your boards and access. Type DELETE and enter your password.", "Anuluje aktywne subskrypcje i trwale usuwa tablice oraz dostęp. Wpisz DELETE i podaj hasło.")}</p><div style={formStyle}><input placeholder={t("Type DELETE", "Wpisz DELETE")} value={confirmation} onChange={(e) => setConfirmation(e.target.value)} style={inputStyle}/><input type="password" autoComplete="current-password" placeholder={t("Current password", "Obecne hasło")} value={deletePassword} onChange={(e) => setDeletePassword(e.target.value)} style={inputStyle}/><button onClick={() => void deleteAccount()} disabled={!!busy || confirmation !== "DELETE" || !deletePassword} style={dangerButton}><Trash2 size={16}/>{busy === "delete" ? t("Deleting...", "Usuwanie...") : t("Delete account permanently", "Usuń konto trwale")}</button></div></div>
         </section>
