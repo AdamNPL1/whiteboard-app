@@ -14,7 +14,7 @@ declare
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',
     'call_push_subscriptions', 'call_notification_preferences',
-    'api_rate_limits', 'stripe_webhook_events'
+    'api_rate_limits', 'stripe_webhook_events', 'email_jobs'
   ];
   browser_read_tables constant text[] := array[
     'boards', 'user_board_state', 'profiles', 'board_shares',

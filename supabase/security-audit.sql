@@ -9,7 +9,7 @@ with expected(tablename) as (
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',
     'call_push_subscriptions', 'call_notification_preferences',
-    'api_rate_limits', 'stripe_webhook_events'
+    'api_rate_limits', 'stripe_webhook_events', 'email_jobs'
   ]::text[])
 )
 select
@@ -60,7 +60,7 @@ where grants.table_schema = 'public'
     'call_participant_states', 'call_state_events', 'call_signal_messages',
     'call_device_ownership', 'call_blocks', 'call_abuse_events',
     'call_push_subscriptions', 'call_notification_preferences',
-    'api_rate_limits', 'stripe_webhook_events'
+    'api_rate_limits', 'stripe_webhook_events', 'email_jobs'
   )
   and allowed.role_name is null
 order by grants.grantee, grants.table_name, grants.privilege_type;

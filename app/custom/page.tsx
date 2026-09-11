@@ -3432,11 +3432,11 @@ export default function Page() {
       }
       setShareEmailInput("");
       if (data.inviteEmailSent) {
-      setSharePanelMessage(t("Board shared successfully and invite email sent.", "Tablica została udostępniona, a zaproszenie wysłane."));
+      setSharePanelMessage(t("Board shared successfully and invite email queued.", "Tablica została udostępniona, a zaproszenie dodane do kolejki."));
         setSharePanelTone("success");
       } else {
         setSharePanelMessage(
-          "Board shared successfully, but the invite email could not be sent."
+          "Board shared successfully, but the invite email could not be queued."
         );
         setSharePanelTone("error");
       }

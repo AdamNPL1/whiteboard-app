@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import { enqueueEmail } from "@/lib/email-queue";
 
 type BoardShareInviteEmailParams = {
   appOrigin: string;
@@ -103,7 +104,7 @@ const escapeHtml = (value: string) =>
       })[character] ?? character
   );
 
-export const sendSubscriptionLifecycleEmail = async ({
+export const deliverSubscriptionLifecycleEmail = async ({
   recipientEmail,
   subject,
   heading,
@@ -156,7 +157,7 @@ export const sendSubscriptionLifecycleEmail = async ({
   });
 };
 
-export const sendSupportRequestEmails = async ({
+export const deliverSupportRequestEmails = async ({
   ticketNumber,
   requesterEmail,
   subject,
@@ -233,7 +234,7 @@ export const sendSupportRequestEmails = async ({
   });
 };
 
-export const sendBoardShareInviteEmail = async ({
+export const deliverBoardShareInviteEmail = async ({
   appOrigin,
   ownerEmail,
   recipientEmail,
@@ -282,7 +283,7 @@ export const sendBoardShareInviteEmail = async ({
   });
 };
 
-export const sendAccountDeletedEmail = async ({
+export const deliverAccountDeletedEmail = async ({
   recipientEmail,
 }: AccountDeletedEmailParams) => {
   const transporter = getTransporter();
@@ -312,3 +313,12 @@ export const sendAccountDeletedEmail = async ({
     `,
   });
 };
+
+export const sendSubscriptionLifecycleEmail = async (payload: SubscriptionLifecycleEmailParams) =>
+  enqueueEmail({ kind: "subscription_lifecycle", payload });
+export const sendSupportRequestEmails = async (payload: SupportRequestEmailParams) =>
+  enqueueEmail({ kind: "support_request", payload });
+export const sendBoardShareInviteEmail = async (payload: BoardShareInviteEmailParams) =>
+  enqueueEmail({ kind: "board_share_invite", payload });
+export const sendAccountDeletedEmail = async (payload: AccountDeletedEmailParams) =>
+  enqueueEmail({ kind: "account_deleted", payload });

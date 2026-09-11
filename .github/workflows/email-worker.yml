@@ -1,0 +1,28 @@
+name: Process Scriboo email queue
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scriboo-email-worker
+  cancel-in-progress: false
+
+jobs:
+  process:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Deliver queued emails
+        env:
+          EMAIL_WORKER_SECRET: ${{ secrets.EMAIL_WORKER_SECRET }}
+        run: |
+          test -n "$EMAIL_WORKER_SECRET"
+          curl --fail-with-body --silent --show-error --retry 2 \
+            --max-time 55 \
+            -H "Authorization: Bearer $EMAIL_WORKER_SECRET" \
+            https://scribooapp.com/api/internal/email-worker
