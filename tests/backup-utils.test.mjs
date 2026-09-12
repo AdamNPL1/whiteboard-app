@@ -64,7 +64,7 @@ describe("Scriboo backup safeguards", () => {
   });
 
   it("uses small pages for large board documents", () => {
-    expect(TABLES.find(({ name }) => name === "boards")?.pageSize).toBe(5);
+    expect(TABLES.find(({ name }) => name === "boards")?.pageSize).toBe(1);
     expect(TABLES.find(({ name }) => name === "board_versions")?.pageSize).toBe(5);
   });
 

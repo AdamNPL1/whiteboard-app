@@ -11,6 +11,7 @@ import {
   hashRows,
   projectHost,
   readAllRows,
+  readExactCount,
   validatePayload,
 } from "./lib/backup-utils.mjs";
 
@@ -28,12 +29,7 @@ const tableManifest = {};
 
 for (const { name, key, pageSize } of TABLES) {
   const rows = await readAllRows(client, name, key, pageSize);
-  const { count, error: countError } = await client
-    .from(name)
-    .select("*", { count: "exact", head: true });
-  if (countError) {
-    throw new Error(`BACKUP_COUNT_FAILED:${name}:${countError.code || "unknown"}`);
-  }
+  const count = await readExactCount(client, name);
   if (count !== rows.length) {
     throw new Error(
       `BACKUP_SOURCE_CHANGED:${name}: expected ${count ?? "unknown"} rows but read ${rows.length}`

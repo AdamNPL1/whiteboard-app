@@ -12,14 +12,14 @@ const MAX_ENCRYPTED_BACKUP_BYTES = 512 * 1024 * 1024;
 
 export const LEGACY_TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id", pageSize: 5 },
+  { name: "boards", key: "id", pageSize: 1 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
 ];
 
 export const PREVIOUS_TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id", pageSize: 5 },
+  { name: "boards", key: "id", pageSize: 1 },
   { name: "board_versions", key: "id", pageSize: 5 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
@@ -28,7 +28,7 @@ export const PREVIOUS_TABLES = [
 
 export const TABLES = [
   { name: "profiles", key: "id" },
-  { name: "boards", key: "id", pageSize: 5 },
+  { name: "boards", key: "id", pageSize: 1 },
   { name: "board_versions", key: "id", pageSize: 5 },
   { name: "user_board_state", key: "user_id" },
   { name: "board_shares", key: "id" },
@@ -152,12 +152,20 @@ export const readAllRows = async (client, table, key, requestedPageSize = 500) =
   const pageSize = Math.max(1, Math.min(500, requestedPageSize));
   const rows = [];
   for (let from = 0; ; from += pageSize) {
-    let query = client.from(table).select("*");
-    for (const column of Array.isArray(key) ? key : [key]) {
-      query = query.order(column, { ascending: true });
+    let data;
+    let lastError;
+    for (let attempt = 1; attempt <= 4; attempt += 1) {
+      let query = client.from(table).select("*");
+      for (const column of Array.isArray(key) ? key : [key]) {
+        query = query.order(column, { ascending: true });
+      }
+      const result = await query.range(from, from + pageSize - 1);
+      data = result.data;
+      lastError = result.error;
+      if (!lastError) break;
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
     }
-    const { data, error } = await query.range(from, from + pageSize - 1);
-    if (error) throw new Error(`BACKUP_READ_FAILED:${table}:${error.code || "unknown"}`);
+    if (lastError) throw new Error(`BACKUP_READ_FAILED:${table}:${lastError.code || "unknown"}`);
     rows.push(...(data ?? []));
     if (!data || data.length < pageSize) break;
   }
@@ -247,6 +255,17 @@ export const validatePayload = (payload) => {
     includesStorageObjects: false,
     legacyFormat: payload.format === LEGACY_PAYLOAD_FORMAT,
   };
+};
+
+export const readExactCount = async (client, table) => {
+  let lastError;
+  for (let attempt = 1; attempt <= 4; attempt += 1) {
+    const result = await client.from(table).select("*", { count: "exact", head: true });
+    lastError = result.error;
+    if (!lastError) return result.count;
+    if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, attempt * 1_000));
+  }
+  throw new Error(`BACKUP_COUNT_FAILED:${table}:${lastError?.code || "unknown"}`);
 };
 
 export const projectHost = (url) => new URL(url).host.toLowerCase();
