@@ -1,0 +1,12 @@
+title = "Scriboo secret scanning"
+
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Known non-secret values used only by the local Playwright server in an earlier PR commit"
+regexTarget = "line"
+regexes = [
+  '''NEXT_PUBLIC_SUPABASE_ANON_KEY:\s*"e2e-placeholder-anon-key"''',
+  '''SUPABASE_SERVICE_ROLE_KEY:\s*"e2e-placeholder-service-key"''',
+]
