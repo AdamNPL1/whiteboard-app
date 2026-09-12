@@ -22,6 +22,9 @@ const publicPathsWhenClosed = new Set([
   // Stripe must be able to deliver signed billing events even while the
   // customer-facing site is in private maintenance/testing mode.
   "/api/billing/webhook",
+  // Scheduled delivery is authenticated with CRON_SECRET and must continue
+  // while the customer-facing application is in maintenance mode.
+  "/api/internal/email-worker",
   "/favicon.ico",
 ]);
 
