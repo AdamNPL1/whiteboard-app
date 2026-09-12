@@ -29,8 +29,8 @@ export default defineConfig({
     env: {
       SITE_CLOSED: "false",
       NEXT_PUBLIC_SUPABASE_URL: "https://example.supabase.co",
-      NEXT_PUBLIC_SUPABASE_ANON_KEY: "e2e-placeholder-anon-key",
-      SUPABASE_SERVICE_ROLE_KEY: "e2e-placeholder-service-key",
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: crypto.randomUUID(),
+      SUPABASE_SERVICE_ROLE_KEY: crypto.randomUUID(),
       TURNSTILE_ENABLED: "false",
     },
   },
