@@ -1,0 +1,24 @@
+name: Production health
+
+on:
+  schedule:
+    - cron: "*/10 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scriboo-production-health
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Check application and critical background services
+        run: |
+          curl --fail-with-body --silent --show-error --retry 2 \
+            --retry-all-errors --max-time 30 \
+            https://scribooapp.com/api/health
