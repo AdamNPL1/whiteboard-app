@@ -9,6 +9,8 @@
     "lint": "eslint",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "test:e2e:ui": "playwright test --ui",
     "db:validate": "node scripts/validate-supabase-sql.mjs",
     "launch:check": "node --env-file=.env.local scripts/check-launch-readiness.mjs",
     "backup:create": "node --env-file=.env.local --env-file=.env.backup.local scripts/backup-supabase.mjs",
@@ -36,6 +38,7 @@
     "web-push": "^3.6.7"
   },
   "devDependencies": {
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4",
     "@types/bcrypt": "^6.0.0",
     "@types/node": "^20",
