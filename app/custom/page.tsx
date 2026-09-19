@@ -3969,13 +3969,15 @@ export default function Page() {
     ? "linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%)"
     : topBarPaletteGradient;
   const premiumHeadingStyle = {
+    fontFamily: appSansFontFamily,
     letterSpacing: "-0.045em",
-    fontWeight: 650,
+    fontWeight: 700,
     textRendering: "optimizeLegibility" as const,
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
   };
   const premiumBodyStyle = {
+    fontFamily: appSansFontFamily,
     textRendering: "optimizeLegibility" as const,
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
