@@ -3,7 +3,10 @@ import Stripe from "stripe";
 
 import { getWorkspaceAccess } from "@/lib/board-store";
 import { sendSubscriptionLifecycleEmail } from "@/lib/email";
-import { ensureProfileForSupabaseUser } from "@/lib/profile-store";
+import {
+  ensureProfileForSupabaseUser,
+  type AppProfileSubscriptionStatus,
+} from "@/lib/profile-store";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import {
   createSupabaseServerAuthClient,
@@ -501,7 +504,7 @@ export async function POST(request: NextRequest) {
           }
         );
 
-        const nextSubscriptionStatus =
+        const nextSubscriptionStatus: AppProfileSubscriptionStatus =
           updatedSubscription.status === "trialing" ||
           updatedSubscription.status === "active" ||
           updatedSubscription.status === "past_due"
