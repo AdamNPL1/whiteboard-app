@@ -12290,6 +12290,65 @@ export default function Page() {
                     </button>
                   </article>
                 ))}
+                <aside
+                  className="scriboo-pricing-feature-stack"
+                  aria-label={t("Included Pro tools", "Narzędzia w planie Pro")}
+                >
+                  {[
+                    {
+                      key: "video",
+                      icon: <Video size={17} fill="currentColor" />,
+                      title: t("Video calls", "Rozmowy wideo"),
+                      copy: t("Meet one-to-one", "Spotkania jeden na jeden"),
+                    },
+                    {
+                      key: "calendar",
+                      icon: <CalendarDays size={17} />,
+                      title: t("Calendar", "Kalendarz"),
+                      copy: t("Plan every session", "Planuj każde spotkanie"),
+                    },
+                    {
+                      key: "whiteboard",
+                      icon: <Pen size={17} />,
+                      title: t("Whiteboard", "Tablica"),
+                      copy: t("Create together live", "Twórzcie razem na żywo"),
+                    },
+                  ].map((feature) => (
+                    <article
+                      key={feature.key}
+                      className={`scriboo-pricing-feature-mini scriboo-pricing-feature-mini--${feature.key}`}
+                    >
+                      <div className="scriboo-pricing-feature-mini__copy">
+                        <span>{feature.icon}</span>
+                        <div>
+                          <strong>{feature.title}</strong>
+                          <small>{feature.copy}</small>
+                        </div>
+                      </div>
+                      <div className="scriboo-pricing-feature-mini__preview" aria-hidden="true">
+                        {feature.key === "video" ? (
+                          <>
+                            <span className="scriboo-mini-person"><UserRound size={22} /></span>
+                            <span className="scriboo-mini-person scriboo-mini-person--guest"><UserRound size={15} /></span>
+                            <span className="scriboo-mini-call"><Video size={11} /></span>
+                          </>
+                        ) : feature.key === "calendar" ? (
+                          <>
+                            <span className="scriboo-mini-calendar-month">{t("This week", "Ten tydzień")}</span>
+                            <span className="scriboo-mini-calendar-days">
+                              <i>10</i><i className="is-active">11</i><i>12</i>
+                            </span>
+                          </>
+                        ) : (
+                          <>
+                            <span className="scriboo-mini-board-tools"><Pen size={10} /><Type size={10} /></span>
+                            <svg viewBox="0 0 92 42"><path d="M5 32 C22 5, 40 38, 56 17 S78 7, 88 25" /></svg>
+                          </>
+                        )}
+                      </div>
+                    </article>
+                  ))}
+                </aside>
               </div>
             </div>
           </div>
