@@ -3548,13 +3548,9 @@ export default function Page() {
           `Twój plan ${currentWorkspacePlanLabel} zakończy się ${currentSubscriptionEndLabel}.`
         )
       : "";
-  const currentPlanRank = hasActivePaidSubscription
-    ? currentAccountPlan === "master"
-      ? 3
-      : currentAccountPlan === "pro"
-      ? 2
-      : 1
-    : 0;
+  const hasProInterfaceAccess =
+    hasActivePaidSubscription &&
+    (currentAccountPlan === "pro" || currentAccountPlan === "master");
   const canUseCalendar =
     hasActivePaidSubscription &&
     (currentAccountPlan === "pro" || currentAccountPlan === "master");
@@ -3967,10 +3963,6 @@ export default function Page() {
     `linear-gradient(0deg, rgba(4,8,34,0.12), rgba(4,8,34,0.12)), ${topBarPaletteGradient}`;
   const signatureIndigoButtonGradient =
     `linear-gradient(0deg, rgba(12,19,63,0.12), rgba(12,19,63,0.12)), ${topBarPaletteGradient}`;
-  const topBarWarmCardGradient =
-    "linear-gradient(135deg, rgba(235,142,76,0.17) 0%, rgba(248,207,96,0.14) 30%, rgba(255,255,255,0.98) 72%, rgba(104,168,239,0.1) 100%)";
-  const topBarCoolCardGradient =
-    "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,226,114,0.1) 24%, rgba(66,179,182,0.12) 68%, rgba(104,168,239,0.15) 100%)";
   const topBarFeaturedChipGradient =
     "linear-gradient(135deg, rgba(255,255,255,0.2) 0%, rgba(255,255,255,0.1) 100%)";
   const topBarGradient = isInterfaceDarkMode
@@ -3996,19 +3988,20 @@ export default function Page() {
     "0 30px 74px rgba(31,74,178,0.24), 0 1px 0 rgba(255,255,255,0.14) inset";
   const billingPlans = [
     {
-      name: "Basic",
-      value: "basic" as const,
-      prices: { pln: "29.99", eur: "9.99" },
-      priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
-      accent: topBarWarmCardGradient,
-      border: "rgba(217,138,86,0.24)",
-      text: "#1f2937",
-      buttonBackground: "rgba(255,255,255,0.78)",
-      buttonText: "#c25c2f",
-      checkBackground: "rgba(217,138,86,0.12)",
+      name: "Free",
+      value: "free" as const,
+      prices: { pln: "0", eur: "0" },
+      priceSuffix: "",
+      accent: "#ffffff",
+      border: "rgba(148,163,184,0.28)",
+      text: "#101828",
+      buttonBackground: "#f8fafc",
+      buttonText: "#475569",
+      checkBackground: "#eef2f6",
       features: [
-        t("Up to 5 boards", "Do 5 tablic"),
-        t("Share with up to 1 person", "Udostępnianie 1 osobie"),
+        t("Up to 3 boards", "Do 3 tablic"),
+        t("Share boards with other people", "Udostępniaj tablice innym osobom"),
+        t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
       ],
     },
     {
@@ -4023,30 +4016,13 @@ export default function Page() {
       buttonText: "#166534",
       checkBackground: "rgba(255,255,255,0.18)",
       features: [
+        t("One-to-one video and audio calls", "Rozmowy wideo i audio jeden na jeden"),
         t("Unlimited boards", "Nielimitowane tablice"),
-        t("Share with up to 3 people", "Udostępnianie 3 osobom"),
+        t("Share and collaborate with others", "Udostępniaj i współpracuj z innymi"),
         t("Calendar planning", "Planowanie w kalendarzu"),
+        t("30-day version history", "30-dniowa historia wersji"),
       ],
       featured: true,
-    },
-    {
-      name: "Master",
-      value: "master" as const,
-      prices: { pln: "79.99", eur: "21.99" },
-      priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
-      accent: topBarCoolCardGradient,
-      border: "rgba(89,171,168,0.26)",
-      text: "#0f172a",
-      buttonBackground: "rgba(255,255,255,0.72)",
-      buttonText: "#16738a",
-      checkBackground: "rgba(89,171,168,0.14)",
-      features: [
-        t("Unlimited boards", "Nielimitowane tablice"),
-        t("Share with up to 10 people", "Udostępnianie 10 osobom"),
-        t("Calendar planning", "Planowanie w kalendarzu"),
-        t("Full premium experience", "Pełne funkcje premium"),
-        t("Maximum workspace control", "Maksymalna kontrola przestrzeni"),
-      ],
     },
   ];
 
@@ -12259,37 +12235,29 @@ export default function Page() {
               <div className="scriboo-feature-page__cards scriboo-feature-page__cards--pricing">
                 {[
                   {
-                    name: "Basic",
-                    price: "29.99",
+                    name: "Free",
+                    price: "0",
                     features: [
-                      t("Up to 5 boards", "Do 5 tablic"),
-                      t("Share with up to 1 person", "Udostępnianie 1 osobie"),
+                      t("Up to 3 boards", "Do 3 tablic"),
+                      t("Share boards with other people", "Udostępniaj tablice innym osobom"),
+                      t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
                     ],
-                    button: t("Choose Basic", "Wybierz Basic"),
+                    button: t("Start for free", "Zacznij bezpłatnie"),
                     tone: "basic",
                   },
                   {
                     name: "Pro",
                     price: "49.99",
                     features: [
+                      t("One-to-one video and audio calls", "Rozmowy wideo i audio jeden na jeden"),
                       t("Unlimited boards", "Nielimitowane tablice"),
-                      t("Share with up to 3 people", "Udostępnianie 3 osobom"),
+                      t("Share and collaborate with others", "Udostępniaj i współpracuj z innymi"),
                       t("Calendar planning", "Planowanie w kalendarzu"),
+                      t("30-day version history", "30-dniowa historia wersji"),
                     ],
-                    button: t("Choose Pro", "Wybierz Pro"),
-                    badge: t("Most popular", "Najpopularniejszy"),
+                    button: t("Upgrade to Pro", "Przejdź na Pro"),
+                    badge: t("Everything included", "Wszystko w pakiecie"),
                     tone: "pro",
-                  },
-                  {
-                    name: "Master",
-                    price: "79.99",
-                    features: [
-                      t("Unlimited boards", "Nielimitowane tablice"),
-                      t("Share with up to 10 people", "Udostępnianie 10 osobom"),
-                      t("Full premium experience", "Pełne doświadczenie premium"),
-                    ],
-                    button: t("Choose Master", "Wybierz Master"),
-                    tone: "master",
                   },
                 ].map((plan) => (
                   <article
@@ -12301,8 +12269,10 @@ export default function Page() {
                       {plan.badge && <span>{plan.badge}</span>}
                     </div>
                     <div className="scriboo-showcase-plan__price">
-                      <strong>{plan.price}</strong>
-                      <span>PLN / {t("month", "miesiąc")}</span>
+                      <strong>{plan.price === "0" ? t("Free", "Bezpłatnie") : plan.price}</strong>
+                      {plan.price !== "0" && (
+                        <span>PLN / {t("month", "miesiąc")}</span>
+                      )}
                     </div>
                     <ul>
                       {plan.features.map((item) => (
@@ -13391,12 +13361,12 @@ export default function Page() {
                           <div
                             className="scriboo-plan-hero"
                             style={{
-                              minHeight: "240px",
-                              borderRadius: "12px",
+                              minHeight: "220px",
+                              borderRadius: "24px",
                               border: "1px solid rgba(89,171,168,0.2)",
                               background: signatureIndigoGradient,
                               color: "#ffffff",
-                              padding: "28px",
+                              padding: "32px",
                               overflow: "hidden",
                               backgroundClip: "padding-box",
                               isolation: "isolate",
@@ -13425,18 +13395,18 @@ export default function Page() {
                                     fontWeight: 700,
                                   }}
                                 >
-                                  {t("Upgrade your workspace", "Ulepsz swoją przestrzeń roboczą")}
+                                  {t("Simple plans", "Proste plany")}
                                 </div>
                                 <div
                                   style={{
                                     marginTop: "10px",
-                                    fontSize: "clamp(38px, 4.6vw, 56px)",
-                                    lineHeight: 0.96,
+                                    fontSize: "clamp(34px, 4.2vw, 52px)",
+                                    lineHeight: 1.02,
                                     maxWidth: "560px",
                                     ...premiumHeadingStyle,
                                   }}
                                 >
-                                  {t("Pick the plan that matches your pace.", "Wybierz plan dopasowany do Twojego tempa.")}
+                                  {t("Start together. Upgrade when you want everything in one place.", "Zacznijcie razem. Przejdź na Pro, gdy chcesz mieć wszystko w jednym miejscu.")}
                                 </div>
                               </div>
                               <div
@@ -13459,9 +13429,8 @@ export default function Page() {
                               }}
                             >
                               {[
-                                t("Clean organization", "Lepsza organizacja"),
-                                t("Smarter scheduling", "Inteligentne planowanie"),
-                                t("Better workspace flow", "Sprawniejsza praca"),
+                                t("Share for free", "Udostępniaj bezpłatnie"),
+                                t("Call with Pro", "Rozmawiaj w Pro"),
                               ].map((badge) => (
                                 <div
                                   key={badge}
@@ -13521,12 +13490,12 @@ export default function Page() {
                           <div
                             className="scriboo-plan-summary"
                             style={{
-                              minHeight: "240px",
-                              borderRadius: "20px",
+                              minHeight: "220px",
+                              borderRadius: "24px",
                               border: "1px solid rgba(89,171,168,0.18)",
                               background:
                                 "linear-gradient(135deg, rgba(255,255,255,0.98) 0%, rgba(239,196,93,0.08) 18%, rgba(231,217,122,0.08) 34%, rgba(89,171,168,0.11) 72%, rgba(110,163,215,0.12) 100%)",
-                              padding: "24px",
+                              padding: "32px",
                               overflow: "hidden",
                               backgroundClip: "padding-box",
                               isolation: "isolate",
@@ -13547,7 +13516,7 @@ export default function Page() {
                                 fontWeight: 700,
                               }}
                             >
-                              {t("Monthly billing", "Rozliczenie miesięczne")}
+                              {t("One clear upgrade", "Jeden prosty wybór")}
                             </div>
                             <div
                               style={{
@@ -13558,7 +13527,7 @@ export default function Page() {
                                 ...premiumHeadingStyle,
                               }}
                             >
-                              {t("Clear pricing in", "Przejrzyste ceny w")} {billingCurrencyLabel}.
+                              {t("Free to start. Pro when you need more.", "Zacznij bezpłatnie. Wybierz Pro, gdy potrzebujesz więcej.")}
                             </div>
                             <div
                               style={{
@@ -13568,7 +13537,7 @@ export default function Page() {
                                 maxWidth: "420px",
                               }}
                             >
-                              {t("Start simple, move up when your boards, schedules, and team rhythm need more room.", "Zacznij prosto i przejdź wyżej, gdy tablice, harmonogramy i praca zespołu będą potrzebować więcej miejsca.")}
+                              {t("Share boards at no cost. Pro adds built-in calls, unlimited boards, calendar planning, and version history.", "Udostępniaj tablice bez opłat. Pro dodaje wbudowane rozmowy, nielimitowane tablice, kalendarz i historię wersji.")}
                             </div>
                             <div
                               style={{
@@ -13657,8 +13626,11 @@ export default function Page() {
                           style={{
                             display: "grid",
                             gridTemplateColumns:
-                              "repeat(auto-fit, minmax(260px, 1fr))",
-                            gap: "18px",
+                              "repeat(auto-fit, minmax(300px, 1fr))",
+                            gap: "22px",
+                            maxWidth: "980px",
+                            width: "100%",
+                            margin: "0 auto",
                           }}
                         >
                           {billingPlans.map((plan) => (
@@ -13668,11 +13640,11 @@ export default function Page() {
                                 plan.featured ? " is-featured" : ""
                               }`}
                               style={{
-                                minHeight: "384px",
-                                borderRadius: "20px",
+                                minHeight: "400px",
+                                borderRadius: "24px",
                                 border: `1px solid ${plan.border}`,
                                 background: plan.accent,
-                                padding: "24px",
+                                padding: "30px",
                                 overflow: "hidden",
                                 backgroundClip: "padding-box",
                                 isolation: "isolate",
@@ -13682,7 +13654,7 @@ export default function Page() {
                                 boxShadow: plan.featured
                                   ? premiumFeaturedCardShadow
                                   : premiumCardShadow,
-                                transform: plan.featured ? "translateY(-6px)" : "none",
+                                transform: "none",
                                 ...premiumBodyStyle,
                               }}
                             >
@@ -13712,8 +13684,8 @@ export default function Page() {
                                     justifyContent: "flex-end",
                                   }}
                                 >
-                                  {hasActivePaidSubscription &&
-                                    currentAccountPlan === plan.value && (
+                                  {((plan.value === "free" && !hasActivePaidSubscription) ||
+                                    (plan.value === "pro" && hasProInterfaceAccess)) && (
                                     <div
                                       style={{
                                         height: "28px",
@@ -13739,7 +13711,7 @@ export default function Page() {
                                         : t("Current plan", "Obecny plan")}
                                     </div>
                                   )}
-                                  {plan.featured && (
+                                  {plan.featured && !hasProInterfaceAccess && (
                                     <div
                                       style={{
                                         height: "28px",
@@ -13838,10 +13810,14 @@ export default function Page() {
                               <button
                                 className="scriboo-plan-action"
                                 type="button"
-                                onClick={() => startPlanCheckout(plan.value)}
+                                onClick={() => {
+                                  if (plan.value === "pro") {
+                                    startPlanCheckout("pro");
+                                  }
+                                }}
                                 disabled={
-                                  (hasActivePaidSubscription &&
-                                    currentAccountPlan === plan.value) ||
+                                  plan.value === "free" ||
+                                  (plan.value === "pro" && hasProInterfaceAccess) ||
                                   Boolean(pendingBillingPlan)
                                 }
                                 style={{
@@ -13861,14 +13837,14 @@ export default function Page() {
                                     ? "0 12px 28px rgba(10,11,45,0.18)"
                                     : "0 10px 24px rgba(89,171,168,0.08)",
                                   cursor:
-                                    (hasActivePaidSubscription &&
-                                      currentAccountPlan === plan.value) ||
+                                    plan.value === "free" ||
+                                    (plan.value === "pro" && hasProInterfaceAccess) ||
                                     Boolean(pendingBillingPlan)
                                       ? "default"
                                       : "pointer",
                                   opacity:
-                                    (hasActivePaidSubscription &&
-                                      currentAccountPlan === plan.value) ||
+                                    plan.value === "free" ||
+                                    (plan.value === "pro" && hasProInterfaceAccess) ||
                                     Boolean(pendingBillingPlan)
                                       ? 0.88
                                       : 1,
@@ -13884,24 +13860,18 @@ export default function Page() {
                                     display: "inline-block",
                                   }}
                                 >
-                                  {pendingBillingPlan === plan.value
+                                  {plan.value === "free"
+                                    ? !hasActivePaidSubscription
+                                      ? t("Your current plan", "Twój obecny plan")
+                                      : t("Included for everyone", "Dostępny dla każdego")
+                                    : pendingBillingPlan === plan.value
                                     ? t("Opening billing...", "Otwieranie płatności...")
-                                    : hasActivePaidSubscription &&
-                                      currentAccountPlan === plan.value
+                                    : hasProInterfaceAccess
                                     ? currentSubscriptionCancelAtPeriodEnd &&
                                       currentSubscriptionEndLabel
                                       ? `${plan.name} active until ${currentSubscriptionEndLabel}`
                                       : `${plan.name} active`
-                                    : currentPlanRank === 0
-                                    ? t(
-                                        `Subscribe to ${plan.name}`,
-                                        `Subskrybuj plan ${plan.name}`
-                                      )
-                                    : plan.value === "basic"
-                                    ? t("Switch to Basic", "Przejdź na Basic")
-                                    : currentPlanRank < (plan.value === "master" ? 3 : 2)
-                                    ? t(`Upgrade to ${plan.name}`, `Przejdź na ${plan.name}`)
-                                    : t(`Change to ${plan.name}`, `Zmień na ${plan.name}`)}
+                                    : t("Upgrade to Pro", "Przejdź na Pro")}
                                 </span>
                               </button>
                             </div>
