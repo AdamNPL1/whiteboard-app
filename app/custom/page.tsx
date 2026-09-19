@@ -12294,6 +12294,11 @@ export default function Page() {
                   className="scriboo-pricing-feature-stack"
                   aria-label={t("Included Pro tools", "Narzędzia w planie Pro")}
                 >
+                  <div className="scriboo-pricing-feature-stack__heading">
+                    <span>{t("Inside Pro", "W planie Pro")}</span>
+                    <strong>{t("Everything for every session", "Wszystko na każde spotkanie")}</strong>
+                    <small>{t("Call, plan, and create without switching apps.", "Rozmawiaj, planuj i twórz bez zmiany aplikacji.")}</small>
+                  </div>
                   {[
                     {
                       key: "video",
