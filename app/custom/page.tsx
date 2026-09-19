@@ -3969,15 +3969,18 @@ export default function Page() {
     ? "linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%)"
     : topBarPaletteGradient;
   const premiumHeadingStyle = {
-    fontFamily: appSansFontFamily,
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Arial, sans-serif',
     letterSpacing: "-0.045em",
     fontWeight: 700,
+    fontVariantNumeric: "tabular-nums" as const,
     textRendering: "optimizeLegibility" as const,
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
   };
   const premiumBodyStyle = {
-    fontFamily: appSansFontFamily,
+    fontFamily:
+      '-apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Arial, sans-serif',
     textRendering: "optimizeLegibility" as const,
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
