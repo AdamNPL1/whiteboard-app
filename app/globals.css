@@ -1155,6 +1155,172 @@ input.modern-range::-ms-thumb {
   background: rgba(255,255,255,0.92);
 }
 
+.scriboo-feature-page__cards--pricing {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) minmax(210px, 0.88fr);
+}
+
+.scriboo-pricing-feature-stack {
+  min-width: 0;
+  display: grid;
+  grid-template-rows: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.scriboo-pricing-feature-mini {
+  min-width: 0;
+  padding: 16px;
+  border: 1px solid rgba(202, 211, 227, 0.86);
+  border-radius: 20px;
+  background: linear-gradient(145deg, rgba(255,255,255,0.96), rgba(242,245,255,0.96));
+  box-shadow: 0 16px 34px rgba(36, 45, 120, 0.1), inset 0 1px 0 rgba(255,255,255,0.9);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 92px;
+  align-items: center;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.scriboo-pricing-feature-mini__copy {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.scriboo-pricing-feature-mini__copy > span {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+  border-radius: 11px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #7244e5, #5685e6 58%, #59bc9e);
+  display: grid;
+  place-items: center;
+  box-shadow: 0 9px 20px rgba(89, 80, 205, 0.2);
+}
+
+.scriboo-pricing-feature-mini__copy div {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.scriboo-pricing-feature-mini__copy strong {
+  color: #1c2438;
+  font-size: 14px;
+  line-height: 1.1;
+}
+
+.scriboo-pricing-feature-mini__copy small {
+  color: #718096;
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.scriboo-pricing-feature-mini__preview {
+  position: relative;
+  width: 92px;
+  height: 70px;
+  border: 1px solid rgba(207, 215, 231, 0.88);
+  border-radius: 14px;
+  background: rgba(247,248,255,0.96);
+  overflow: hidden;
+}
+
+.scriboo-pricing-feature-mini--video .scriboo-pricing-feature-mini__preview {
+  background: #20253d;
+}
+
+.scriboo-mini-person {
+  position: absolute;
+  inset: 9px 33px 16px 9px;
+  border-radius: 9px;
+  color: #ffffff;
+  background: linear-gradient(145deg, #596bc0, #68a69e);
+  display: grid;
+  place-items: center;
+}
+
+.scriboo-mini-person--guest {
+  inset: 30px 7px 16px 61px;
+  border: 2px solid #88deb1;
+}
+
+.scriboo-mini-call {
+  position: absolute;
+  left: 39px;
+  bottom: 3px;
+  width: 18px;
+  height: 12px;
+  border-radius: 999px;
+  color: #ffffff;
+  background: #444b69;
+  display: grid;
+  place-items: center;
+}
+
+.scriboo-mini-calendar-month {
+  position: absolute;
+  top: 11px;
+  left: 10px;
+  color: #676f87;
+  font-size: 9px;
+  font-weight: 700;
+}
+
+.scriboo-mini-calendar-days {
+  position: absolute;
+  left: 8px;
+  right: 8px;
+  bottom: 10px;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 4px;
+}
+
+.scriboo-mini-calendar-days i {
+  height: 26px;
+  border-radius: 8px;
+  color: #667085;
+  background: #eef1fa;
+  font-size: 9px;
+  font-style: normal;
+  display: grid;
+  place-items: center;
+}
+
+.scriboo-mini-calendar-days i.is-active {
+  color: #ffffff;
+  background: linear-gradient(145deg, #7046e4, #5f8de3);
+}
+
+.scriboo-mini-board-tools {
+  position: absolute;
+  top: 8px;
+  left: 8px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 7px;
+  color: #6847df;
+  background: #eee9ff;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.scriboo-pricing-feature-mini--whiteboard svg {
+  position: absolute;
+  left: 6px;
+  right: 6px;
+  bottom: 5px;
+  width: 80px;
+  height: 36px;
+  fill: none;
+  stroke: #7046df;
+  stroke-width: 4;
+  stroke-linecap: round;
+}
+
 .scriboo-feature-card__topline {
   position: relative;
   z-index: 2;
@@ -1480,6 +1646,14 @@ input.modern-range::-ms-thumb {
     scrollbar-width: none;
   }
 
+  .scriboo-feature-page__cards--pricing {
+    grid-template-columns: repeat(3, minmax(280px, 78%));
+  }
+
+  .scriboo-pricing-feature-stack {
+    min-height: 360px;
+  }
+
   .scriboo-feature-page__cards::-webkit-scrollbar {
     display: none;
   }
@@ -1510,6 +1684,10 @@ input.modern-range::-ms-thumb {
   }
 
   .scriboo-feature-page__cards {
+    grid-template-columns: repeat(3, 100%);
+  }
+
+  .scriboo-feature-page__cards--pricing {
     grid-template-columns: repeat(3, 100%);
   }
 
