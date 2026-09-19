@@ -1,4 +1,5 @@
 import nodemailer from "nodemailer";
+import type { Transporter } from "nodemailer";
 import { enqueueEmail } from "@/lib/email-queue";
 
 type BoardShareInviteEmailParams = {
@@ -31,7 +32,7 @@ type SubscriptionLifecycleEmailParams = {
   eventId?: string;
 };
 
-let cachedTransporter: nodemailer.Transporter | null = null;
+let cachedTransporter: Transporter | null = null;
 
 type SenderKind = "accounts" | "billing" | "support";
 
