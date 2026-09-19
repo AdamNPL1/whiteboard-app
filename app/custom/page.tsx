@@ -481,7 +481,7 @@ export default function Page() {
   } = useCall();
   const topBarHeight = 48;
   const appSansFontFamily =
-    'var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+    'var(--font-inter), Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
   const accountPanelFontFamily = appSansFontFamily;
   const lightCanvasColor = "#ffffff";
   const greyCanvasColor = "#6b7280";
@@ -3969,9 +3969,8 @@ export default function Page() {
     ? "linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%)"
     : topBarPaletteGradient;
   const premiumHeadingStyle = {
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Arial, sans-serif',
-    letterSpacing: "-0.045em",
+    fontFamily: appSansFontFamily,
+    letterSpacing: "-0.03em",
     fontWeight: 700,
     fontVariantNumeric: "tabular-nums" as const,
     textRendering: "optimizeLegibility" as const,
@@ -3979,8 +3978,7 @@ export default function Page() {
     MozOsxFontSmoothing: "grayscale" as const,
   };
   const premiumBodyStyle = {
-    fontFamily:
-      '-apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", Arial, sans-serif',
+    fontFamily: appSansFontFamily,
     textRendering: "optimizeLegibility" as const,
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
