@@ -12528,7 +12528,11 @@ export default function Page() {
                   top: "calc(100% + 10px)",
                   left: "-38px",
                   width: "min(1560px, calc(100vw - 24px))",
-                  height: "min(880px, calc(100vh - 64px))",
+                  maxWidth: boardBrowserView === "plan" ? "860px" : undefined,
+                  height:
+                    boardBrowserView === "plan"
+                      ? "min(650px, calc(100vh - 64px))"
+                      : "min(880px, calc(100vh - 64px))",
                   borderRadius: "24px",
                   background:
                     "linear-gradient(180deg, rgba(250,252,255,0.985) 0%, rgba(247,251,255,0.985) 100%)",
@@ -12536,7 +12540,7 @@ export default function Page() {
                   boxShadow: premiumShellShadow,
                   display: "grid",
                   gridTemplateColumns:
-                    boardBrowserView === "calendar"
+                    boardBrowserView === "calendar" || boardBrowserView === "plan"
                       ? "minmax(0, 1fr)"
                       : "300px minmax(0, 1fr)",
                   overflow: "hidden",
@@ -12547,7 +12551,7 @@ export default function Page() {
                   MozOsxFontSmoothing: "grayscale",
                 }}
               >
-                {boardBrowserView !== "calendar" && <aside
+                {boardBrowserView !== "calendar" && boardBrowserView !== "plan" && <aside
                   className="scriboo-workspace-sidebar"
                   style={{
                     background:
@@ -12731,11 +12735,6 @@ export default function Page() {
                         value: "trash" as const,
                         icon: <Trash2 size={15} />,
                       },
-                      {
-                        label: t("Your plan", "Twój plan"),
-                        value: "plan" as const,
-                        icon: <Star size={15} />,
-                      },
                     ].map((item) => {
                       const isActive = boardBrowserView === item.value;
 
@@ -12882,10 +12881,14 @@ export default function Page() {
                     ...premiumBodyStyle,
                   }}
                 >
-                  {boardBrowserView === "calendar" && (
+                  {(boardBrowserView === "calendar" || boardBrowserView === "plan") && (
                     <button
                       type="button"
-                      aria-label={t("Close calendar", "Zamknij kalendarz")}
+                      aria-label={
+                        boardBrowserView === "plan"
+                          ? t("Close plans", "Zamknij plany")
+                          : t("Close calendar", "Zamknij kalendarz")
+                      }
                       onClick={() => setShowBoardsMenu(false)}
                       style={{
                         position: "absolute",
@@ -12963,6 +12966,30 @@ export default function Page() {
                               {currentSubscriptionEndingMessage}
                             </div>
                           ) : null}
+                          {hasActivePaidSubscription ? (
+                            <button
+                              type="button"
+                              onClick={openBillingPortal}
+                              disabled={isBillingPortalLoading}
+                              style={{
+                                marginTop: "12px",
+                                height: "36px",
+                                padding: "0 14px",
+                                borderRadius: "10px",
+                                border: "1px solid rgba(99,102,241,0.2)",
+                                background: "#ffffff",
+                                color: "#4338ca",
+                                fontSize: "13px",
+                                fontWeight: 650,
+                                cursor: isBillingPortalLoading ? "default" : "pointer",
+                                opacity: isBillingPortalLoading ? 0.7 : 1,
+                              }}
+                            >
+                              {isBillingPortalLoading
+                                ? t("Opening billing...", "Otwieranie płatności...")
+                                : t("Manage subscription", "Zarządzaj subskrypcją")}
+                            </button>
+                          ) : null}
                         </>
                       )}
                     </div>
@@ -12974,7 +13001,7 @@ export default function Page() {
                         borderRadius: "0",
                         border: "none",
                         background: "transparent",
-                        display: "flex",
+                        display: boardBrowserView === "plan" ? "none" : "flex",
                         alignItems: "center",
                         gap: "12px",
                         boxShadow: "none",
@@ -13284,7 +13311,7 @@ export default function Page() {
                         <div
                           className="scriboo-plan-stats"
                           style={{
-                            display: "grid",
+                            display: "none",
                             gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
                             gap: "14px",
                           }}
@@ -13355,7 +13382,7 @@ export default function Page() {
                         </div>
                         <div
                           style={{
-                            display: "grid",
+                            display: "none",
                             gridTemplateColumns:
                               "repeat(auto-fit, minmax(280px, 1fr))",
                             gap: "18px",
@@ -13643,17 +13670,17 @@ export default function Page() {
                                 plan.featured ? " is-featured" : ""
                               }`}
                               style={{
-                                minHeight: "400px",
-                                borderRadius: "24px",
+                                minHeight: "300px",
+                                borderRadius: "20px",
                                 border: `1px solid ${plan.border}`,
                                 background: plan.accent,
-                                padding: "30px",
+                                padding: "24px",
                                 overflow: "hidden",
                                 backgroundClip: "padding-box",
                                 isolation: "isolate",
                                 display: "grid",
                                 gridTemplateRows: "auto auto 1fr auto",
-                                gap: "18px",
+                                gap: "14px",
                                 boxShadow: plan.featured
                                   ? premiumFeaturedCardShadow
                                   : premiumCardShadow,
@@ -13673,7 +13700,7 @@ export default function Page() {
                                 <div
                                   style={{
                                     color: plan.text,
-                                    fontSize: "24px",
+                                    fontSize: "20px",
                                     ...premiumHeadingStyle,
                                   }}
                                 >
@@ -13746,7 +13773,7 @@ export default function Page() {
                               >
                                 <span
                                   style={{
-                                    fontSize: "50px",
+                                    fontSize: "40px",
                                     lineHeight: 0.88,
                                     ...premiumHeadingStyle,
                                   }}
@@ -13777,7 +13804,9 @@ export default function Page() {
                                   alignContent: "start",
                                 }}
                               >
-                                {plan.features.map((feature) => (
+                                {plan.features
+                                  .slice(0, plan.value === "pro" ? 4 : 3)
+                                  .map((feature) => (
                                   <div
                                     key={feature}
                                     style={{
@@ -13785,7 +13814,7 @@ export default function Page() {
                                       alignItems: "center",
                                       gap: "10px",
                                       color: plan.text,
-                                      fontSize: "15px",
+                                      fontSize: "14px",
                                       lineHeight: 1.35,
                                       fontWeight: 500,
                                       letterSpacing: "-0.015em",
@@ -13883,20 +13912,20 @@ export default function Page() {
                         <div
                           className="scriboo-plan-legal"
                           style={{
-                            marginTop: "16px",
-                            padding: "14px 16px",
+                            marginTop: "2px",
+                            padding: "10px 12px",
                             border: "1px solid rgba(148,163,184,0.28)",
                             borderRadius: "10px",
                             background: "rgba(248,250,252,0.82)",
                             color: "#475569",
-                            fontSize: "12px",
-                            lineHeight: 1.6,
-                            fontWeight: 600,
+                            fontSize: "11px",
+                            lineHeight: 1.5,
+                            fontWeight: 500,
                           }}
                         >
                           {t(
-                            "Paid plans are monthly subscriptions that renew automatically until cancelled. The selected price and any charge due now will be shown again before payment. You can cancel through Manage subscription; access continues until the end of the paid billing period. By subscribing, you agree to the",
-                            "Płatne plany są miesięcznymi subskrypcjami odnawianymi automatycznie do czasu anulowania. Wybrana cena i należna teraz opłata zostaną ponownie pokazane przed płatnością. Subskrypcję możesz anulować w sekcji zarządzania; dostęp pozostanie aktywny do końca opłaconego okresu. Subskrybując, akceptujesz"
+                            "Pro renews monthly until cancelled. The final price is shown before payment. By subscribing, you agree to the",
+                            "Pro odnawia się co miesiąc do czasu anulowania. Ostateczna cena jest pokazana przed płatnością. Subskrybując, akceptujesz"
                           )}{" "}
                           <Link
                             href="/terms"
@@ -17008,8 +17037,14 @@ export default function Page() {
                 >
                   {currentAccountEmail}
                 </div>
-                <div
+                <button
+                  type="button"
                   className="scriboo-plan-chip"
+                  onClick={() => {
+                    setShowProfileMenu(false);
+                    setBoardBrowserView("plan");
+                    setShowBoardsMenu(true);
+                  }}
                   style={{
                     justifySelf: "start",
                     height: "32px",
@@ -17027,11 +17062,15 @@ export default function Page() {
                     letterSpacing: "0.14em",
                     textTransform: "uppercase",
                     boxShadow: "0 1px 0 rgba(255,255,255,0.82) inset",
+                    cursor: "pointer",
                   }}
                 >
                       <Crown size={14} fill="currentColor" strokeWidth={1.7} />
                       {currentPlanLabel} {t("plan", "plan")}
-                </div>
+                      <span style={{ letterSpacing: 0, textTransform: "none" }}>
+                        · {t("View plans", "Zobacz plany")}
+                      </span>
+                </button>
                 <button
                   className="scriboo-theme-toggle"
                   type="button"
