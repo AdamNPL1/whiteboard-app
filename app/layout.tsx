@@ -1,8 +1,15 @@
 import type { Metadata } from "next";
+import { Inter } from "next/font/google";
 import { CallProvider } from "@/app/components/CallProvider";
 import RealtimeDiagnostics from "@/app/components/RealtimeDiagnostics";
 import { LanguageProvider } from "@/lib/i18n";
 import "./globals.css";
+
+const inter = Inter({
+  subsets: ["latin", "latin-ext"],
+  display: "swap",
+  variable: "--font-inter",
+});
 
 export const metadata: Metadata = {
   metadataBase: new URL("https://scribooapp.com"),
@@ -30,7 +37,7 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full antialiased">
+    <html lang="en" className={`${inter.variable} h-full antialiased`}>
       <body className="min-h-full flex flex-col">
         <LanguageProvider>
           <CallProvider>{children}</CallProvider>
