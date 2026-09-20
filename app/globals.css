@@ -1166,7 +1166,10 @@ input.modern-range::-ms-thumb {
   border: 1px solid rgba(255,255,255,0.34);
   border-radius: 25px;
   color: #ffffff;
-  background: linear-gradient(155deg, #7143e5 0%, #5d75e3 48%, #59b99a 100%);
+  background:
+    radial-gradient(circle at 92% 8%, rgba(255,255,255,0.2), transparent 26%),
+    radial-gradient(circle at 8% 94%, rgba(72,255,190,0.24), transparent 32%),
+    linear-gradient(155deg, #5424c9 0%, #4e6fe5 50%, #25a987 100%);
   box-shadow: 0 25px 54px rgba(77, 74, 196, 0.22), inset 0 1px 0 rgba(255,255,255,0.24);
   display: grid;
   grid-template-rows: auto repeat(3, 104px);
@@ -1194,9 +1197,11 @@ input.modern-range::-ms-thumb {
   display: grid;
   gap: 6px;
   margin-bottom: 8px;
+  width: 100%;
 }
 
 .scriboo-pricing-feature-stack__heading > span {
+  display: block;
   color: rgba(255,255,255,0.72);
   font-size: 9px;
   font-weight: 800;
@@ -1205,6 +1210,7 @@ input.modern-range::-ms-thumb {
 }
 
 .scriboo-pricing-feature-stack__heading strong {
+  display: block;
   max-width: 220px;
   font-size: 20px;
   line-height: 1.05;
@@ -1212,6 +1218,7 @@ input.modern-range::-ms-thumb {
 }
 
 .scriboo-pricing-feature-stack__heading small {
+  display: block;
   max-width: 220px;
   color: rgba(255,255,255,0.76);
   font-size: 10px;
@@ -1223,15 +1230,26 @@ input.modern-range::-ms-thumb {
   z-index: 1;
   min-width: 0;
   padding: 12px;
-  border: 1px solid rgba(255,255,255,0.22);
+  border: 1px solid rgba(255,255,255,0.32);
   border-radius: 16px;
-  background: rgba(255,255,255,0.93);
-  box-shadow: 0 12px 24px rgba(26, 34, 102, 0.13), inset 0 1px 0 rgba(255,255,255,0.82);
+  box-shadow: 0 16px 30px rgba(26, 24, 94, 0.22), inset 0 1px 0 rgba(255,255,255,0.2);
   display: grid;
   grid-template-columns: minmax(0, 1fr) 82px;
   align-items: center;
   gap: 9px;
   overflow: hidden;
+}
+
+.scriboo-pricing-feature-mini--video {
+  background: linear-gradient(135deg, #30238f 0%, #5b57e6 100%);
+}
+
+.scriboo-pricing-feature-mini--calendar {
+  background: linear-gradient(135deg, #2e67df 0%, #20b8c8 100%);
+}
+
+.scriboo-pricing-feature-mini--whiteboard {
+  background: linear-gradient(135deg, #7b35d3 0%, #28ad83 100%);
 }
 
 .scriboo-pricing-feature-mini__copy {
@@ -1247,7 +1265,7 @@ input.modern-range::-ms-thumb {
   flex: 0 0 30px;
   border-radius: 10px;
   color: #ffffff;
-  background: linear-gradient(145deg, #7244e5, #5685e6 58%, #59bc9e);
+  background: rgba(255,255,255,0.18);
   display: grid;
   place-items: center;
   box-shadow: 0 9px 20px rgba(89, 80, 205, 0.2);
@@ -1260,13 +1278,13 @@ input.modern-range::-ms-thumb {
 }
 
 .scriboo-pricing-feature-mini__copy strong {
-  color: #1c2438;
+  color: #ffffff;
   font-size: 13px;
   line-height: 1.1;
 }
 
 .scriboo-pricing-feature-mini__copy small {
-  color: #718096;
+  color: rgba(255,255,255,0.74);
   font-size: 10px;
   line-height: 1.25;
 }
@@ -1275,9 +1293,9 @@ input.modern-range::-ms-thumb {
   position: relative;
   width: 82px;
   height: 62px;
-  border: 1px solid rgba(207, 215, 231, 0.88);
+  border: 1px solid rgba(255,255,255,0.34);
   border-radius: 14px;
-  background: rgba(247,248,255,0.96);
+  background: rgba(255,255,255,0.9);
   overflow: hidden;
 }
 
