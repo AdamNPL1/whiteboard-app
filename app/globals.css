@@ -1305,7 +1305,7 @@ input.modern-range::-ms-thumb {
 
 .scriboo-mini-person {
   position: absolute;
-  inset: 9px 33px 16px 9px;
+  inset: 8px 28px 14px 8px;
   border-radius: 9px;
   color: #ffffff;
   background: linear-gradient(145deg, #596bc0, #68a69e);
@@ -1314,7 +1314,10 @@ input.modern-range::-ms-thumb {
 }
 
 .scriboo-mini-person--guest {
-  inset: 30px 7px 16px 61px;
+  inset: auto 5px 12px auto;
+  width: 24px;
+  height: 28px;
+  box-sizing: border-box;
   border: 2px solid #88deb1;
 }
 
@@ -1380,7 +1383,8 @@ input.modern-range::-ms-thumb {
   gap: 5px;
 }
 
-.scriboo-pricing-feature-mini--whiteboard svg {
+.scriboo-pricing-feature-mini--whiteboard
+  .scriboo-pricing-feature-mini__preview > svg {
   position: absolute;
   left: 6px;
   right: 6px;
