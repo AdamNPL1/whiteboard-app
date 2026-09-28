@@ -667,11 +667,12 @@ input.modern-range::-ms-thumb {
 
 .scriboo-feature-showcase {
   position: fixed;
+  left: 20px;
   right: 20px;
   top: 68px;
   bottom: 20px;
   z-index: 49;
-  width: min(960px, calc(100vw - 40px));
+  width: auto;
   padding: 28px;
   border: 1px solid rgba(198, 208, 226, 0.88);
   border-radius: 30px;
@@ -1704,10 +1705,11 @@ input.modern-range::-ms-thumb {
 
 @media (max-width: 900px) {
   .scriboo-feature-showcase {
+    left: 12px;
     right: 12px;
     top: 58px;
     bottom: 12px;
-    width: calc(100vw - 24px);
+    width: auto;
     padding: 21px;
     border-radius: 24px;
   }
