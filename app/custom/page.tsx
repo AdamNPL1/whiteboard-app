@@ -12044,6 +12044,7 @@ export default function Page() {
       {!currentAccountId && showGuestFeatureShowcase && !showLoginModal && (
         <section
           className="scriboo-feature-showcase"
+          style={{ left: 20, right: 20, width: "auto", maxWidth: "none" }}
           aria-label={t("Discover Scriboo", "Poznaj Scriboo")}
           onPointerEnter={hidePenCursor}
           onPointerMove={hidePenCursor}
