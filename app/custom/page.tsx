@@ -17012,10 +17012,10 @@ export default function Page() {
                   position: "absolute",
                   top: "calc(100% + 10px)",
                   right: 0,
-                  width: "min(420px, calc(100vw - 20px))",
+                  width: "min(310px, calc(100vw - 20px))",
                   boxSizing: "border-box",
-                  padding: "26px",
-                  borderRadius: "24px",
+                  padding: "18px",
+                  borderRadius: "20px",
                   border: "2px solid rgba(255,255,255,0.96)",
                   background:
                     "radial-gradient(ellipse at 98% 0%, rgba(118,76,229,0.42) 0%, rgba(183,162,247,0.2) 28%, transparent 52%), radial-gradient(ellipse at 72% 2%, rgba(226,218,255,0.62) 0%, transparent 46%), linear-gradient(155deg, #ffffff 0%, #fbfaff 72%, #f5f2ff 100%)",
@@ -17025,7 +17025,7 @@ export default function Page() {
                   overflow: "visible",
                   backgroundClip: "padding-box",
                   display: "grid",
-                  gap: "20px",
+                  gap: "14px",
                   fontFamily: accountPanelFontFamily,
                   textRendering: "optimizeLegibility",
                   WebkitFontSmoothing: "antialiased",
@@ -17035,17 +17035,17 @@ export default function Page() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "72px minmax(0, 1fr)",
+                    gridTemplateColumns: "54px minmax(0, 1fr)",
                     alignItems: "center",
-                    gap: "18px",
+                    gap: "12px",
                   }}
                 >
                   <div
                     className="scriboo-account-avatar"
                     style={{
-                      width: "72px",
-                      height: "72px",
-                      borderRadius: "20px",
+                      width: "54px",
+                      height: "54px",
+                      borderRadius: "16px",
                       border: "1px solid rgba(255,255,255,0.72)",
                       background:
                         "linear-gradient(145deg, #a477f4 0%, #4b22c7 100%)",
@@ -17056,21 +17056,21 @@ export default function Page() {
                       placeItems: "center",
                     }}
                   >
-                    <UserRound size={38} strokeWidth={1.7} />
+                    <UserRound size={29} strokeWidth={1.7} />
                   </div>
                   <div
                     style={{
                       display: "grid",
-                      gap: "5px",
+                      gap: "3px",
                       minWidth: 0,
-                      paddingLeft: "18px",
+                      paddingLeft: "12px",
                       borderLeft: "1px solid rgba(157,145,216,0.48)",
                     }}
                   >
                     <div
                       style={{
                         color: "#7779b9",
-                        fontSize: "12px",
+                        fontSize: "9px",
                         fontWeight: 750,
                         letterSpacing: "0.26em",
                         textTransform: "uppercase",
@@ -17081,7 +17081,7 @@ export default function Page() {
                     <div
                       style={{
                         color: "#0f172a",
-                        fontSize: "26px",
+                        fontSize: "19px",
                         fontWeight: 750,
                         lineHeight: 1.05,
                         letterSpacing: "-0.035em",
@@ -17095,7 +17095,7 @@ export default function Page() {
                     <div
                       style={{
                         color: "#667085",
-                        fontSize: "14px",
+                        fontSize: "10px",
                         fontWeight: 520,
                         lineHeight: 1.35,
                         whiteSpace: "nowrap",
@@ -17123,9 +17123,9 @@ export default function Page() {
                   }}
                   style={{
                     width: "100%",
-                    minHeight: "74px",
-                    padding: "10px 14px 10px 12px",
-                    borderRadius: "12px",
+                    minHeight: "56px",
+                    padding: "7px 9px 7px 8px",
+                    borderRadius: "10px",
                     border: "1px solid rgba(196,181,253,0.72)",
                     borderLeft: "4px solid #6d28d9",
                     background:
@@ -17133,8 +17133,8 @@ export default function Page() {
                     color: "#211747",
                     display: "flex",
                     alignItems: "center",
-                    gap: "12px",
-                    fontSize: "20px",
+                    gap: "8px",
+                    fontSize: "15px",
                     fontWeight: 750,
                     letterSpacing: "-0.015em",
                     boxShadow: "0 8px 20px rgba(109,40,217,0.09), 0 1px 0 rgba(255,255,255,0.88) inset",
@@ -17143,10 +17143,10 @@ export default function Page() {
                 >
                   <span
                     style={{
-                      width: "46px",
-                      height: "46px",
-                      flex: "0 0 46px",
-                      borderRadius: "12px",
+                      width: "36px",
+                      height: "36px",
+                      flex: "0 0 36px",
+                      borderRadius: "10px",
                       background: "rgba(255,255,255,0.72)",
                       color: "#6d28d9",
                       display: "grid",
@@ -17154,13 +17154,13 @@ export default function Page() {
                       boxShadow: "0 5px 14px rgba(91,54,205,0.12)",
                     }}
                   >
-                    <Crown size={25} fill="currentColor" strokeWidth={1.7} />
+                    <Crown size={19} fill="currentColor" strokeWidth={1.7} />
                   </span>
                   <span
                     style={{
                       flex: 1,
-                      minHeight: "40px",
-                      paddingLeft: "14px",
+                      minHeight: "32px",
+                      paddingLeft: "9px",
                       borderLeft: "1px solid rgba(157,145,216,0.42)",
                       display: "flex",
                       alignItems: "center",
@@ -17173,12 +17173,12 @@ export default function Page() {
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: "5px",
+                      gap: "3px",
                       color: "#6437d5",
-                      fontSize: "14px",
+                      fontSize: "10px",
                       fontWeight: 700,
                       whiteSpace: "nowrap",
-                      padding: "10px 12px",
+                      padding: "7px 8px",
                       borderRadius: "999px",
                       border: "1px solid rgba(255,255,255,0.75)",
                       background: "rgba(255,255,255,0.35)",
@@ -17186,7 +17186,7 @@ export default function Page() {
                     }}
                   >
                     {t("View plans", "Zobacz plany")}
-                    <ArrowRight size={18} strokeWidth={2.2} />
+                    <ArrowRight size={14} strokeWidth={2.2} />
                   </span>
                 </button>
                 <div
@@ -17206,8 +17206,8 @@ export default function Page() {
                       : t("Use dark mode", "Włącz ciemny motyw")
                   }
                   style={{
-                    height: "52px",
-                    padding: "0 10px",
+                    height: "44px",
+                    padding: "0 8px",
                     borderRadius: 0,
                     border: "none",
                     background: "transparent",
@@ -17216,13 +17216,13 @@ export default function Page() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "12px",
-                    fontSize: "18px",
+                    fontSize: "14px",
                     fontWeight: 700,
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "16px" }}>
-                    {isInterfaceDarkMode ? <Sun size={25} /> : <Moon size={25} />}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "10px" }}>
+                    {isInterfaceDarkMode ? <Sun size={20} /> : <Moon size={20} />}
                     {isInterfaceDarkMode
                       ? t("Light mode", "Jasny motyw")
                       : t("Dark mode", "Ciemny motyw")}
@@ -17230,8 +17230,8 @@ export default function Page() {
                   <span
                     aria-hidden="true"
                     style={{
-                      width: "54px",
-                      height: "30px",
+                      width: "42px",
+                      height: "24px",
                       padding: "3px",
                       borderRadius: "999px",
                       background: isInterfaceDarkMode ? "#6d28d9" : "#d8d9e3",
@@ -17242,8 +17242,8 @@ export default function Page() {
                   >
                     <span
                       style={{
-                        width: "24px",
-                        height: "24px",
+                        width: "18px",
+                        height: "18px",
                         borderRadius: "999px",
                         background: "#ffffff",
                         boxShadow: "0 1px 4px rgba(15,23,42,0.25)",
@@ -17264,7 +17264,7 @@ export default function Page() {
                   onClick={signOut}
                   style={{
                     marginTop: 0,
-                    height: "58px",
+                    height: "48px",
                     padding: "0 17px",
                     borderRadius: "14px",
                     border: "1px solid rgba(255,255,255,0.45)",
@@ -17273,7 +17273,7 @@ export default function Page() {
                     display: "grid",
                     gridTemplateColumns: "24px 1fr 24px",
                     alignItems: "center",
-                    fontSize: "18px",
+                    fontSize: "15px",
                     fontWeight: 700,
                     letterSpacing: "-0.01em",
                     boxShadow:
@@ -17290,7 +17290,7 @@ export default function Page() {
                     event.currentTarget.style.filter = "none";
                   }}
                 >
-                    <LogOut size={25} strokeWidth={2} />
+                    <LogOut size={20} strokeWidth={2} />
                     <span>{t("Log out", "Wyloguj się")}</span>
                     <span aria-hidden="true" />
                 </button>

@@ -409,8 +409,8 @@ input.modern-range::-ms-thumb {
 
 @media (max-width: 480px) {
   .scriboo-account-popover {
-    width: min(420px, calc(100vw - 20px)) !important;
-    padding: 20px !important;
+    width: min(310px, calc(100vw - 20px)) !important;
+    padding: 16px !important;
   }
 }
 
