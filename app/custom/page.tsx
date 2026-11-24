@@ -17018,7 +17018,7 @@ export default function Page() {
                   borderRadius: "20px",
                   border: "2px solid rgba(255,255,255,0.96)",
                   background:
-                    "radial-gradient(ellipse at 98% 0%, rgba(118,76,229,0.42) 0%, rgba(183,162,247,0.2) 28%, transparent 52%), radial-gradient(ellipse at 72% 2%, rgba(226,218,255,0.62) 0%, transparent 46%), linear-gradient(155deg, #ffffff 0%, #fbfaff 72%, #f5f2ff 100%)",
+                    "radial-gradient(ellipse at 100% 0%, rgba(109,40,217,0.48) 0%, rgba(139,92,246,0.34) 20%, rgba(196,181,253,0.22) 38%, transparent 58%), radial-gradient(ellipse at 72% 2%, rgba(233,228,255,0.62) 0%, transparent 46%), linear-gradient(155deg, #ffffff 0%, #fbfaff 72%, #f5f2ff 100%)",
                   boxShadow:
                     "0 30px 72px rgba(55,43,119,0.26), 0 1px 0 rgba(255,255,255,1) inset, 0 0 0 1px rgba(157,145,216,0.22)",
                   backdropFilter: "blur(22px)",
