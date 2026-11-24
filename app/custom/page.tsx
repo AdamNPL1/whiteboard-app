@@ -3958,7 +3958,7 @@ export default function Page() {
 
   const billingCurrencyLabel = billingCurrency.toUpperCase();
   const topBarPaletteGradient =
-    "linear-gradient(90deg, #8b46ff 0%, #4b8fff 46%, #19c3bc 78%, #30cf68 100%)";
+    "linear-gradient(90deg, #8b46ff 0%, #765cf6 38%, #6678ef 70%, #5f91e8 100%)";
   const signatureIndigoGradient =
     `linear-gradient(0deg, rgba(4,8,34,0.12), rgba(4,8,34,0.12)), ${topBarPaletteGradient}`;
   const signatureIndigoButtonGradient =
