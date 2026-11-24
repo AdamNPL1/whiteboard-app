@@ -1,9 +1,11 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { useRouter } from "next/navigation";
 import { KeyRound, LockKeyhole } from "lucide-react";
 
 export default function TesterAccessPage() {
+  const router = useRouter();
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -30,7 +32,7 @@ export default function TesterAccessPage() {
         return;
       }
 
-      window.location.assign("/");
+      router.replace("/");
     } catch {
       setError("Could not reach Scriboo. Please try again.");
     } finally {

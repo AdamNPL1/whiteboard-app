@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import NextImage from "next/image";
+import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useEffectEvent, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { RealtimeChannel } from "@supabase/supabase-js";
@@ -469,6 +470,7 @@ type BoardBrowserView =
   | "plan";
 
 export default function Page() {
+  const router = useRouter();
   const { language, setLanguage, text: t } = useLanguage();
   const {
     setBoardContext,
@@ -2037,7 +2039,7 @@ export default function Page() {
         return;
       }
 
-      window.location.assign("/?account-deleted=true");
+      router.replace("/?account-deleted=true");
     } catch {
       setDeleteAccountError(
         "Could not reach the server. Your account was not deleted."
@@ -2176,6 +2178,9 @@ export default function Page() {
     );
   };
 
+  const loadCurrentAccountEffect = useEffectEvent(loadCurrentAccount);
+  const applyBoardDocumentEffect = useEffectEvent(applyBoardDocument);
+
   const readBoardResponse = async (response: Response) => {
     const data = (await response.json().catch(() => ({}))) as {
       error?: string;
@@ -2248,21 +2253,16 @@ export default function Page() {
 
           setBoards((previousBoards) =>
             previousBoards.map<BoardSummary>((board) =>
-              board.id === boardId
-                ? {
-                    ...board,
-                    name: savedBoard.name ?? board.name,
-                    createdAt: savedBoard.createdAt ?? board.createdAt,
-                    updatedAt: savedUpdatedAt,
-                    deletedAt: savedBoard.deletedAt,
-                    starred: savedBoard.starred ?? board.starred,
-                    previewDocument:
-                      savedBoard.document ?? board.previewDocument,
-                  }
+                  board.id === boardId
+                    ? {
+                        ...board,
+                        updatedAt: savedUpdatedAt,
+                        previewDocument: documentSnapshot,
+                      }
                 : board
             )
           );
-          broadcastBoardSaved(boardId, savedUpdatedAt, savedBoard.document);
+          broadcastBoardSaved(boardId, savedUpdatedAt, documentSnapshot);
         }
       });
 
@@ -3650,7 +3650,7 @@ export default function Page() {
     }
 
     if (plan === "pro") {
-      return currency === "eur" ? "14.99" : "49.99";
+      return currency === "eur" ? "10.99" : "49.99";
     }
 
     return currency === "eur" ? "9.99" : "29.99";
@@ -3939,7 +3939,7 @@ export default function Page() {
       return;
     }
 
-    void loadCurrentAccount();
+    void loadCurrentAccountEffect();
   }, []);
 
   const calendarSchedules = isCalendarBrowserVisible
@@ -4003,14 +4003,14 @@ export default function Page() {
       checkBackground: "#eef2f6",
       features: [
         t("Up to 3 boards", "Do 3 tablic"),
-        t("Share boards with other people", "Udostępniaj tablice innym osobom"),
+        t("Up to 3 collaborators per board", "Do 3 współpracowników na tablicę"),
         t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
       ],
     },
     {
       name: "Pro",
       value: "pro" as const,
-      prices: { pln: "49.99", eur: "14.99" },
+      prices: { pln: "49.99", eur: "10.99" },
       priceSuffix: `${billingCurrencyLabel} / ${t("month", "miesiąc")}`,
       accent: signatureIndigoGradient,
       border: "rgba(59,130,246,0.3)",
@@ -4019,9 +4019,12 @@ export default function Page() {
       buttonText: "#166534",
       checkBackground: "rgba(255,255,255,0.18)",
       features: [
-        t("One-to-one video and audio calls", "Rozmowy wideo i audio jeden na jeden"),
+        t(
+          "One-to-one video calls and screen sharing",
+          "Rozmowy wideo jeden na jeden i udostępnianie ekranu"
+        ),
         t("Unlimited boards", "Nielimitowane tablice"),
-        t("Share and collaborate with others", "Udostępniaj i współpracuj z innymi"),
+        t("Up to 20 collaborators per board", "Do 20 współpracowników na tablicę"),
         t("Calendar planning", "Planowanie w kalendarzu"),
         t("30-day version history", "30-dniowa historia wersji"),
       ],
@@ -5080,7 +5083,7 @@ export default function Page() {
                   : board
               )
             );
-            applyBoardDocument(mergedDocument, { preserveRealtime: true });
+            applyBoardDocumentEffect(mergedDocument, { preserveRealtime: true });
             return;
           }
         }
@@ -6891,7 +6894,7 @@ export default function Page() {
   );
 
   useEffect(() => {
-    loadCurrentAccount();
+    void loadCurrentAccountEffect();
   }, []);
 
   useEffect(() => {
@@ -6910,7 +6913,7 @@ export default function Page() {
         return;
       }
 
-      void loadCurrentAccount();
+      void loadCurrentAccountEffect();
     };
 
     window.addEventListener("focus", refreshAccountState);
@@ -12044,6 +12047,7 @@ export default function Page() {
       {!currentAccountId && showGuestFeatureShowcase && !showLoginModal && (
         <section
           className="scriboo-feature-showcase"
+          style={{ left: 20, right: 20, width: "auto", maxWidth: "none" }}
           aria-label={t("Discover Scriboo", "Poznaj Scriboo")}
           onPointerEnter={hidePenCursor}
           onPointerMove={hidePenCursor}
@@ -12242,7 +12246,7 @@ export default function Page() {
                     price: "0",
                     features: [
                       t("Up to 3 boards", "Do 3 tablic"),
-                      t("Share boards with other people", "Udostępniaj tablice innym osobom"),
+                       t("Up to 3 collaborators per board", "Do 3 współpracowników na tablicę"),
                       t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
                     ],
                     button: t("Start for free", "Zacznij bezpłatnie"),
@@ -12252,9 +12256,9 @@ export default function Page() {
                     name: "Pro",
                     price: "49.99",
                     features: [
-                      t("One-to-one video and audio calls", "Rozmowy wideo i audio jeden na jeden"),
+                       t("One-to-one video calls and screen sharing", "Rozmowy wideo jeden na jeden i udostępnianie ekranu"),
                       t("Unlimited boards", "Nielimitowane tablice"),
-                      t("Share and collaborate with others", "Udostępniaj i współpracuj z innymi"),
+                       t("Up to 20 collaborators per board", "Do 20 współpracowników na tablicę"),
                       t("Calendar planning", "Planowanie w kalendarzu"),
                       t("30-day version history", "30-dniowa historia wersji"),
                     ],
@@ -13868,9 +13872,7 @@ export default function Page() {
                                   alignContent: "start",
                                 }}
                               >
-                                {plan.features
-                                  .slice(0, plan.value === "pro" ? 4 : 3)
-                                  .map((feature) => (
+                                {plan.features.map((feature) => (
                                   <div
                                     key={feature}
                                     style={{
@@ -13988,8 +13990,8 @@ export default function Page() {
                           }}
                         >
                           {t(
-                            "Pro renews monthly until cancelled. The final price is shown before payment. By subscribing, you agree to the",
-                            "Pro odnawia się co miesiąc do czasu anulowania. Ostateczna cena jest pokazana przed płatnością. Subskrybując, akceptujesz"
+                            "Pro renews monthly until cancelled. Cancel anytime in Manage Billing. The final price is shown before payment. By subscribing, you agree to the",
+                            "Pro odnawia się co miesiąc do czasu anulowania. Możesz anulować w dowolnym momencie w sekcji Zarządzaj płatnościami. Ostateczna cena jest pokazana przed płatnością. Subskrybując, akceptujesz"
                           )}{" "}
                           <Link
                             href="/terms"
@@ -16194,7 +16196,7 @@ export default function Page() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => window.location.assign("/account-settings")}
+                          onClick={() => router.push("/account-settings")}
                           style={{
                             width: "220px",
                             height: "42px",

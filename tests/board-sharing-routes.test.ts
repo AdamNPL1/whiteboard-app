@@ -84,6 +84,28 @@ describe("board authorization and sharing", () => {
     expect(mocks.saveBoard).not.toHaveBeenCalled();
   });
 
+  it("returns only lightweight metadata after a board save", async () => {
+    mocks.getRequestUser.mockResolvedValue({
+      id: "owner-1",
+      email: "owner@example.com",
+    });
+    mocks.saveBoard.mockResolvedValue({
+      ok: true,
+      board: { id: "board-secret-id", updatedAt: "2026-09-19T12:00:00Z" },
+    });
+
+    const response = await saveBoard(
+      request("/api/boards/board-secret-id", "PUT", { elements: [] }),
+      boardContext
+    );
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual({
+      ok: true,
+      board: { id: "board-secret-id", updatedAt: "2026-09-19T12:00:00Z" },
+    });
+  });
+
   it("returns a sharing-limit error without creating another share", async () => {
     mocks.getRequestUser.mockResolvedValue({
       id: "owner-1",

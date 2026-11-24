@@ -37,15 +37,12 @@ SUPABASE_SERVICE_ROLE_KEY=
 STRIPE_SECRET_KEY=
 STRIPE_WEBHOOK_SECRET=
 NEXT_PUBLIC_APP_URL=http://localhost:3000
-STRIPE_PRICE_BASIC_MONTHLY_PLN=
 STRIPE_PRICE_PRO_MONTHLY_PLN=
-STRIPE_PRICE_MASTER_MONTHLY_PLN=
-STRIPE_PRICE_BASIC_MONTHLY_EUR=
 STRIPE_PRICE_PRO_MONTHLY_EUR=
-STRIPE_PRICE_MASTER_MONTHLY_EUR=
 SITE_CLOSED=false
 NEXT_PUBLIC_SENTRY_DSN=
 SENTRY_DSN=
+CRON_SECRET=
 ```
 
 ## Automated tests
@@ -148,10 +145,10 @@ Supabase managed backups for Auth users and complete project recovery.
 
 3. Run the Supabase SQL in this order:
 
-- [supabase/profiles.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/profiles.sql:1)
-- [supabase/boards.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/boards.sql:1)
-- [supabase/rls-policies.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/rls-policies.sql:1)
-- [supabase/board-shares.sql](/abs/path/C:/Users/Adam/blackboard-app/supabase/board-shares.sql:1)
+- `supabase/profiles.sql`
+- `supabase/boards.sql`
+- `supabase/rls-policies.sql`
+- `supabase/board-shares.sql`
 
 4. Start the app:
 
@@ -167,24 +164,23 @@ npm run build
 
 ## Current Plan Rules
 
-- `Free`: 1 board, 0 shares, no calendar
-- `Basic`: 5 boards, 1 share, no calendar
-- `Pro`: unlimited boards, 3 shares, calendar
-- `Master`: unlimited boards, 10 shares, calendar
+- `Free`: 3 boards, 3 collaborators per board, no calls, no calendar
+- `Pro`: unlimited boards, 20 collaborators per board, one-to-one calls, calendar, and 30-day version history
+- Legacy `Basic` and `Master` records remain supported internally but are not available for new purchases.
 
 ## What To Test Next
 
 1. Register a user and confirm login works.
 2. Create a board and refresh the page.
-3. Check free/basic/pro/master board limits.
-4. Check sharing limits by plan.
-5. Check that calendar is blocked on free/basic and works on pro/master.
+3. Check Free and Pro board limits.
+4. Check the 3-person Free and 20-person Pro sharing limits.
+5. Check that calls and calendar are blocked on Free and work on Pro.
 6. Test Stripe checkout success and cancel flows.
 7. Test the Stripe webhook updates the stored plan.
 
 ## Important Note
 
-The app will not sell subscriptions correctly until all six Stripe price IDs are set in `.env.local` and in production environment variables.
+The app will not sell subscriptions correctly until both Pro Stripe price IDs are set in `.env.local` and in production environment variables.
 ### Public registration protection
 
 Scriboo supports Cloudflare Turnstile on registration, login, password-reset
@@ -204,6 +200,6 @@ from seeing authentication buttons that lead to an unconfigured provider.
 Before disabling maintenance mode, run `npm run launch:check`. The command does
 not print secret values. It verifies that production Supabase, Stripe, email and
 Turnstile variables exist, that the application URL uses HTTPS, that the Stripe
-key is live-mode, and that all six Stripe Price IDs are distinct. Dashboard
+key is live-mode, and that the PLN and EUR Pro Price IDs are distinct. Dashboard
 configuration still needs a real Stripe test purchase and webhook-delivery
 test; environment validation cannot replace those external checks.

@@ -5,6 +5,7 @@ const mocks = vi.hoisted(() => ({
   getUser: vi.fn(),
   getActiveCalls: vi.fn(),
   getBoardCallParticipants: vi.fn(),
+  getCallPlanAccess: vi.fn(),
   getCall: vi.fn(),
   startCall: vi.fn(),
   transitionCall: vi.fn(),
@@ -25,6 +26,7 @@ vi.mock("@/lib/supabase-auth", () => ({
 vi.mock("@/lib/call-store", () => ({
   getActiveCallsForUser: mocks.getActiveCalls,
   getBoardCallParticipants: mocks.getBoardCallParticipants,
+  getCallPlanAccess: mocks.getCallPlanAccess,
   getCallSessionForUser: mocks.getCall,
   startBoardCall: mocks.startCall,
   transitionBoardCall: mocks.transitionCall,
@@ -108,6 +110,12 @@ describe("call API authorization", () => {
     vi.clearAllMocks();
     mocks.getUser.mockResolvedValue(caller);
     mocks.startCall.mockResolvedValue(call);
+    mocks.getCallPlanAccess.mockResolvedValue(
+      new Map([
+        [caller.id, true],
+        [recipientId, true],
+      ])
+    );
     mocks.getBoardCallParticipants.mockResolvedValue({
       board: { id: "board-1", name: "Board 1" },
       participants: [{ userId: caller.id, name: "Caller", role: "owner" }],
@@ -141,6 +149,46 @@ describe("call API authorization", () => {
     );
 
     expect(response.status).toBe(401);
+    expect(mocks.startCall).not.toHaveBeenCalled();
+  });
+
+  it("requires Pro access before starting a one-to-one call", async () => {
+    mocks.getCallPlanAccess.mockResolvedValue(
+      new Map([
+        [caller.id, false],
+        [recipientId, true],
+      ])
+    );
+    const response = await startCall(
+      request("/api/calls", "POST", {
+        boardId: "board-1",
+        recipientUserId: recipientId,
+        clientRequestId,
+      })
+    );
+
+    expect(response.status).toBe(403);
+    expect(await response.json()).toMatchObject({ code: "CALL_PRO_REQUIRED" });
+    expect(mocks.startCall).not.toHaveBeenCalled();
+  });
+
+  it("does not start a call to a participant without call access", async () => {
+    mocks.getCallPlanAccess.mockResolvedValue(
+      new Map([
+        [caller.id, true],
+        [recipientId, false],
+      ])
+    );
+    const response = await startCall(
+      request("/api/calls", "POST", {
+        boardId: "board-1",
+        recipientUserId: recipientId,
+        clientRequestId,
+      })
+    );
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toMatchObject({ code: "CALL_PARTICIPANT_UNAVAILABLE" });
     expect(mocks.startCall).not.toHaveBeenCalled();
   });
 

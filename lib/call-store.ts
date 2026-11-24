@@ -217,6 +217,29 @@ export const startBoardCall = async (
   return mapCallSession(row);
 };
 
+export const getCallPlanAccess = async (userIds: string[]) => {
+  const uniqueUserIds = [...new Set(userIds.filter(Boolean))];
+  if (uniqueUserIds.length === 0) return new Map<string, boolean>();
+
+  const { data, error } = await getSupabaseServiceRoleClient()
+    .from("profiles")
+    .select("id,plan,subscription_status")
+    .in("id", uniqueUserIds);
+
+  if (error) throw new Error(`CALL_PLAN_ACCESS_FAILED:${error.message}`);
+
+  const access = new Map(uniqueUserIds.map((userId) => [userId, false]));
+  for (const profile of data ?? []) {
+    const hasPaidCallPlan =
+      (profile.plan === "pro" || profile.plan === "master") &&
+      (profile.subscription_status === "trialing" ||
+        profile.subscription_status === "active" ||
+        profile.subscription_status === "past_due");
+    access.set(String(profile.id), hasPaidCallPlan);
+  }
+  return access;
+};
+
 const expireCalls = async () => {
   const { error } = await getSupabaseServiceRoleClient().rpc(
     "cleanup_expired_call_sessions"

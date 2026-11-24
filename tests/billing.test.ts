@@ -112,7 +112,7 @@ describe("Stripe billing behavior", () => {
     vi.stubEnv("STRIPE_SECRET_KEY", "sk_test_safe_for_mock");
     vi.stubEnv("STRIPE_WEBHOOK_SECRET", "whsec_test_safe_for_mock");
     vi.stubEnv("NEXT_PUBLIC_APP_URL", "https://scribooapp.com");
-    vi.stubEnv("STRIPE_PRICE_MASTER_MONTHLY_PLN", "price_master_pln");
+    vi.stubEnv("STRIPE_PRICE_PRO_MONTHLY_PLN", "price_pro_pln");
     mocks.claim = { claimed: true, already_completed: false };
     mocks.profileUpdate = null;
     mocks.billingProfile = {
@@ -199,12 +199,12 @@ describe("Stripe billing behavior", () => {
     expect(mocks.lifecycleEmail).toHaveBeenCalled();
   });
 
-  it("upgrades an existing subscription immediately without proration", async () => {
+  it("upgrades a legacy Basic subscription to Pro without proration", async () => {
     mocks.checkoutProfile = {
       id: "user-1",
       email: "person@example.com",
       name: "Person",
-      plan: "pro",
+      plan: "basic",
       subscriptionStatus: "active",
       stripeCustomerId: "cus_1",
     };
@@ -220,8 +220,8 @@ describe("Stripe billing behavior", () => {
         status: "active",
         customer: "cus_1",
         schedule: null,
-        metadata: { targetPlan: "pro", userId: "user-1" },
-        items: { data: [{ id: "si_1", current_period_start: 1, current_period_end: 2_000_000_000, quantity: 1, price: { id: "price_pro" } }] },
+        metadata: { targetPlan: "basic", userId: "user-1" },
+        items: { data: [{ id: "si_1", current_period_start: 1, current_period_end: 2_000_000_000, quantity: 1, price: { id: "price_basic" } }] },
       }],
     });
     mocks.priceRetrieve.mockResolvedValue({ unit_amount: 7999 });
@@ -236,7 +236,7 @@ describe("Stripe billing behavior", () => {
       {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ targetPlan: "master", targetCurrency: "pln" }),
+        body: JSON.stringify({ targetPlan: "pro", targetCurrency: "pln" }),
       }
     ));
     expect(response.status).toBe(200);
@@ -244,7 +244,7 @@ describe("Stripe billing behavior", () => {
       "sub_1",
       expect.objectContaining({ proration_behavior: "none" })
     );
-    expect(mocks.profileUpdate).toMatchObject({ plan: "master" });
+    expect(mocks.profileUpdate).toMatchObject({ plan: "pro" });
   });
 
   it("uses a Stripe idempotency key for a new checkout attempt", async () => {
@@ -267,7 +267,7 @@ describe("Stripe billing behavior", () => {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          targetPlan: "master",
+          targetPlan: "pro",
           targetCurrency: "pln",
           attemptId: "attempt_12345678",
         }),

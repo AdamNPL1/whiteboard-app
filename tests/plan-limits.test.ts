@@ -10,8 +10,8 @@ describe("workspace plan limits", () => {
   it("uses free limits when a subscription is inactive", () => {
     expect(getWorkspaceAccess("master", "inactive")).toEqual({
       tier: "free",
-      maxBoards: 1,
-      maxShares: 0,
+      maxBoards: 3,
+      maxShares: 3,
       canUseCalendar: false,
     });
   });
@@ -28,7 +28,7 @@ describe("workspace plan limits", () => {
   it("enforces Pro sharing and calendar access", () => {
     expect(getWorkspaceAccess("pro", "active")).toMatchObject({
       tier: "pro",
-      maxShares: 3,
+      maxShares: 20,
       canUseCalendar: true,
     });
   });

@@ -141,8 +141,8 @@ export const getWorkspaceAccess = (
   if (!hasActivePaidSubscription(subscriptionStatus)) {
     return {
       tier: "free",
-      maxBoards: 1,
-      maxShares: 0,
+      maxBoards: 3,
+      maxShares: 3,
       canUseCalendar: false,
     };
   }
@@ -160,7 +160,7 @@ export const getWorkspaceAccess = (
     return {
       tier: "pro",
       maxBoards: Number.POSITIVE_INFINITY,
-      maxShares: 3,
+      maxShares: 20,
       canUseCalendar: true,
     };
   }
@@ -908,60 +908,48 @@ export const selectBoardForUser = async (
 };
 
 export const saveBoardForUser = async (
-  supabase: SupabaseClient,
+  _supabase: SupabaseClient,
   userId: string,
-  userEmail: string,
+  _userEmail: string,
   plan: AppProfilePlan,
   subscriptionStatus: AppProfileSubscriptionStatus,
   boardId: string,
   document: Partial<BoardDocument>,
   expectedUpdatedAt?: string
 ) => {
-  const client = getBoardStoreClient(supabase);
   const access = getWorkspaceAccess(plan, subscriptionStatus);
-  const entry = await loadUserBoardCollection(client, userId);
-  const board = getAccessibleBoardOrThrow(entry, boardId);
-  if (!board.ownedByUser && board.sharePermission !== "editor") {
-    throw new Error("BOARD_FORBIDDEN");
-  }
   const normalizedDocument = normalizeBoardDocument(document);
-  const documentToStore = access.canUseCalendar
-    ? normalizedDocument
-    : {
-        ...normalizedDocument,
-        calendarEntries: board.document.calendarEntries,
-      };
-  const updatedAt = new Date().toISOString();
-
-  const clearsExistingBoard =
-    board.document.elements.length > 0 && documentToStore.elements.length === 0;
-  await createBoardSnapshot(board, "automatic", clearsExistingBoard);
-  await updateBoardRow(
-    board.ownedByUser ? client : getSupabaseServiceRoleClient(),
-    board.id,
+  const { data, error } = await getSupabaseServiceRoleClient().rpc(
+    "save_board_document",
     {
-    document: documentToStore,
-    updated_at: updatedAt,
-    },
-    expectedUpdatedAt
+      p_board_id: boardId,
+      p_user_id: userId,
+      p_document: normalizedDocument,
+      p_expected_updated_at: expectedUpdatedAt ?? null,
+      p_can_use_calendar: access.canUseCalendar,
+    }
   );
+
+  if (error) {
+    const message = `${error.message ?? ""} ${error.details ?? ""}`;
+    if (message.includes("BOARD_NOT_FOUND")) throw new Error("BOARD_NOT_FOUND");
+    if (message.includes("BOARD_FORBIDDEN")) throw new Error("BOARD_FORBIDDEN");
+    if (message.includes("BOARD_SAVE_CONFLICT")) {
+      throw new Error("BOARD_SAVE_CONFLICT");
+    }
+    throw new Error(`SUPABASE_BOARD_SAVE_FAILED:${error.message}`);
+  }
+
+  const result = Array.isArray(data) ? data[0] : data;
+  if (!result?.board_id || !result?.updated_at) {
+    throw new Error("SUPABASE_BOARD_SAVE_FAILED:Missing save result");
+  }
 
   return {
     ok: true,
     board: {
-      id: board.id,
-      name: board.name,
-      createdAt: board.createdAt,
-      updatedAt,
-      deletedAt: board.deletedAt,
-      starred: board.starred,
-      document: applyCalendarAccessToDocument(
-        documentToStore,
-        access.canUseCalendar
-      ),
-      ownedByUser: board.ownedByUser,
-      shareCount: board.shareCount,
-      sharePermission: board.sharePermission,
+      id: String(result.board_id),
+      updatedAt: String(result.updated_at),
     },
   };
 };

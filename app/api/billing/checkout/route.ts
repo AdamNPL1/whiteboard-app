@@ -24,38 +24,29 @@ const BILLING_PLAN_RANK: Record<BillingPlan, number> = {
   master: 2,
 };
 
-const isBillingPlan = (value: string): value is BillingPlan =>
-  value === "basic" || value === "pro" || value === "master";
+const isPurchasablePlan = (value: string): value is "pro" => value === "pro";
 
 const isBillingCurrency = (value: string): value is BillingCurrency =>
   value === "pln" || value === "eur";
 
-const getStripePriceEnvKey = (plan: BillingPlan, currency: BillingCurrency) => {
+const getStripePriceEnvKey = (currency: BillingCurrency) => {
   const suffix = currency === "eur" ? "EUR" : "PLN";
-
-  if (plan === "master") return `STRIPE_PRICE_MASTER_MONTHLY_${suffix}`;
-  if (plan === "pro") return `STRIPE_PRICE_PRO_MONTHLY_${suffix}`;
-  return `STRIPE_PRICE_BASIC_MONTHLY_${suffix}`;
+  return `STRIPE_PRICE_PRO_MONTHLY_${suffix}`;
 };
 
-const getLegacyStripePriceEnvKey = (plan: BillingPlan) => {
-  if (plan === "master") return "STRIPE_PRICE_MASTER_MONTHLY";
-  if (plan === "pro") return "STRIPE_PRICE_PRO_MONTHLY";
-  return "STRIPE_PRICE_BASIC_MONTHLY";
-};
+const getLegacyStripePriceEnvKey = () => "STRIPE_PRICE_PRO_MONTHLY";
 
 const isStripePriceId = (value: string | undefined | null): value is string =>
   typeof value === "string" && value.trim().startsWith("price_");
 
 const resolveStripePriceId = (
-  plan: BillingPlan,
   currency: BillingCurrency
 ): {
   priceId?: string;
   checkedKeys: string[];
 } => {
   const checkedKeys: string[] = [];
-  const preferredKey = getStripePriceEnvKey(plan, currency);
+  const preferredKey = getStripePriceEnvKey(currency);
   const preferredValue = process.env[preferredKey];
   checkedKeys.push(preferredKey);
 
@@ -67,7 +58,7 @@ const resolveStripePriceId = (
   }
 
   if (currency === "pln") {
-    const legacyKey = getLegacyStripePriceEnvKey(plan);
+    const legacyKey = getLegacyStripePriceEnvKey();
     const legacyValue = process.env[legacyKey];
     checkedKeys.push(legacyKey);
 
@@ -210,9 +201,9 @@ export async function POST(request: NextRequest) {
   const confirmSubscriptionChange = body?.confirmSubscriptionChange === true;
   const attemptId = body?.attemptId?.trim() ?? "";
 
-  if (!isBillingPlan(targetPlan)) {
+  if (!isPurchasablePlan(targetPlan)) {
     return NextResponse.json(
-      { error: "Choose a valid workspace plan." },
+      { error: "Pro is the only paid workspace plan currently available." },
       { status: 400 }
     );
   }
@@ -243,7 +234,7 @@ export async function POST(request: NextRequest) {
 
   const stripeSecretKey = process.env.STRIPE_SECRET_KEY;
   const { priceId: stripePriceId, checkedKeys: checkedStripePriceKeys } =
-    resolveStripePriceId(targetPlan, targetCurrency);
+    resolveStripePriceId(targetCurrency);
   const appUrl = process.env.NEXT_PUBLIC_APP_URL;
 
   if (!stripeSecretKey || !stripePriceId || !appUrl) {

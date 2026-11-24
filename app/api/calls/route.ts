@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 
-import { getActiveCallsForUser, getBoardCallParticipants, startBoardCall } from "@/lib/call-store";
+import { getActiveCallsForUser, getBoardCallParticipants, getCallPlanAccess, startBoardCall } from "@/lib/call-store";
 import { sendCallPush } from "@/lib/call-push-store";
 import { enforceRateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import { getSupabaseUserFromRequest } from "@/lib/supabase-auth";
@@ -58,6 +58,28 @@ export async function POST(request: NextRequest) {
     identifiers: [user.id],
   });
   if (!hourlyLimit.allowed) return rateLimitResponse(hourlyLimit);
+
+  try {
+    const callAccess = await getCallPlanAccess([user.id, recipientUserId]);
+    if (!callAccess.get(user.id)) {
+      return NextResponse.json(
+        { error: "One-to-one calls are available on the Pro plan.", code: "CALL_PRO_REQUIRED" },
+        { status: 403, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+    if (!callAccess.get(recipientUserId)) {
+      return NextResponse.json(
+        { error: "The participant is unavailable right now.", code: "CALL_PARTICIPANT_UNAVAILABLE" },
+        { status: 409, headers: { "Cache-Control": "no-store" } }
+      );
+    }
+  } catch (error) {
+    console.error("Could not verify call plan access", error);
+    return NextResponse.json(
+      { error: "Could not verify call access.", code: "CALL_PLAN_ACCESS_UNAVAILABLE" },
+      { status: 503, headers: { "Cache-Control": "no-store" } }
+    );
+  }
 
   try {
     const permission = await getCallContactPermission(user.id, recipientUserId);

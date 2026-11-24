@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { FormEvent, useEffect, useState } from "react";
 import { ArrowLeft, Download, LogOut, ShieldCheck, Trash2 } from "lucide-react";
 import { useLanguage } from "@/lib/i18n";
@@ -10,6 +11,7 @@ import MfaSettings from "@/app/components/MfaSettings";
 type AccountUser = { email: string; name: string };
 
 export default function AccountSettingsPage() {
+  const router = useRouter();
   const { text: t } = useLanguage();
   const [user, setUser] = useState<AccountUser | null>(null);
   const [displayName, setDisplayName] = useState("");
@@ -31,14 +33,14 @@ export default function AccountSettingsPage() {
       })
       .then(({ user: loadedUser }) => {
         if (!loadedUser) {
-          window.location.assign("/custom");
+          router.replace("/custom");
           return;
         }
         setUser(loadedUser);
         setDisplayName(loadedUser.name || "");
       })
       .catch(() => setError(t("Could not load your account.", "Nie udało się wczytać konta.")));
-  }, [t]);
+  }, [router, t]);
 
   const patchSecurity = async (payload: Record<string, string>, operation: string) => {
     setBusy(operation); setError(""); setMessage("");
@@ -61,7 +63,7 @@ export default function AccountSettingsPage() {
   const logout = async (allDevices: boolean) => {
     setBusy(allDevices ? "all-devices" : "logout");
     await fetch("/api/auth/logout", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ allDevices }) });
-    window.location.assign("/custom");
+    router.replace("/custom");
   };
 
   const deleteAccount = async () => {
@@ -70,7 +72,7 @@ export default function AccountSettingsPage() {
     const response = await fetch("/api/account", { method: "DELETE", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ password: deletePassword, confirmation }) });
     const data = (await response.json().catch(() => ({}))) as { error?: string };
     if (!response.ok) { setError(data.error || t("Account deletion failed.", "Usunięcie konta nie powiodło się.")); setBusy(""); return; }
-    window.location.assign("/register");
+    router.replace("/register");
   };
 
   return (

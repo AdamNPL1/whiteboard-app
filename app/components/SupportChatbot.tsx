@@ -46,8 +46,8 @@ export default function SupportChatbot({ open, onOpen, onClose }: SupportChatbot
       "Użyj opcji Nie pamiętasz hasła w oknie logowania. Konto i język znajdziesz pod ikoną ustawień."
     );
     if (/price|pricing|plan|billing|subscription|płat|cenn|abonament/.test(normalized)) return t(
-      "Open Boards and select Your plan to compare Basic, Pro and Master.",
-      "Otwórz Tablice i wybierz Twój plan, aby porównać Basic, Pro i Master."
+      "Open Boards and select Your plan to compare Free and Pro.",
+      "Otwórz Tablice i wybierz Twój plan, aby porównać plany Free i Pro."
     );
     return t(
       "I can help with boards, sharing, accounts and plans. Choose a topic below or contact the Scriboo team.",
