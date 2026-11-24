@@ -17010,20 +17010,20 @@ export default function Page() {
                   position: "absolute",
                   top: "calc(100% + 10px)",
                   right: 0,
-                  width: "min(280px, calc(100vw - 24px))",
+                  width: "min(310px, calc(100vw - 24px))",
                   boxSizing: "border-box",
-                  padding: "18px",
-                  borderRadius: "24px",
-                  border: "1px solid rgba(214,222,239,0.92)",
+                  padding: "16px",
+                  borderRadius: "20px",
+                  border: "1px solid rgba(218,220,239,0.96)",
                   background:
-                    "radial-gradient(circle at 18% 8%, rgba(124,58,237,0.08), transparent 34%), radial-gradient(circle at 92% 88%, rgba(74,222,128,0.09), transparent 38%), linear-gradient(145deg, rgba(255,255,255,0.99), rgba(250,252,255,0.975))",
+                    "radial-gradient(circle at 88% 3%, rgba(139,92,246,0.14), transparent 38%), linear-gradient(155deg, rgba(255,255,255,0.995), rgba(248,247,255,0.99))",
                   boxShadow:
-                    "0 32px 75px rgba(66,73,120,0.19), 0 1px 0 rgba(255,255,255,0.96) inset",
+                    "0 26px 64px rgba(56,47,112,0.22), 0 1px 0 rgba(255,255,255,0.98) inset",
                   backdropFilter: "blur(22px)",
                   overflow: "hidden",
                   backgroundClip: "padding-box",
                   display: "grid",
-                  gap: "13px",
+                  gap: "14px",
                   fontFamily: accountPanelFontFamily,
                   textRendering: "optimizeLegibility",
                   WebkitFontSmoothing: "antialiased",
@@ -17033,7 +17033,7 @@ export default function Page() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "54px minmax(0, 1fr)",
+                    gridTemplateColumns: "58px minmax(0, 1fr)",
                     alignItems: "center",
                     gap: "13px",
                   }}
@@ -17041,20 +17041,20 @@ export default function Page() {
                   <div
                     className="scriboo-account-avatar"
                     style={{
-                      width: "54px",
-                      height: "54px",
-                      borderRadius: "17px",
-                      border: "2px solid rgba(255,255,255,0.94)",
+                      width: "58px",
+                      height: "58px",
+                      borderRadius: "16px",
+                      border: "1px solid rgba(255,255,255,0.72)",
                       background:
-                        "linear-gradient(145deg, rgba(242,238,255,0.98), rgba(218,213,255,0.94))",
+                        "linear-gradient(145deg, #a477f4 0%, #4b22c7 100%)",
                       boxShadow:
-                        "0 15px 32px rgba(116,71,232,0.16), 0 1px 0 rgba(255,255,255,0.95) inset",
-                      color: "#7048e8",
+                        "0 12px 24px rgba(91,54,205,0.28), 0 1px 0 rgba(255,255,255,0.34) inset",
+                      color: "#ffffff",
                       display: "grid",
                       placeItems: "center",
                     }}
                   >
-                    <UserRound size={26} strokeWidth={1.8} />
+                    <UserRound size={29} strokeWidth={1.8} />
                   </div>
                   <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
                     <div
@@ -17071,7 +17071,7 @@ export default function Page() {
                     <div
                       style={{
                         color: "#0f172a",
-                        fontSize: "18px",
+                        fontSize: "19px",
                         fontWeight: 750,
                         lineHeight: 1.05,
                         letterSpacing: "-0.035em",
@@ -17082,6 +17082,20 @@ export default function Page() {
                     >
                       {currentAccountName || currentAccountEmail}
                     </div>
+                    <div
+                      style={{
+                        color: "#667085",
+                        fontSize: "11px",
+                        fontWeight: 520,
+                        lineHeight: 1.35,
+                        whiteSpace: "nowrap",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                      }}
+                      title={currentAccountEmail}
+                    >
+                      {currentAccountEmail}
+                    </div>
                   </div>
                 </div>
                 <div
@@ -17091,18 +17105,6 @@ export default function Page() {
                       "linear-gradient(90deg, rgba(199,210,254,0.95), rgba(219,234,254,0.7))",
                   }}
                 />
-                <div
-                  style={{
-                    color: "#667085",
-                    fontSize: "12px",
-                    fontWeight: 520,
-                    lineHeight: 1.4,
-                    letterSpacing: "0.002em",
-                    wordBreak: "break-word",
-                  }}
-                >
-                  {currentAccountEmail}
-                </div>
                 <button
                   type="button"
                   className="scriboo-plan-chip"
@@ -17112,30 +17114,57 @@ export default function Page() {
                     setShowBoardsMenu(true);
                   }}
                   style={{
-                    justifySelf: "start",
-                    height: "32px",
-                    padding: "0 14px",
-                    borderRadius: "999px",
-                    border: "1px solid rgba(196,181,253,0.8)",
+                    width: "100%",
+                    minHeight: "54px",
+                    padding: "8px 12px 8px 10px",
+                    borderRadius: "11px",
+                    border: "1px solid rgba(196,181,253,0.72)",
+                    borderLeft: "4px solid #6d28d9",
                     background:
-                      "linear-gradient(180deg, rgba(250,248,255,0.98), rgba(242,239,255,0.98))",
-                    color: "#6d28d9",
-                    display: "inline-flex",
+                      "linear-gradient(100deg, rgba(245,241,255,0.99), rgba(238,233,255,0.92))",
+                    color: "#211747",
+                    display: "flex",
                     alignItems: "center",
-                    gap: "8px",
-                    fontSize: "10px",
+                    gap: "10px",
+                    fontSize: "14px",
                     fontWeight: 750,
-                    letterSpacing: "0.14em",
-                    textTransform: "uppercase",
-                    boxShadow: "0 1px 0 rgba(255,255,255,0.82) inset",
+                    letterSpacing: "-0.015em",
+                    boxShadow: "0 8px 20px rgba(109,40,217,0.09), 0 1px 0 rgba(255,255,255,0.88) inset",
                     cursor: "pointer",
                   }}
                 >
-                      <Crown size={14} fill="currentColor" strokeWidth={1.7} />
-                      {currentPlanLabel} {t("plan", "plan")}
-                      <span style={{ letterSpacing: 0, textTransform: "none" }}>
-                        · {t("View plans", "Zobacz plany")}
-                      </span>
+                  <span
+                    style={{
+                      width: "36px",
+                      height: "36px",
+                      flex: "0 0 36px",
+                      borderRadius: "10px",
+                      background: "rgba(255,255,255,0.72)",
+                      color: "#6d28d9",
+                      display: "grid",
+                      placeItems: "center",
+                      boxShadow: "0 5px 14px rgba(91,54,205,0.12)",
+                    }}
+                  >
+                    <Crown size={18} fill="currentColor" strokeWidth={1.7} />
+                  </span>
+                  <span style={{ flex: 1, textAlign: "left" }}>
+                    {currentPlanLabel} {t("Plan", "Plan")}
+                  </span>
+                  <span
+                    style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "3px",
+                      color: "#6437d5",
+                      fontSize: "11px",
+                      fontWeight: 700,
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    {t("View plans", "Zobacz plany")}
+                    <ArrowRight size={14} strokeWidth={2.2} />
+                  </span>
                 </button>
                 <button
                   className="scriboo-theme-toggle"
@@ -17147,17 +17176,17 @@ export default function Page() {
                       : t("Use dark mode", "Włącz ciemny motyw")
                   }
                   style={{
-                    height: "42px",
-                    padding: "0 14px",
-                    borderRadius: "13px",
-                    border: "1px solid rgba(196,181,253,0.62)",
-                    background: "rgba(124,58,237,0.07)",
-                    color: "#5b3fd1",
+                    height: "48px",
+                    padding: "0 10px",
+                    borderRadius: 0,
+                    border: "none",
+                    background: "transparent",
+                    color: "#20183f",
                     display: "flex",
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "12px",
-                    fontSize: "13px",
+                    fontSize: "14px",
                     fontWeight: 700,
                     cursor: "pointer",
                   }}
@@ -17171,11 +17200,11 @@ export default function Page() {
                   <span
                     aria-hidden="true"
                     style={{
-                      width: "34px",
-                      height: "20px",
-                      padding: "2px",
+                      width: "42px",
+                      height: "24px",
+                      padding: "3px",
                       borderRadius: "999px",
-                      background: isInterfaceDarkMode ? "#7c3aed" : "#cbd5e1",
+                      background: isInterfaceDarkMode ? "#6d28d9" : "#d8d9e3",
                       display: "flex",
                       justifyContent: isInterfaceDarkMode ? "flex-end" : "flex-start",
                       boxSizing: "border-box",
@@ -17183,8 +17212,8 @@ export default function Page() {
                   >
                     <span
                       style={{
-                        width: "16px",
-                        height: "16px",
+                        width: "18px",
+                        height: "18px",
                         borderRadius: "999px",
                         background: "#ffffff",
                         boxShadow: "0 1px 4px rgba(15,23,42,0.25)",
@@ -17197,13 +17226,12 @@ export default function Page() {
                   type="button"
                   onClick={signOut}
                   style={{
-                    marginTop: "3px",
-                    height: "48px",
+                    marginTop: 0,
+                    height: "46px",
                     padding: "0 17px",
                     borderRadius: "14px",
                     border: "1px solid rgba(255,255,255,0.45)",
-                    background:
-                      "linear-gradient(100deg, #7b4ded 0%, #5d8de5 48%, #68cf77 100%)",
+                    background: "linear-gradient(100deg, #7c3aed 0%, #4c1dbe 100%)",
                     color: "#ffffff",
                     display: "grid",
                     gridTemplateColumns: "24px 1fr 24px",
@@ -17212,7 +17240,7 @@ export default function Page() {
                     fontWeight: 700,
                     letterSpacing: "-0.01em",
                     boxShadow:
-                      "0 18px 34px rgba(92,105,210,0.28), 0 1px 0 rgba(255,255,255,0.28) inset",
+                      "0 14px 28px rgba(91,33,182,0.28), 0 1px 0 rgba(255,255,255,0.25) inset",
                     cursor: "pointer",
                     transition: "transform 160ms ease, box-shadow 160ms ease, filter 160ms ease",
                   }}
