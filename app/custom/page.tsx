@@ -3983,8 +3983,6 @@ export default function Page() {
     WebkitFontSmoothing: "antialiased" as const,
     MozOsxFontSmoothing: "grayscale" as const,
   };
-  const premiumShellShadow =
-    "0 30px 86px rgba(15,23,42,0.16), 0 1px 0 rgba(255,255,255,0.82) inset";
   const premiumCardShadow =
     "0 18px 44px rgba(15,23,42,0.08), 0 1px 0 rgba(255,255,255,0.7) inset";
   const premiumFeaturedCardShadow =
@@ -12603,9 +12601,9 @@ export default function Page() {
                       : "min(880px, calc(100vh - 64px))",
                   borderRadius: "24px",
                   background:
-                    "linear-gradient(180deg, rgba(250,252,255,0.985) 0%, rgba(247,251,255,0.985) 100%)",
-                  border: "1px solid rgba(205,218,236,0.92)",
-                  boxShadow: premiumShellShadow,
+                    "radial-gradient(ellipse at 100% 0%, rgba(109,40,217,0.15) 0%, rgba(196,181,253,0.1) 28%, transparent 52%), linear-gradient(155deg, #ffffff 0%, #fbfaff 74%, #f7f5ff 100%)",
+                  border: "1px solid rgba(207,198,239,0.78)",
+                  boxShadow: "0 30px 72px rgba(55,43,119,0.18), 0 1px 0 rgba(255,255,255,0.98) inset",
                   display: "grid",
                   gridTemplateColumns:
                     boardBrowserView === "calendar" || boardBrowserView === "plan"
@@ -12623,8 +12621,8 @@ export default function Page() {
                   className="scriboo-workspace-sidebar"
                   style={{
                     background:
-                      "linear-gradient(180deg, #f8fafc 0%, #eef4ff 100%)",
-                    borderRight: "1px solid rgba(203,213,225,0.74)",
+                      "linear-gradient(180deg, rgba(250,249,255,0.98) 0%, rgba(244,241,255,0.96) 100%)",
+                    borderRight: "1px solid rgba(211,203,238,0.72)",
                     padding: "30px 22px 24px",
                     display: "grid",
                     gridTemplateRows: boardActionMessage
@@ -12703,7 +12701,7 @@ export default function Page() {
                         : "transparent",
                       backgroundImage: isInterfaceDarkMode
                         ? "none"
-                        : signatureIndigoGradient,
+                        : "linear-gradient(100deg, #7c3aed 0%, #4c1dbe 100%)",
                       backgroundSize: "145% 145%",
                       backgroundPosition:
                         isNewBoardButtonHovered &&
@@ -12818,12 +12816,12 @@ export default function Page() {
                           padding: "0 14px",
                           borderRadius: "12px",
                           border: isActive
-                            ? "1px solid rgba(110,163,215,0.2)"
+                            ? "1px solid rgba(196,181,253,0.68)"
                             : "1px solid transparent",
                           background: isActive
-                            ? "linear-gradient(90deg, rgba(139,70,255,0.055) 0%, rgba(75,143,255,0.05) 38%, rgba(25,195,188,0.048) 72%, rgba(48,207,104,0.048) 100%)"
+                            ? "linear-gradient(90deg, rgba(124,58,237,0.1) 0%, rgba(237,233,254,0.7) 100%)"
                             : "transparent",
-                          color: isActive ? "#145d93" : "#334155",
+                          color: isActive ? "#5b21b6" : "#334155",
                           display: "flex",
                           alignItems: "center",
                           justifyContent: "space-between",
@@ -12833,7 +12831,7 @@ export default function Page() {
                           cursor: "pointer",
                           opacity: 1,
                           boxShadow: isActive
-                            ? "0 8px 18px rgba(71,127,189,0.08), 0 1px 0 rgba(255,255,255,0.58) inset"
+                            ? "0 8px 18px rgba(91,33,182,0.08), 0 1px 0 rgba(255,255,255,0.7) inset"
                             : "none",
                         }}
                       >
@@ -12865,8 +12863,8 @@ export default function Page() {
                         padding: "16px",
                         borderRadius: "14px",
                         background:
-                          "linear-gradient(135deg, rgba(255,255,255,0.82) 0%, rgba(239,196,93,0.08) 34%, rgba(89,171,168,0.08) 100%)",
-                        border: "1px solid rgba(110,163,215,0.18)",
+                          "linear-gradient(135deg, rgba(255,255,255,0.92) 0%, rgba(237,233,254,0.76) 100%)",
+                        border: "1px solid rgba(196,181,253,0.42)",
                         boxShadow: premiumCardShadow,
                       }}
                     >
@@ -12945,7 +12943,7 @@ export default function Page() {
                     minWidth: 0,
                     minHeight: 0,
                     background:
-                      "linear-gradient(180deg, #ffffff 0%, #fbfdff 100%)",
+                      "linear-gradient(155deg, rgba(255,255,255,0.99) 0%, rgba(252,251,255,0.99) 72%, rgba(247,245,255,0.98) 100%)",
                     ...premiumBodyStyle,
                   }}
                 >
@@ -13081,12 +13079,12 @@ export default function Page() {
                           height: "40px",
                           borderRadius: "999px",
                           background:
-                            "linear-gradient(135deg, #22c55e 0%, #14b8a6 100%)",
+                            "linear-gradient(145deg, #a477f4 0%, #4b22c7 100%)",
                           color: "#ffffff",
                           display: "grid",
                           placeItems: "center",
                           flex: "0 0 auto",
-                          boxShadow: "0 8px 18px rgba(34,197,94,0.2)",
+                          boxShadow: "0 8px 18px rgba(91,54,205,0.22)",
                         }}
                       >
                         <UserRound size={18} />
@@ -13100,7 +13098,7 @@ export default function Page() {
                       >
                         <div
                           style={{
-                            color: "#16a34a",
+                            color: "#6d28d9",
                             fontSize: "11px",
                             fontWeight: 600,
                             letterSpacing: "0.04em",
@@ -15501,14 +15499,16 @@ export default function Page() {
                 width: "min(920px, calc(100vw - 32px))",
                 height: "min(610px, calc(100vh - 82px))",
                 borderRadius: "18px",
-                border: `1px solid ${panelBorderColor}`,
-                background: popoverBackground,
+                border: "1px solid rgba(207,198,239,0.78)",
+                background: isInterfaceDarkMode
+                  ? popoverBackground
+                  : "radial-gradient(ellipse at 100% 0%, rgba(109,40,217,0.15) 0%, rgba(196,181,253,0.1) 28%, transparent 52%), linear-gradient(155deg, #ffffff 0%, #fbfaff 76%, #f7f5ff 100%)",
                 color: panelTextColor,
                 fontFamily: appSansFontFamily,
                 WebkitFontSmoothing: "antialiased",
                 MozOsxFontSmoothing: "grayscale",
                 textRendering: "geometricPrecision",
-                boxShadow: "0 24px 70px rgba(15,23,42,0.28)",
+                boxShadow: "0 30px 72px rgba(55,43,119,0.22), 0 1px 0 rgba(255,255,255,0.98) inset",
                 display: "grid",
                 gridTemplateColumns: "260px minmax(0, 1fr)",
                 overflow: "hidden",
@@ -15523,7 +15523,7 @@ export default function Page() {
                     ? "rgba(20,20,20,0.72)"
                     : isGreyCanvas
                     ? "rgba(31,41,55,0.22)"
-                    : "rgba(248,250,252,0.72)",
+                    : "linear-gradient(180deg, rgba(250,249,255,0.94), rgba(244,241,255,0.9))",
                 }}
               >
                 <div
@@ -15548,6 +15548,8 @@ export default function Page() {
 
                     return (
                       <button
+                        className="scriboo-settings-nav-button"
+                        data-active={isActive ? "true" : "false"}
                         key={item.id}
                         onClick={() =>
                           setActiveSettingsSection(item.id as SettingsSection)
@@ -15556,11 +15558,13 @@ export default function Page() {
                           height: "46px",
                           padding: "0 14px",
                           borderRadius: "8px",
-                          border: "none",
+                          border: isActive
+                            ? "1px solid rgba(196,181,253,0.58)"
+                            : "1px solid transparent",
                           background: isActive
-                            ? selectedControlBackground
+                            ? "linear-gradient(90deg, rgba(124,58,237,0.11), rgba(237,233,254,0.72))"
                             : "transparent",
-                          color: isActive ? panelTextColor : "#94a3b8",
+                          color: isActive ? "#5b21b6" : "#64748b",
                           display: "flex",
                           alignItems: "center",
                           gap: "11px",
