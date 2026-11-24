@@ -4022,7 +4022,7 @@ export default function Page() {
           "Rozmowy wideo jeden na jeden i udostępnianie ekranu"
         ),
         t("Unlimited boards", "Nielimitowane tablice"),
-        t("Up to 20 collaborators per board", "Do 20 współpracowników na tablicę"),
+        t("Up to 15 collaborators per board", "Do 15 współpracowników na tablicę"),
         t("Calendar planning", "Planowanie w kalendarzu"),
         t("30-day version history", "30-dniowa historia wersji"),
       ],
@@ -12256,7 +12256,7 @@ export default function Page() {
                     features: [
                        t("One-to-one video calls and screen sharing", "Rozmowy wideo jeden na jeden i udostępnianie ekranu"),
                       t("Unlimited boards", "Nielimitowane tablice"),
-                       t("Up to 20 collaborators per board", "Do 20 współpracowników na tablicę"),
+                       t("Up to 15 collaborators per board", "Do 15 współpracowników na tablicę"),
                       t("Calendar planning", "Planowanie w kalendarzu"),
                       t("30-day version history", "30-dniowa historia wersji"),
                     ],

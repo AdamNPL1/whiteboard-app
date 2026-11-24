@@ -160,7 +160,7 @@ export const getWorkspaceAccess = (
     return {
       tier: "pro",
       maxBoards: Number.POSITIVE_INFINITY,
-      maxShares: 20,
+      maxShares: 15,
       canUseCalendar: true,
     };
   }

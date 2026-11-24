@@ -28,7 +28,7 @@ describe("workspace plan limits", () => {
   it("enforces Pro sharing and calendar access", () => {
     expect(getWorkspaceAccess("pro", "active")).toMatchObject({
       tier: "pro",
-      maxShares: 20,
+      maxShares: 15,
       canUseCalendar: true,
     });
   });
