@@ -17012,20 +17012,20 @@ export default function Page() {
                   position: "absolute",
                   top: "calc(100% + 10px)",
                   right: 0,
-                  width: "min(310px, calc(100vw - 24px))",
+                  width: "min(420px, calc(100vw - 20px))",
                   boxSizing: "border-box",
-                  padding: "16px",
-                  borderRadius: "20px",
-                  border: "1px solid rgba(218,220,239,0.96)",
+                  padding: "26px",
+                  borderRadius: "24px",
+                  border: "2px solid rgba(255,255,255,0.96)",
                   background:
-                    "radial-gradient(circle at 88% 3%, rgba(139,92,246,0.14), transparent 38%), linear-gradient(155deg, rgba(255,255,255,0.995), rgba(248,247,255,0.99))",
+                    "radial-gradient(ellipse at 98% 0%, rgba(118,76,229,0.42) 0%, rgba(183,162,247,0.2) 28%, transparent 52%), radial-gradient(ellipse at 72% 2%, rgba(226,218,255,0.62) 0%, transparent 46%), linear-gradient(155deg, #ffffff 0%, #fbfaff 72%, #f5f2ff 100%)",
                   boxShadow:
-                    "0 26px 64px rgba(56,47,112,0.22), 0 1px 0 rgba(255,255,255,0.98) inset",
+                    "0 30px 72px rgba(55,43,119,0.26), 0 1px 0 rgba(255,255,255,1) inset, 0 0 0 1px rgba(157,145,216,0.22)",
                   backdropFilter: "blur(22px)",
-                  overflow: "hidden",
+                  overflow: "visible",
                   backgroundClip: "padding-box",
                   display: "grid",
-                  gap: "14px",
+                  gap: "20px",
                   fontFamily: accountPanelFontFamily,
                   textRendering: "optimizeLegibility",
                   WebkitFontSmoothing: "antialiased",
@@ -17035,34 +17035,42 @@ export default function Page() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "58px minmax(0, 1fr)",
+                    gridTemplateColumns: "72px minmax(0, 1fr)",
                     alignItems: "center",
-                    gap: "13px",
+                    gap: "18px",
                   }}
                 >
                   <div
                     className="scriboo-account-avatar"
                     style={{
-                      width: "58px",
-                      height: "58px",
-                      borderRadius: "16px",
+                      width: "72px",
+                      height: "72px",
+                      borderRadius: "20px",
                       border: "1px solid rgba(255,255,255,0.72)",
                       background:
                         "linear-gradient(145deg, #a477f4 0%, #4b22c7 100%)",
                       boxShadow:
-                        "0 12px 24px rgba(91,54,205,0.28), 0 1px 0 rgba(255,255,255,0.34) inset",
+                        "0 15px 30px rgba(91,54,205,0.3), 0 1px 0 rgba(255,255,255,0.34) inset",
                       color: "#ffffff",
                       display: "grid",
                       placeItems: "center",
                     }}
                   >
-                    <UserRound size={29} strokeWidth={1.8} />
+                    <UserRound size={38} strokeWidth={1.7} />
                   </div>
-                  <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
+                  <div
+                    style={{
+                      display: "grid",
+                      gap: "5px",
+                      minWidth: 0,
+                      paddingLeft: "18px",
+                      borderLeft: "1px solid rgba(157,145,216,0.48)",
+                    }}
+                  >
                     <div
                       style={{
                         color: "#7779b9",
-                        fontSize: "9px",
+                        fontSize: "12px",
                         fontWeight: 750,
                         letterSpacing: "0.26em",
                         textTransform: "uppercase",
@@ -17073,7 +17081,7 @@ export default function Page() {
                     <div
                       style={{
                         color: "#0f172a",
-                        fontSize: "19px",
+                        fontSize: "26px",
                         fontWeight: 750,
                         lineHeight: 1.05,
                         letterSpacing: "-0.035em",
@@ -17087,7 +17095,7 @@ export default function Page() {
                     <div
                       style={{
                         color: "#667085",
-                        fontSize: "11px",
+                        fontSize: "14px",
                         fontWeight: 520,
                         lineHeight: 1.35,
                         whiteSpace: "nowrap",
@@ -17102,9 +17110,7 @@ export default function Page() {
                 </div>
                 <div
                   style={{
-                    height: "1px",
-                    background:
-                      "linear-gradient(90deg, rgba(199,210,254,0.95), rgba(219,234,254,0.7))",
+                    display: "none",
                   }}
                 />
                 <button
@@ -17117,9 +17123,9 @@ export default function Page() {
                   }}
                   style={{
                     width: "100%",
-                    minHeight: "54px",
-                    padding: "8px 12px 8px 10px",
-                    borderRadius: "11px",
+                    minHeight: "74px",
+                    padding: "10px 14px 10px 12px",
+                    borderRadius: "12px",
                     border: "1px solid rgba(196,181,253,0.72)",
                     borderLeft: "4px solid #6d28d9",
                     background:
@@ -17127,8 +17133,8 @@ export default function Page() {
                     color: "#211747",
                     display: "flex",
                     alignItems: "center",
-                    gap: "10px",
-                    fontSize: "14px",
+                    gap: "12px",
+                    fontSize: "20px",
                     fontWeight: 750,
                     letterSpacing: "-0.015em",
                     boxShadow: "0 8px 20px rgba(109,40,217,0.09), 0 1px 0 rgba(255,255,255,0.88) inset",
@@ -17137,10 +17143,10 @@ export default function Page() {
                 >
                   <span
                     style={{
-                      width: "36px",
-                      height: "36px",
-                      flex: "0 0 36px",
-                      borderRadius: "10px",
+                      width: "46px",
+                      height: "46px",
+                      flex: "0 0 46px",
+                      borderRadius: "12px",
                       background: "rgba(255,255,255,0.72)",
                       color: "#6d28d9",
                       display: "grid",
@@ -17148,26 +17154,48 @@ export default function Page() {
                       boxShadow: "0 5px 14px rgba(91,54,205,0.12)",
                     }}
                   >
-                    <Crown size={18} fill="currentColor" strokeWidth={1.7} />
+                    <Crown size={25} fill="currentColor" strokeWidth={1.7} />
                   </span>
-                  <span style={{ flex: 1, textAlign: "left" }}>
+                  <span
+                    style={{
+                      flex: 1,
+                      minHeight: "40px",
+                      paddingLeft: "14px",
+                      borderLeft: "1px solid rgba(157,145,216,0.42)",
+                      display: "flex",
+                      alignItems: "center",
+                      textAlign: "left",
+                    }}
+                  >
                     {currentPlanLabel} {t("Plan", "Plan")}
                   </span>
                   <span
                     style={{
                       display: "inline-flex",
                       alignItems: "center",
-                      gap: "3px",
+                      gap: "5px",
                       color: "#6437d5",
-                      fontSize: "11px",
+                      fontSize: "14px",
                       fontWeight: 700,
                       whiteSpace: "nowrap",
+                      padding: "10px 12px",
+                      borderRadius: "999px",
+                      border: "1px solid rgba(255,255,255,0.75)",
+                      background: "rgba(255,255,255,0.35)",
+                      boxShadow: "0 7px 18px rgba(91,54,205,0.08)",
                     }}
                   >
                     {t("View plans", "Zobacz plany")}
-                    <ArrowRight size={14} strokeWidth={2.2} />
+                    <ArrowRight size={18} strokeWidth={2.2} />
                   </span>
                 </button>
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: "1px",
+                    background: "rgba(199,198,229,0.62)",
+                  }}
+                />
                 <button
                   className="scriboo-theme-toggle"
                   type="button"
@@ -17178,7 +17206,7 @@ export default function Page() {
                       : t("Use dark mode", "Włącz ciemny motyw")
                   }
                   style={{
-                    height: "48px",
+                    height: "52px",
                     padding: "0 10px",
                     borderRadius: 0,
                     border: "none",
@@ -17188,13 +17216,13 @@ export default function Page() {
                     alignItems: "center",
                     justifyContent: "space-between",
                     gap: "12px",
-                    fontSize: "14px",
+                    fontSize: "18px",
                     fontWeight: 700,
                     cursor: "pointer",
                   }}
                 >
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: "9px" }}>
-                    {isInterfaceDarkMode ? <Sun size={18} /> : <Moon size={18} />}
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "16px" }}>
+                    {isInterfaceDarkMode ? <Sun size={25} /> : <Moon size={25} />}
                     {isInterfaceDarkMode
                       ? t("Light mode", "Jasny motyw")
                       : t("Dark mode", "Ciemny motyw")}
@@ -17202,8 +17230,8 @@ export default function Page() {
                   <span
                     aria-hidden="true"
                     style={{
-                      width: "42px",
-                      height: "24px",
+                      width: "54px",
+                      height: "30px",
                       padding: "3px",
                       borderRadius: "999px",
                       background: isInterfaceDarkMode ? "#6d28d9" : "#d8d9e3",
@@ -17214,8 +17242,8 @@ export default function Page() {
                   >
                     <span
                       style={{
-                        width: "18px",
-                        height: "18px",
+                        width: "24px",
+                        height: "24px",
                         borderRadius: "999px",
                         background: "#ffffff",
                         boxShadow: "0 1px 4px rgba(15,23,42,0.25)",
@@ -17223,13 +17251,20 @@ export default function Page() {
                     />
                   </span>
                 </button>
+                <div
+                  aria-hidden="true"
+                  style={{
+                    height: "1px",
+                    background: "rgba(199,198,229,0.62)",
+                  }}
+                />
                 <button
                   className="scriboo-logout-button"
                   type="button"
                   onClick={signOut}
                   style={{
                     marginTop: 0,
-                    height: "46px",
+                    height: "58px",
                     padding: "0 17px",
                     borderRadius: "14px",
                     border: "1px solid rgba(255,255,255,0.45)",
@@ -17238,7 +17273,7 @@ export default function Page() {
                     display: "grid",
                     gridTemplateColumns: "24px 1fr 24px",
                     alignItems: "center",
-                    fontSize: "15px",
+                    fontSize: "18px",
                     fontWeight: 700,
                     letterSpacing: "-0.01em",
                     boxShadow:
@@ -17255,7 +17290,7 @@ export default function Page() {
                     event.currentTarget.style.filter = "none";
                   }}
                 >
-                    <LogOut size={20} strokeWidth={2} />
+                    <LogOut size={25} strokeWidth={2} />
                     <span>{t("Log out", "Wyloguj się")}</span>
                     <span aria-hidden="true" />
                 </button>

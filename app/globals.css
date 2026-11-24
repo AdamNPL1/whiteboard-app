@@ -387,6 +387,33 @@ input.modern-range::-ms-thumb {
   animation: scriboo-account-popover-enter 240ms cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.scriboo-account-popover::before {
+  content: "";
+  position: absolute;
+  top: -14px;
+  right: 28px;
+  width: 28px;
+  height: 28px;
+  border-top: 2px solid rgba(255, 255, 255, 0.96);
+  border-left: 2px solid rgba(255, 255, 255, 0.96);
+  border-radius: 5px 0 0;
+  background: #eeeaff;
+  transform: rotate(45deg);
+  z-index: -1;
+}
+
+.scriboo-account-popover > * {
+  position: relative;
+  z-index: 1;
+}
+
+@media (max-width: 480px) {
+  .scriboo-account-popover {
+    width: min(420px, calc(100vw - 20px)) !important;
+    padding: 20px !important;
+  }
+}
+
 @keyframes scriboo-account-popover-enter {
   from {
     opacity: 0;
