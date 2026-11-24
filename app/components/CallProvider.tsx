@@ -4302,7 +4302,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             </div>
           )}
           {isPreCall && (
-            <div style={{ order: 2, display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "10px" }}>
+            <div
+              style={{
+                order: 2,
+                display: "grid",
+                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                gap: "12px 16px",
+                padding: "16px",
+                borderRadius: "16px",
+                background: "linear-gradient(145deg, #faf9ff 0%, #f5f3ff 100%)",
+                boxShadow: "inset 0 0 0 1px rgba(221,214,254,0.72)",
+              }}
+            >
               <div style={preCallFieldStyle}>
                 <label htmlFor="precall-microphone" style={preCallLabelStyle}>
                   {t("Microphone", "Mikrofon")}
@@ -4341,7 +4352,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   aria-valuemin={0}
                   aria-valuemax={100}
                   aria-valuenow={microphoneLevel}
-                  style={{ height: 8, borderRadius: 999, background: "#e2e8f0", overflow: "hidden" }}
+                  style={{ height: 4, borderRadius: 999, background: "#e9e5f5", overflow: "hidden" }}
                 >
                   <div style={{ width: `${microphoneLevel}%`, height: "100%", background: microphoneLevel > 3 ? "#22c55e" : "#94a3b8", transition: "width 80ms linear" }} />
                 </div>
@@ -4381,7 +4392,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 </button>
               </div>
 
-              <div style={{ ...preCallFieldStyle, gridColumn: "1 / -1", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center" }}>
+              <div style={{ ...preCallFieldStyle, gridColumn: "1 / -1", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", paddingTop: 2 }}>
                 <span style={preCallLabelStyle}>{t("Speaker", "Głośnik")}</span>
                 {isSpeakerSelectionSupported && speakerDevices.length > 0 ? (
                   <select
@@ -4416,8 +4427,25 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   : t("Join unmuted", "Dołącz bez wyciszenia")}
               </button>
 
-              <div style={{ gridColumn: "1 / -1", color: "#64748b", fontSize: 11, lineHeight: 1.45 }}>
-                {t("Microphone permission", "Uprawnienie mikrofonu")}: {permissionText(microphonePermission)} · {t("Camera permission", "Uprawnienie kamery")}: {permissionText(cameraPermission)}
+              <div
+                style={{
+                  gridColumn: "1 / -1",
+                  display: "flex",
+                  flexWrap: "wrap",
+                  gap: "8px 14px",
+                  color: "#64748b",
+                  fontSize: 11,
+                  lineHeight: 1.4,
+                }}
+              >
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: microphonePermission === "denied" ? "#ef4444" : "#22c55e" }} />
+                  {t("Microphone", "Mikrofon")}: {permissionText(microphonePermission)}
+                </span>
+                <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                  <span aria-hidden="true" style={{ width: 7, height: 7, borderRadius: 999, background: cameraPermission === "denied" ? "#ef4444" : "#22c55e" }} />
+                  {t("Camera", "Kamera")}: {permissionText(cameraPermission)}
+                </span>
               </div>
               {(microphonePermission === "denied" || cameraPermission === "denied") && (
                 <div role="alert" style={{ color: "#b45309", fontSize: 12, lineHeight: 1.45 }}>
@@ -5559,34 +5587,33 @@ const participantButtonStyle: React.CSSProperties = {
 };
 const preCallFieldStyle: React.CSSProperties = {
   display: "grid",
-  gap: "7px",
-  padding: "11px",
-  border: "1px solid #e2e8f0",
-  borderRadius: "12px",
-  background: "#f8fafc",
+  gap: "6px",
+  minWidth: 0,
 };
 const preCallLabelStyle: React.CSSProperties = {
-  color: "#334155",
-  fontSize: "12px",
-  fontWeight: 800,
+  color: "#4b4563",
+  fontSize: "11px",
+  fontWeight: 750,
 };
 const preCallSelectStyle: React.CSSProperties = {
   width: "100%",
   minWidth: 0,
-  height: "36px",
-  padding: "0 9px",
-  border: "1px solid #cbd5e1",
-  borderRadius: "9px",
+  height: "40px",
+  padding: "0 11px",
+  border: "1px solid rgba(196,181,253,0.72)",
+  borderRadius: "11px",
   background: "#ffffff",
-  color: "#334155",
+  color: "#312e46",
   fontSize: "12px",
+  outline: "none",
 };
 const preCallSmallButtonStyle: React.CSSProperties = {
   minHeight: "36px",
   padding: "0 10px",
-  border: "1px solid #cbd5e1",
-  borderRadius: "9px",
-  background: "#ffffff",
+  border: "none",
+  borderRadius: "10px",
+  background: "#ede9fe",
+  color: "#5b21b6",
   display: "inline-flex",
   alignItems: "center",
   gap: "7px",
