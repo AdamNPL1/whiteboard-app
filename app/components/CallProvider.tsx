@@ -4890,17 +4890,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           )}
 
           {isPreCall && (
-            <div
-              style={{
-                order: 1,
-                position: "relative",
-                overflow: "hidden",
-                aspectRatio: "16 / 9",
-                borderRadius: "18px",
-                border: "1px solid #ddd6fe",
-                background: "linear-gradient(135deg,#1e293b,#0f172a)",
-              }}
-            >
+            <>
+              <div
+                style={{
+                  order: 1,
+                  position: "relative",
+                  overflow: "hidden",
+                  aspectRatio: "16 / 9",
+                  borderRadius: "18px",
+                  border: "1px solid #ddd6fe",
+                  background: "linear-gradient(135deg,#1e293b,#0f172a)",
+                }}
+              >
               <video
                 ref={localVideoRef}
                 autoPlay
@@ -4935,27 +4936,38 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                   {isCameraStarting ? t("Starting camera…", "Uruchamianie kamery…") : t("Camera preview is off", "Podgląd kamery jest wyłączony")}
                 </div>
               )}
-              <div style={{ position: "absolute", left: "50%", bottom: 16, transform: "translateX(-50%)", display: "flex", gap: 8, padding: 7, borderRadius: 14, background: "rgba(15,23,42,0.78)", backdropFilter: "blur(10px)" }}>
+              </div>
+              <div
+                role="toolbar"
+                aria-label={t("Call setup controls", "Sterowanie ustawieniami rozmowy")}
+                style={{
+                  order: 1,
+                  display: "flex",
+                  justifyContent: "center",
+                  gap: 8,
+                  marginTop: -2,
+                }}
+              >
                 <button type="button" onClick={toggleMute} aria-pressed={isMuted} style={preCallPreviewButtonStyle}>
-                  {isMuted ? <MicOff size={20} /> : <Mic size={20} />}
+                  {isMuted ? <MicOff size={16} /> : <Mic size={16} />}
                   <span>{isMuted ? t("Unmute", "Włącz mikrofon") : t("Audio", "Dźwięk")}</span>
                 </button>
                 <button type="button" onClick={() => isCameraOn ? void stopCamera() : void startCamera(selectedCameraId)} disabled={isCameraStarting} aria-pressed={!isCameraOn} style={preCallPreviewButtonStyle}>
-                  {isCameraOn ? <Video size={21} /> : <VideoOff size={21} />}
+                  {isCameraOn ? <Video size={16} /> : <VideoOff size={16} />}
                   <span>{t("Video", "Wideo")}</span>
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setIsSelfViewBlurred((blurred) => !blurred)}
+                  disabled={!isCameraOn}
+                  aria-pressed={isSelfViewBlurred}
+                  style={{ ...preCallPreviewButtonStyle, background: isSelfViewBlurred ? "#ede9fe" : "#ffffff", color: isSelfViewBlurred ? "#5b21b6" : "#312e46", opacity: isCameraOn ? 1 : 0.55 }}
+                >
+                  <ImageIcon size={16} />
+                  <span>{t("Background", "Tło")}</span>
+                </button>
               </div>
-              <button
-                type="button"
-                onClick={() => setIsSelfViewBlurred((blurred) => !blurred)}
-                disabled={!isCameraOn}
-                aria-pressed={isSelfViewBlurred}
-                style={{ ...preCallPreviewButtonStyle, position: "absolute", right: 14, bottom: 16, minWidth: 116, flexDirection: "row", background: isSelfViewBlurred ? "rgba(109,40,217,0.9)" : "rgba(15,23,42,0.78)", opacity: isCameraOn ? 1 : 0.55 }}
-              >
-                <ImageIcon size={18} />
-                <span>{t("Background", "Tło")}</span>
-              </button>
-            </div>
+            </>
           )}
 
           {phase === "connected" && cameraMessage && (
@@ -5622,20 +5634,19 @@ const preCallSmallButtonStyle: React.CSSProperties = {
   cursor: "pointer",
 };
 const preCallPreviewButtonStyle: React.CSSProperties = {
-  minWidth: 76,
-  minHeight: 54,
-  padding: "7px 12px",
-  border: "1px solid rgba(255,255,255,0.14)",
-  borderRadius: 11,
-  background: "transparent",
-  color: "#ffffff",
+  minHeight: 34,
+  padding: "0 11px",
+  border: "1px solid rgba(196,181,253,0.66)",
+  borderRadius: 10,
+  background: "#ffffff",
+  color: "#312e46",
   display: "inline-flex",
-  flexDirection: "column",
+  flexDirection: "row",
   alignItems: "center",
   justifyContent: "center",
-  gap: 3,
-  fontSize: 12,
-  fontWeight: 750,
+  gap: 6,
+  fontSize: 11,
+  fontWeight: 700,
   cursor: "pointer",
 };
 const callActionStyle: React.CSSProperties = {
