@@ -13872,7 +13872,9 @@ export default function Page() {
                                   alignContent: "start",
                                 }}
                               >
-                                {plan.features.map((feature) => (
+                                {plan.features
+                                  .slice(0, plan.value === "pro" ? 4 : 3)
+                                  .map((feature) => (
                                   <div
                                     key={feature}
                                     style={{
