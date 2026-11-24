@@ -4021,8 +4021,8 @@ export default function Page() {
           "One-to-one video calls and screen sharing",
           "Rozmowy wideo jeden na jeden i udostępnianie ekranu"
         ),
-        t("Unlimited boards", "Nielimitowane tablice"),
-        t("Up to 15 collaborators per board", "Do 15 współpracowników na tablicę"),
+        t("Up to 15 boards", "Do 15 tablic"),
+        t("Two people per board (you + 1 collaborator)", "Dwie osoby na tablicę (Ty + 1 współpracownik)"),
         t("Calendar planning", "Planowanie w kalendarzu"),
         t("30-day version history", "30-dniowa historia wersji"),
       ],
@@ -12255,8 +12255,8 @@ export default function Page() {
                     price: "49.99",
                     features: [
                        t("One-to-one video calls and screen sharing", "Rozmowy wideo jeden na jeden i udostępnianie ekranu"),
-                      t("Unlimited boards", "Nielimitowane tablice"),
-                       t("Up to 15 collaborators per board", "Do 15 współpracowników na tablicę"),
+                      t("Up to 15 boards", "Do 15 tablic"),
+                       t("Two people per board (you + 1 collaborator)", "Dwie osoby na tablicę (Ty + 1 współpracownik)"),
                       t("Calendar planning", "Planowanie w kalendarzu"),
                       t("30-day version history", "30-dniowa historia wersji"),
                     ],
@@ -13633,7 +13633,7 @@ export default function Page() {
                                 maxWidth: "420px",
                               }}
                             >
-                              {t("Share boards at no cost. Pro adds built-in calls, unlimited boards, calendar planning, and version history.", "Udostępniaj tablice bez opłat. Pro dodaje wbudowane rozmowy, nielimitowane tablice, kalendarz i historię wersji.")}
+                              {t("Share boards at no cost. Pro adds one-to-one calls, up to 15 boards, calendar planning, and version history.", "Udostępniaj tablice bez opłat. Pro dodaje rozmowy jeden na jeden, do 15 tablic, kalendarz i historię wersji.")}
                             </div>
                             <div
                               style={{

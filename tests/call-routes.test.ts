@@ -172,7 +172,7 @@ describe("call API authorization", () => {
     expect(mocks.startCall).not.toHaveBeenCalled();
   });
 
-  it("does not start a call to a participant without call access", async () => {
+  it("allows a Pro caller to call a free board collaborator", async () => {
     mocks.getCallPlanAccess.mockResolvedValue(
       new Map([
         [caller.id, true],
@@ -187,9 +187,11 @@ describe("call API authorization", () => {
       })
     );
 
-    expect(response.status).toBe(409);
-    expect(await response.json()).toMatchObject({ code: "CALL_PARTICIPANT_UNAVAILABLE" });
-    expect(mocks.startCall).not.toHaveBeenCalled();
+    expect(response.status).toBe(201);
+    expect(mocks.getCallPlanAccess).toHaveBeenCalledWith([caller.id]);
+    expect(mocks.startCall).toHaveBeenCalledWith(
+      "board-1", caller.id, recipientId, clientRequestId
+    );
   });
 
   it("passes the authenticated caller identity to the trusted call function", async () => {

@@ -60,17 +60,11 @@ export async function POST(request: NextRequest) {
   if (!hourlyLimit.allowed) return rateLimitResponse(hourlyLimit);
 
   try {
-    const callAccess = await getCallPlanAccess([user.id, recipientUserId]);
+    const callAccess = await getCallPlanAccess([user.id]);
     if (!callAccess.get(user.id)) {
       return NextResponse.json(
         { error: "One-to-one calls are available on the Pro plan.", code: "CALL_PRO_REQUIRED" },
         { status: 403, headers: { "Cache-Control": "no-store" } }
-      );
-    }
-    if (!callAccess.get(recipientUserId)) {
-      return NextResponse.json(
-        { error: "The participant is unavailable right now.", code: "CALL_PARTICIPANT_UNAVAILABLE" },
-        { status: 409, headers: { "Cache-Control": "no-store" } }
       );
     }
   } catch (error) {

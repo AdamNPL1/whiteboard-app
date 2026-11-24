@@ -159,8 +159,8 @@ export const getWorkspaceAccess = (
   if (plan === "pro") {
     return {
       tier: "pro",
-      maxBoards: Number.POSITIVE_INFINITY,
-      maxShares: 15,
+      maxBoards: 15,
+      maxShares: 1,
       canUseCalendar: true,
     };
   }
