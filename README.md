@@ -164,7 +164,7 @@ npm run build
 
 ## Current Plan Rules
 
-- `Free`: 3 boards, 3 collaborators per board, no calls, no calendar
+- `Free`: up to 3 boards, one collaborator per board (two people total), no calls, no calendar
 - `Pro`: up to 15 boards, one collaborator per board (two people total), Pro-hosted one-to-one calls, calendar, and 30-day version history
 - Legacy `Basic` and `Master` records remain supported internally but are not available for new purchases.
 

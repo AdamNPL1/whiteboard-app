@@ -11,7 +11,7 @@ describe("workspace plan limits", () => {
     expect(getWorkspaceAccess("master", "inactive")).toEqual({
       tier: "free",
       maxBoards: 3,
-      maxShares: 3,
+      maxShares: 1,
       canUseCalendar: false,
     });
   });

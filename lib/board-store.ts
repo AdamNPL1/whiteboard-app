@@ -142,7 +142,7 @@ export const getWorkspaceAccess = (
     return {
       tier: "free",
       maxBoards: 3,
-      maxShares: 3,
+      maxShares: 1,
       canUseCalendar: false,
     };
   }

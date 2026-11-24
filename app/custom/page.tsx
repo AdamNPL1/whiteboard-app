@@ -4001,7 +4001,7 @@ export default function Page() {
       checkBackground: "#eef2f6",
       features: [
         t("Up to 3 boards", "Do 3 tablic"),
-        t("Up to 3 collaborators per board", "Do 3 współpracowników na tablicę"),
+        t("Two people per board (you + 1 collaborator)", "Dwie osoby na tablicę (Ty + 1 współpracownik)"),
         t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
       ],
     },
@@ -12244,7 +12244,7 @@ export default function Page() {
                     price: "0",
                     features: [
                       t("Up to 3 boards", "Do 3 tablic"),
-                       t("Up to 3 collaborators per board", "Do 3 współpracowników na tablicę"),
+                       t("Two people per board (you + 1 collaborator)", "Dwie osoby na tablicę (Ty + 1 współpracownik)"),
                       t("Live whiteboard collaboration", "Współpraca na tablicy na żywo"),
                     ],
                     button: t("Start for free", "Zacznij bezpłatnie"),
