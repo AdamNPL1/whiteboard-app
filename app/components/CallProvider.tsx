@@ -4042,6 +4042,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           background-image: linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%);
           box-shadow: 0 10px 24px rgba(3, 7, 18, 0.34);
         }
+        .scriboo-call-panel--ended {
+          position: fixed !important;
+          left: 50vw !important;
+          right: auto !important;
+          top: 50dvh !important;
+          bottom: auto !important;
+          margin: 0 !important;
+          transform: translate3d(-50%, -50%, 0) !important;
+        }
         @media (hover: hover) and (pointer: fine) {
           .scriboo-video-tile > .scriboo-video-hover-control {
             opacity: 0;
@@ -4103,7 +4112,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
       {phase !== "idle" && phase !== "choosing" && (
         <section
           ref={callPanelRef}
-          className="scriboo-call-panel"
+          className={`scriboo-call-panel${phase === "ended" ? " scriboo-call-panel--ended" : ""}`}
           tabIndex={-1}
           aria-label={t("Audio call", "Połączenie audio")}
           onPointerDown={isActiveCallPanelHidden || phase === "ended" ? undefined : beginCallPanelDrag}
