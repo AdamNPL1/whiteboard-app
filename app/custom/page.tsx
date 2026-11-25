@@ -17022,9 +17022,9 @@ export default function Page() {
                   borderRadius: "20px",
                   border: "2px solid rgba(255,255,255,0.96)",
                   background:
-                    "radial-gradient(ellipse at 100% 0%, rgba(109,40,217,0.48) 0%, rgba(139,92,246,0.34) 20%, rgba(196,181,253,0.22) 38%, transparent 58%), radial-gradient(ellipse at 72% 2%, rgba(233,228,255,0.62) 0%, transparent 46%), linear-gradient(155deg, #ffffff 0%, #fbfaff 72%, #f5f2ff 100%)",
+                    "linear-gradient(135deg, rgba(139,70,255,0.18) 0%, rgba(75,143,255,0.15) 28%, rgba(25,195,188,0.12) 48%, rgba(48,207,104,0.1) 62%, transparent 78%), linear-gradient(155deg, #ffffff 0%, #fbfcff 72%, #f5faf8 100%)",
                   boxShadow:
-                    "0 30px 72px rgba(55,43,119,0.26), 0 1px 0 rgba(255,255,255,1) inset, 0 0 0 1px rgba(157,145,216,0.22)",
+                    "0 30px 72px rgba(55,79,119,0.22), 0 1px 0 rgba(255,255,255,1) inset, 0 0 0 1px rgba(126,166,202,0.2)",
                   backdropFilter: "blur(22px)",
                   overflow: "visible",
                   backgroundClip: "padding-box",
@@ -17051,10 +17051,9 @@ export default function Page() {
                       height: "54px",
                       borderRadius: "16px",
                       border: "1px solid rgba(255,255,255,0.72)",
-                      background:
-                        "linear-gradient(145deg, #a477f4 0%, #4b22c7 100%)",
+                      background: topBarGradient,
                       boxShadow:
-                        "0 15px 30px rgba(91,54,205,0.3), 0 1px 0 rgba(255,255,255,0.34) inset",
+                        "0 15px 30px rgba(63,111,212,0.26), 0 1px 0 rgba(255,255,255,0.34) inset",
                       color: "#ffffff",
                       display: "grid",
                       placeItems: "center",
@@ -17130,10 +17129,10 @@ export default function Page() {
                     minHeight: "56px",
                     padding: "7px 9px 7px 8px",
                     borderRadius: "10px",
-                    border: "1px solid rgba(196,181,253,0.72)",
-                    borderLeft: "4px solid #6d28d9",
+                    border: "1px solid transparent",
+                    borderLeft: "4px solid transparent",
                     background:
-                      "linear-gradient(100deg, rgba(245,241,255,0.99), rgba(238,233,255,0.92))",
+                      `linear-gradient(100deg, rgba(250,249,255,0.97), rgba(244,251,249,0.94)) padding-box, ${topBarGradient} border-box`,
                     color: "#211747",
                     display: "flex",
                     alignItems: "center",
@@ -17141,7 +17140,7 @@ export default function Page() {
                     fontSize: "15px",
                     fontWeight: 750,
                     letterSpacing: "-0.015em",
-                    boxShadow: "0 8px 20px rgba(109,40,217,0.09), 0 1px 0 rgba(255,255,255,0.88) inset",
+                    boxShadow: "0 8px 20px rgba(63,111,212,0.1), 0 1px 0 rgba(255,255,255,0.88) inset",
                     cursor: "pointer",
                   }}
                 >
@@ -17152,7 +17151,7 @@ export default function Page() {
                       flex: "0 0 36px",
                       borderRadius: "10px",
                       background: "rgba(255,255,255,0.72)",
-                      color: "#6d28d9",
+                      color: "#4b7ee5",
                       display: "grid",
                       placeItems: "center",
                       boxShadow: "0 5px 14px rgba(91,54,205,0.12)",
@@ -17178,7 +17177,7 @@ export default function Page() {
                       display: "inline-flex",
                       alignItems: "center",
                       gap: "3px",
-                      color: "#6437d5",
+                      color: "#3f6fd4",
                       fontSize: "10px",
                       fontWeight: 700,
                       whiteSpace: "nowrap",
@@ -17238,7 +17237,7 @@ export default function Page() {
                       height: "24px",
                       padding: "3px",
                       borderRadius: "999px",
-                      background: isInterfaceDarkMode ? "#6d28d9" : "#d8d9e3",
+                      background: isInterfaceDarkMode ? topBarGradient : "#d8d9e3",
                       display: "flex",
                       justifyContent: isInterfaceDarkMode ? "flex-end" : "flex-start",
                       boxSizing: "border-box",
@@ -17272,7 +17271,7 @@ export default function Page() {
                     padding: "0 17px",
                     borderRadius: "14px",
                     border: "1px solid rgba(255,255,255,0.45)",
-                    background: "linear-gradient(100deg, #7c3aed 0%, #4c1dbe 100%)",
+                    background: topBarGradient,
                     color: "#ffffff",
                     display: "grid",
                     gridTemplateColumns: "24px 1fr 24px",
@@ -17281,7 +17280,7 @@ export default function Page() {
                     fontWeight: 700,
                     letterSpacing: "-0.01em",
                     boxShadow:
-                      "0 14px 28px rgba(91,33,182,0.28), 0 1px 0 rgba(255,255,255,0.25) inset",
+                      "0 14px 28px rgba(63,111,212,0.25), 0 1px 0 rgba(255,255,255,0.25) inset",
                     cursor: "pointer",
                     transition: "transform 160ms ease, box-shadow 160ms ease, filter 160ms ease",
                   }}
