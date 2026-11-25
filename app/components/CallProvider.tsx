@@ -5314,7 +5314,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
             aspectRatio: "16 / 9",
             overflow: "visible",
             borderRadius: "12px",
-            border: "1px solid rgba(255,255,255,0.7)",
+            border: "none",
             background: "#0f172a",
             boxShadow: "0 10px 28px rgba(15,23,42,0.26)",
           }}
