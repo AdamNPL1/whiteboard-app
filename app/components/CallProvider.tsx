@@ -4048,12 +4048,12 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           style={{
             position: "fixed",
             inset: "0 0 auto",
-            height: "260px",
+            height: "184px",
             zIndex: 49,
             pointerEvents: "none",
             background:
               "linear-gradient(90deg, #8b46ff 0%, #4b8fff 46%, #19c3bc 78%, #30cf68 100%)",
-            boxShadow: "0 16px 34px rgba(68, 81, 160, 0.16)",
+            boxShadow: "0 10px 24px rgba(68, 81, 160, 0.12)",
           }}
         />
       )}
@@ -4633,15 +4633,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               onPointerMove={moveParticipantVideo}
               style={{
                 position: "fixed",
-                left: "calc(50% - min(320px, calc(50vw - 18px)) - 6px)",
-                top: "64px",
+                left: "calc(50% - min(216px, calc(50vw - 16px)) - 5px)",
+                top: "56px",
                 zIndex: 221,
                 overflow: "visible",
-                width: "min(320px, calc(50vw - 18px))",
+                width: "min(216px, calc(50vw - 16px))",
                 aspectRatio: "16 / 9",
-                borderRadius: "14px",
+                borderRadius: "12px",
                 background: "#0f172a",
-                boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
+                boxShadow: "0 10px 28px rgba(15,23,42,0.26)",
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
               }}
             >
@@ -5283,18 +5283,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }}
           style={{
             position: "fixed",
-            left: "calc(50% + 6px)",
+            left: "calc(50% + 5px)",
             right: "auto",
-            top: "64px",
+            top: "56px",
             bottom: "auto",
             zIndex: 220,
-            width: "min(320px, calc(50vw - 18px))",
+            width: "min(216px, calc(50vw - 16px))",
             aspectRatio: "16 / 9",
             overflow: "visible",
-            borderRadius: "14px",
+            borderRadius: "12px",
             border: "1px solid rgba(255,255,255,0.7)",
             background: "#0f172a",
-            boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
+            boxShadow: "0 10px 28px rgba(15,23,42,0.26)",
           }}
         >
           {isSelfAvatarShown || !isCameraOn ? (
