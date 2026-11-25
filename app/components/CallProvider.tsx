@@ -4106,14 +4106,14 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           className="scriboo-call-panel"
           tabIndex={-1}
           aria-label={t("Audio call", "Połączenie audio")}
-          onPointerDown={isActiveCallPanelHidden ? undefined : beginCallPanelDrag}
-          onPointerMove={isActiveCallPanelHidden ? undefined : moveCallPanel}
-          onPointerUp={isActiveCallPanelHidden ? undefined : endCallPanelDrag}
-          onPointerCancel={isActiveCallPanelHidden ? undefined : endCallPanelDrag}
+          onPointerDown={isActiveCallPanelHidden || phase === "ended" ? undefined : beginCallPanelDrag}
+          onPointerMove={isActiveCallPanelHidden || phase === "ended" ? undefined : moveCallPanel}
+          onPointerUp={isActiveCallPanelHidden || phase === "ended" ? undefined : endCallPanelDrag}
+          onPointerCancel={isActiveCallPanelHidden || phase === "ended" ? undefined : endCallPanelDrag}
           style={{
             position: "fixed",
             ...callPanelDockStyle,
-            ...(isPreCall
+            ...(isPreCall || phase === "ended"
               ? {
                   left: "50%",
                   right: "auto",
@@ -4147,7 +4147,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               display: isActiveCallPanelHidden ? "none" : "flex",
               alignItems: "center",
               gap: isCallPanelMinimized ? "9px" : "12px",
-              cursor: callPanelDragRef.current ? "grabbing" : "grab",
+              cursor: phase === "ended" ? "default" : callPanelDragRef.current ? "grabbing" : "grab",
               touchAction: "none",
               userSelect: "none",
             }}
