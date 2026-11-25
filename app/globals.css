@@ -3879,11 +3879,8 @@ html:not([data-scriboo-theme="dark"]) .scriboo-board-card:hover {
 }
 
 html:not([data-scriboo-theme="dark"]) .scriboo-board-card.is-active {
-  border-color: rgba(124, 58, 237, 0.62) !important;
-  box-shadow:
-    inset 4px 0 0 #6d28d9,
-    0 10px 26px rgba(76, 52, 138, 0.13),
-    0 0 0 2px rgba(124, 58, 237, 0.055) !important;
+  border-color: rgba(196, 181, 253, 0.5) !important;
+  box-shadow: 0 10px 26px rgba(76, 52, 138, 0.1) !important;
 }
 
 html:not([data-scriboo-theme="dark"]) .scriboo-board-card-preview {
@@ -3922,7 +3919,7 @@ html:not([data-scriboo-theme="dark"]) .scriboo-settings-main {
 }
 
 .scriboo-settings-nav-button[data-active="true"] {
-  box-shadow: 0 8px 18px rgba(91, 33, 182, 0.08), inset 3px 0 0 #6d28d9;
+  box-shadow: 0 8px 18px rgba(91, 33, 182, 0.08);
 }
 
 @keyframes scriboo-fade-in {

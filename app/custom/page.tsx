@@ -17130,7 +17130,6 @@ export default function Page() {
                     padding: "7px 9px 7px 8px",
                     borderRadius: "10px",
                     border: "1px solid transparent",
-                    borderLeft: "4px solid transparent",
                     background:
                       `linear-gradient(100deg, rgba(250,249,255,0.97), rgba(244,251,249,0.94)) padding-box, ${topBarGradient} border-box`,
                     color: "#211747",
