@@ -283,7 +283,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isSelfViewMirrored, setIsSelfViewMirrored] = useState(true);
   const [selfViewFit, setSelfViewFit] = useState<"cover" | "contain">("cover");
   const [selfViewSize, setSelfViewSize] = useState<"small" | "medium" | "large">("medium");
-  const [selfViewPosition, setSelfViewPosition] = useState<{ left: number; top: number } | null>(null);
+  const [, setSelfViewPosition] = useState<{ left: number; top: number } | null>(null);
   const [microphoneDevices, setMicrophoneDevices] = useState<MediaDeviceOption[]>([]);
   const [speakerDevices, setSpeakerDevices] = useState<MediaDeviceOption[]>([]);
   const [selectedMicrophoneId, setSelectedMicrophoneId] = useState("");
@@ -333,9 +333,9 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [callLayoutMode, setCallLayoutMode] = useState<CallLayoutMode>("standard");
   const [callPanelDock, setCallPanelDock] = useState<CallPanelDock>("top-right");
-  const [participantVideoWidth, setParticipantVideoWidth] = useState(320);
+  const [, setParticipantVideoWidth] = useState(320);
   const [participantVideoHeight, setParticipantVideoHeight] = useState(210);
-  const [participantVideoPosition, setParticipantVideoPosition] = useState<{
+  const [, setParticipantVideoPosition] = useState<{
     left: number;
     top: number;
   } | null>(null);
@@ -3710,11 +3710,6 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
     return labels[state];
   };
 
-  const selfViewDimensions = {
-    small: { width: 180, height: 102 },
-    medium: { width: 240, height: 135 },
-    large: { width: 320, height: 180 },
-  }[selfViewSize];
   const showCallVideo = callLayoutMode === "standard" || callLayoutMode === "video";
   const callPanelWidth = isPreCall
     ? 560
@@ -4046,6 +4041,22 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }
         }
       `}</style>
+
+      {phase === "connected" && showCallVideo && (
+        <div
+          aria-hidden="true"
+          style={{
+            position: "fixed",
+            inset: "0 0 auto",
+            height: "260px",
+            zIndex: 49,
+            pointerEvents: "none",
+            background:
+              "linear-gradient(90deg, #8b46ff 0%, #4b8fff 46%, #19c3bc 78%, #30cf68 100%)",
+            boxShadow: "0 16px 34px rgba(68, 81, 160, 0.16)",
+          }}
+        />
+      )}
 
       {phase === "choosing" && participants.length === 0 && (
         <div style={overlayStyle}>
@@ -4622,23 +4633,15 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
               onPointerMove={moveParticipantVideo}
               style={{
                 position: "fixed",
-                left: participantVideoPosition
-                  ? `${participantVideoPosition.left}px`
-                  : "clamp(8px, calc(50% - 284px), calc(100vw - 328px))",
-                top: participantVideoPosition ? `${participantVideoPosition.top}px` : "104px",
+                left: "calc(50% - min(320px, calc(50vw - 18px)) - 6px)",
+                top: "64px",
                 zIndex: 221,
                 overflow: "visible",
-                width: `min(${participantVideoWidth}px, calc(100vw - 16px))`,
-                height: `${participantVideoHeight}px`,
-                minWidth: "180px",
-                minHeight: "102px",
-                maxWidth: "min(640px, calc(100vw - 16px))",
-                maxHeight: "min(420px, calc(100dvh - 16px))",
+                width: "min(320px, calc(50vw - 18px))",
+                aspectRatio: "16 / 9",
                 borderRadius: "14px",
                 background: "#0f172a",
                 boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
-                cursor: participantVideoDragRef.current ? "grabbing" : "grab",
-                touchAction: "none",
                 outline: isParticipantVideoPinned ? "2px solid #7c3aed" : "none",
               }}
             >
@@ -4863,6 +4866,7 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
                 onPointerUp={endParticipantVideoResize}
                 onPointerCancel={endParticipantVideoResize}
                 style={{
+                  display: "none",
                   position: "absolute",
                   right: -5,
                   bottom: -5,
@@ -5279,26 +5283,18 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
           }}
           style={{
             position: "fixed",
-            left: selfViewPosition
-              ? `${selfViewPosition.left}px`
-              : "clamp(8px, calc(50% + 44px), calc(100vw - 248px))",
+            left: "calc(50% + 6px)",
             right: "auto",
-            top: selfViewPosition ? `${selfViewPosition.top}px` : "104px",
+            top: "64px",
             bottom: "auto",
             zIndex: 220,
-            width: `min(${selfViewDimensions.width}px, calc(100vw - 16px))`,
-            height: `${selfViewDimensions.height}px`,
-            minWidth: "160px",
-            minHeight: "90px",
-            maxWidth: "min(480px, calc(100vw - 16px))",
-            maxHeight: "min(270px, calc(100dvh - 16px))",
+            width: "min(320px, calc(50vw - 18px))",
+            aspectRatio: "16 / 9",
             overflow: "visible",
             borderRadius: "14px",
             border: "1px solid rgba(255,255,255,0.7)",
             background: "#0f172a",
             boxShadow: "0 16px 44px rgba(15,23,42,0.32)",
-            cursor: selfViewDragRef.current ? "grabbing" : "grab",
-            touchAction: "none",
           }}
         >
           {isSelfAvatarShown || !isCameraOn ? (
