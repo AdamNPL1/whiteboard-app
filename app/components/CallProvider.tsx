@@ -4029,6 +4029,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
         .scriboo-video-hover-control {
           transition: opacity 160ms ease;
         }
+        .scriboo-call-video-shelf {
+          width: min(468px, calc(100vw - 20px));
+          border-radius: 0 0 24px 24px;
+          background: linear-gradient(90deg, #8b46ff 0%, #4b8fff 50%, #19c3bc 100%);
+          box-shadow: 0 12px 28px rgba(68, 81, 160, 0.18);
+        }
+        html[data-scriboo-theme="dark"] .scriboo-call-video-shelf {
+          background: linear-gradient(90deg, #171a35 0%, #202541 52%, #172d3a 100%);
+          box-shadow: 0 12px 30px rgba(3, 7, 18, 0.42);
+        }
         @media (hover: hover) and (pointer: fine) {
           .scriboo-video-tile > .scriboo-video-hover-control {
             opacity: 0;
@@ -4044,16 +4054,16 @@ export function CallProvider({ children }: { children: React.ReactNode }) {
 
       {phase === "connected" && showCallVideo && (
         <div
+          className="scriboo-call-video-shelf"
           aria-hidden="true"
           style={{
             position: "fixed",
-            inset: "0 0 auto",
+            top: 0,
+            left: "50%",
+            transform: "translateX(-50%)",
             height: "184px",
             zIndex: 49,
             pointerEvents: "none",
-            background:
-              "linear-gradient(90deg, #8b46ff 0%, #4b8fff 46%, #19c3bc 78%, #30cf68 100%)",
-            boxShadow: "0 10px 24px rgba(68, 81, 160, 0.12)",
           }}
         />
       )}
